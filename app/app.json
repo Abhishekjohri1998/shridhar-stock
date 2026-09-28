@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "Shridhar Stock",
+    "slug": "shridhar-stock",
+    "version": "0.1.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f6f3ec"
+    },
+    "newArchEnabled": false,
+    "android": {
+      "package": "com.shridhar.stock",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#a8721a"
+      },
+      "permissions": ["android.permission.INTERNET"]
+    },
+    "extra": {
+      "//serverUrl": "The stock server this build ships knowing. A device pointed elsewhere from the Server screen keeps its own setting.",
+      "serverUrl": "https://stock.3.111.82.220.sslip.io"
+    },
+    "ios": {}
+  }
+}

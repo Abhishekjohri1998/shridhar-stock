@@ -6,7 +6,8 @@
   "workspaces": [
     "core",
     "server",
-    "web"
+    "web",
+    "app"
   ],
   "scripts": {
     "build:core": "npm run build --workspace @stock/core",

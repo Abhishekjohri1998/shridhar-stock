@@ -1,101 +1,24 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { pickName, type Item, type ItemInput, type Location } from '@stock/core';
+import {
+  blankItemForm,
+  blankUnit,
+  formToInput,
+  itemToForm,
+  pickName,
+  type Item,
+  type ItemForm,
+  type Location,
+  type UnitForm,
+} from '@stock/core';
 import { api } from '../../lib/api';
 import { useSession } from '../../lib/session';
-
-interface UnitForm {
-  code: string;
-  label: string;
-  labelKn: string;
-  perBase: string;
-  price: string;
-  min: string;
-  max: string;
-  cost: string;
-  slabs: { minQty: string; rate: string }[];
-}
-
-const blankUnit = (base: boolean): UnitForm => ({
-  code: base ? 'pc' : '',
-  label: base ? 'Piece' : '',
-  labelKn: base ? 'ಪೀಸ್' : '',
-  perBase: base ? '1' : '',
-  price: '',
-  min: '',
-  max: '',
-  cost: '',
-  slabs: [],
-});
-
-const s = (n: number | undefined) => (n == null ? '' : String(n));
-const n = (v: string): number | undefined => (v.trim() === '' ? undefined : Number(v));
-
-function toForm(item: Item) {
-  return {
-    nameEn: item.nameEn,
-    nameKn: item.nameKn,
-    category: item.category ?? '',
-    units: item.units.map<UnitForm>((u) => ({
-      code: u.code,
-      label: u.label,
-      labelKn: u.labelKn,
-      perBase: String(u.perBase),
-      price: String(u.price),
-      min: s(u.min),
-      max: s(u.max),
-      cost: s(u.cost),
-      slabs: (u.slabs ?? []).map((x) => ({ minQty: String(x.minQty), rate: String(x.rate) })),
-    })),
-    aliases: item.aliases.map((a) => (a.unit ? a.text + ', ' + a.unit : a.text)).join('\n'),
-    racks: { ...item.racks } as Record<string, string>,
-    reorderAt: Object.fromEntries(Object.entries(item.reorderAt).map(([k, v]) => [k, String(v)])) as Record<string, string>,
-  };
-}
-
-type Form = ReturnType<typeof toForm>;
-
-function toInput(f: Form, active?: boolean): ItemInput {
-  return {
-    nameEn: f.nameEn,
-    nameKn: f.nameKn,
-    ...(f.category.trim() ? { category: f.category } : {}),
-    units: f.units.map((u, i) => ({
-      code: u.code,
-      label: u.label,
-      labelKn: u.labelKn,
-      perBase: i === 0 ? 1 : Number(u.perBase),
-      price: u.price.trim() === '' ? NaN : Number(u.price),
-      ...(u.slabs.length ? { slabs: u.slabs.map((x) => ({ minQty: Number(x.minQty), rate: Number(x.rate) })) } : {}),
-      ...(n(u.min) != null ? { min: n(u.min) } : {}),
-      ...(n(u.max) != null ? { max: n(u.max) } : {}),
-      ...(n(u.cost) != null ? { cost: n(u.cost) } : {}),
-    })),
-    aliases: f.aliases
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const [text, unit] = line.split(',').map((p) => p.trim());
-        return unit ? { text: text!, unit } : { text: text! };
-      }),
-    racks: f.racks,
-    reorderAt: Object.fromEntries(
-      Object.entries(f.reorderAt)
-        .filter(([, v]) => v.trim() !== '')
-        .map(([k, v]) => [k, Number(v)]),
-    ),
-    ...(active != null ? { active } : {}),
-  };
-}
-
-const empty: Form = { nameEn: '', nameKn: '', category: '', units: [blankUnit(true)], aliases: '', racks: {}, reorderAt: {} };
 
 export function ItemEditor() {
   const { id } = useParams();
   const { t, lang } = useSession();
   const nav = useNavigate();
-  const [form, setForm] = useState<Form>(empty);
+  const [form, setForm] = useState<ItemForm>(blankItemForm);
   const [item, setItem] = useState<Item | null>(null);
   const [locs, setLocs] = useState<Location[]>([]);
   const [error, setError] = useState('');
@@ -108,13 +31,13 @@ export function ItemEditor() {
         .item(id)
         .then((it) => {
           setItem(it);
-          setForm(toForm(it));
+          setForm(itemToForm(it));
         })
         .catch((e: Error) => setError(e.message));
     }
   }, [id]);
 
-  const set = (patch: Partial<Form>) => setForm((f) => ({ ...f, ...patch }));
+  const set = (patch: Partial<ItemForm>) => setForm((f) => ({ ...f, ...patch }));
   const setUnit = (i: number, patch: Partial<UnitForm>) =>
     setForm((f) => ({ ...f, units: f.units.map((u, j) => (j === i ? { ...u, ...patch } : u)) }));
 
@@ -123,7 +46,7 @@ export function ItemEditor() {
     setBusy(true);
     setError('');
     try {
-      const input = toInput(form, active);
+      const input = formToInput(form, active);
       if (item) await api.saveItem(item.id, input);
       else await api.addItem(input);
       nav('/admin/items');

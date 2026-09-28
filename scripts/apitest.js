@@ -47,7 +47,8 @@ function start(dataDir, port, extraEnv = {}) {
 }
 
 async function waitUp(base) {
-  for (let i = 0; i < 100; i++) {
+  // Up to 30 s: a busy laptop (an APK build alongside) can take well over 10 to start node.
+  for (let i = 0; i < 300; i++) {
     try {
       const r = await fetch(base + '/api/health');
       if (r.ok) return;

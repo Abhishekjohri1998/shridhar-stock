@@ -9,3 +9,5 @@ dist/
 .expo/
 app/android/
 app/ios/
+app/dist/
+app/dist-apk/
