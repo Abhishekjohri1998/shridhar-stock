@@ -1,0 +1,26 @@
+{
+  "name": "shridhar-stock",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stock for the shop: items, units, places, godowns, transfers, and the website for workers, godowns, vendors, delivery and customers. Separate from the billing app, which it only reads.",
+  "workspaces": [
+    "core",
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "build:core": "npm run build --workspace @stock/core",
+    "build": "npm run build:core && npm run build --workspace @stock/server && npm run build --workspace @stock/web",
+    "dev:server": "npm run build:core && npm run dev --workspace @stock/server",
+    "dev:web": "npm run dev --workspace @stock/web",
+    "start": "npm run start --workspace @stock/server",
+    "typecheck": "npm run build:core && npm run typecheck --workspaces --if-present",
+    "unittest": "node scripts/unittest.js",
+    "schematest": "node scripts/schematest.js",
+    "apitest": "node scripts/apitest.js",
+    "test": "npm run typecheck && npm run unittest && npm run schematest && npm run apitest"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}
