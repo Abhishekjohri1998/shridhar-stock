@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { findUnit, itemMatches, pickName, toBase, type Item, type Location, type Refill, type Transfer } from '@stock/core';
 import { http } from '../../lib/api';
 import { itemName, placeName, qtyText, useCatalog } from '../../lib/catalog';
@@ -56,6 +57,7 @@ function QtyInput({ item, base, onChange }: { item: Item | undefined; base: numb
 
 export function RefillPage() {
   const bi = useBi();
+  const nav = useNavigate();
   const { lang } = useSession();
   const [version, setVersion] = useState(0);
   const live = useLive('stock', 'items', 'transfers');
@@ -163,7 +165,12 @@ export function RefillPage() {
       })}
       {value.refill.buy.filter((b) => !pending.has(b.itemId)).length > 0 && (
         <div className="card">
-          <div className="name">🛒 {bi('No godown has enough: buy from a supplier', 'ಯಾವ ಗೋದಾಮಿನಲ್ಲೂ ಸಾಕಷ್ಟಿಲ್ಲ: ಸರಬರಾಜುದಾರರಿಂದ ಖರೀದಿಸಿ')}</div>
+          <div className="bar" style={{ justifyContent: 'space-between' }}>
+            <span className="name">🛒 {bi('No godown has enough: buy from a supplier', 'ಯಾವ ಗೋದಾಮಿನಲ್ಲೂ ಸಾಕಷ್ಟಿಲ್ಲ: ಸರಬರಾಜುದಾರರಿಂದ ಖರೀದಿಸಿ')}</span>
+            <button className="btn primary" onClick={() => nav('/admin/purchases?new=buy')}>
+              {bi('Make a purchase order', 'ಖರೀದಿ ಆರ್ಡರ್ ಮಾಡಿ')}
+            </button>
+          </div>
           {value.refill.buy
             .filter((b) => !pending.has(b.itemId))
             .map((b) => (

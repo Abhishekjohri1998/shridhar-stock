@@ -49,8 +49,13 @@ const personBody = z.object({
   pin: z.string().max(12),
 });
 
-/** A godown person must be tied to a godown that exists. */
+/** A godown person must be tied to a godown that exists, and a vendor to a supplier. */
 async function checkLink(role: Role, linkedId: string | undefined): Promise<string | undefined> {
+  if (role === 'vendor') {
+    const sup = linkedId ? await getRepo().getDoc<{ id: string; active: boolean }>('suppliers', linkedId) : null;
+    if (!sup || !sup.active) throw new HttpError(400, 'Choose which supplier this person is');
+    return linkedId;
+  }
   if (role !== 'godown') return undefined;
   const locs = await getRepo().listLocations();
   if (!linkedId || !locs.some((l) => l.id === linkedId && l.kind === 'godown')) {

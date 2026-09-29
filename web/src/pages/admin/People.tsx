@@ -1,13 +1,13 @@
 import { useState, type FormEvent } from 'react';
 import { ROLES, pickName, type MsgKey, type Person, type Role } from '@stock/core';
-import { api } from '../../lib/api';
+import { api, http } from '../../lib/api';
 import { useLoad, useSession } from '../../lib/session';
 
 export function PeoplePage() {
   const { t, me } = useSession();
   const { value, error, reload } = useLoad(async () => {
-    const [people, locs] = await Promise.all([api.people(), api.locations()]);
-    return { people, godowns: locs.filter((l) => l.kind === 'godown') };
+    const [people, locs, suppliers] = await Promise.all([api.people(), api.locations(), http.get<{ id: string; name: string; active: boolean }[]>('/admin/suppliers')]);
+    return { people, godowns: locs.filter((l) => l.kind === 'godown'), suppliers: suppliers.filter((s) => s.active) };
   });
   const [editing, setEditing] = useState<Person | 'new' | null>(null);
   const [msg, setMsg] = useState('');
@@ -28,6 +28,7 @@ export function PeoplePage() {
         <PersonForm
           person={editing === 'new' ? null : editing}
           godowns={value.godowns}
+          suppliers={value.suppliers}
           onDone={(m) => {
             setEditing(null);
             setMsg(m ?? '');
@@ -48,7 +49,7 @@ export function PeoplePage() {
                 </td>
                 <td>
                   {t(('role.' + p.role) as MsgKey)}
-                  {p.linkedId && <div className="muted">{value.godowns.find((g) => g.id === p.linkedId)?.name}</div>}
+                  {p.linkedId && <div className="muted">{value.godowns.find((g) => g.id === p.linkedId)?.name ?? value.suppliers.find((s) => s.id === p.linkedId)?.name}</div>}
                 </td>
                 <td>{!p.active && <span className="pill bad">{t('people.off')}</span>}</td>
               </tr>
@@ -63,17 +64,19 @@ export function PeoplePage() {
 function PersonForm({
   person,
   godowns,
+  suppliers,
   onDone,
 }: {
   person: Person | null;
   godowns: { id: string; name: string; nameKn: string }[];
+  suppliers: { id: string; name: string }[];
   onDone: (msg?: string) => void;
 }) {
   const { t, lang } = useSession();
   const [name, setName] = useState(person?.name ?? '');
   const [phone, setPhone] = useState(person?.phone ?? '');
   const [role, setRole] = useState<Role>(person?.role ?? 'worker');
-  const [linkedId, setLinkedId] = useState(person?.linkedId ?? godowns[0]?.id ?? '');
+  const [linkedId, setLinkedId] = useState(person?.linkedId ?? '');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
 
@@ -89,7 +92,7 @@ function PersonForm({
 
   const save = (e: FormEvent) => {
     e.preventDefault();
-    const link = role === 'godown' ? { linkedId } : {};
+    const link = role === 'godown' ? { linkedId: linkedId || godowns[0]?.id } : role === 'vendor' ? { linkedId: linkedId || suppliers[0]?.id } : {};
     run(() =>
       person ? api.updatePerson(person.id, { name, role, ...link }) : api.addPerson({ name, phone, role, pin, ...link }),
     );
@@ -117,10 +120,22 @@ function PersonForm({
             ))}
           </select>
         </label>
+        {role === 'vendor' && (
+          <label className="field">
+            <span>Supplier</span>
+            <select value={linkedId || suppliers[0]?.id} onChange={(e) => setLinkedId(e.target.value)}>
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {role === 'godown' && (
           <label className="field">
             <span>{t('people.link')}</span>
-            <select value={linkedId} onChange={(e) => setLinkedId(e.target.value)}>
+            <select value={linkedId || godowns[0]?.id} onChange={(e) => setLinkedId(e.target.value)}>
               {godowns.map((g) => (
                 <option key={g.id} value={g.id}>
                   {pickName(g.name, g.nameKn, lang)}

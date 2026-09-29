@@ -160,6 +160,32 @@ async function main() {
     eq('a customer places a request, typed and written', order.status, 201);
     check('the admin sees it', (await call('/admin/orders', T.admin)).body.some((o) => o.id === order.body.id));
 
+    // ---- suppliers and purchase orders
+    const sup = await call('/admin/suppliers', T.admin, { name: 'Ganesh Oils', phone: '9000000099' });
+    eq('a supplier is added', sup.status, 201);
+    eq('a vendor login needs a supplier', (await call('/people', T.admin, { name: 'V', phone: '9111100001', role: 'vendor', pin: '2222' })).status, 400);
+    eq('and gets one', (await call('/people', T.admin, { name: 'V', phone: '9111100001', role: 'vendor', pin: '2222', linkedId: sup.body.id })).status, 201);
+    eq('a unit the item does not have is refused', (await call('/admin/pos', T.admin, { supplierId: sup.body.id, to: 'loc_g1', lines: [{ itemId: 'it_goil', unit: 'drum', qty: 1, cost: 1 }] })).status, 400);
+    eq('a place that does not exist is refused', (await call('/admin/pos', T.admin, { supplierId: sup.body.id, to: 'loc_moon', lines: [{ itemId: 'it_goil', unit: 'tin', qty: 1, cost: 1 }] })).status, 400);
+    const po = await call('/admin/pos', T.admin, { supplierId: sup.body.id, to: 'loc_g1', lines: [{ itemId: 'it_goil', unit: 'tin', qty: 4, cost: 2500 }] });
+    eq('an order for 4 tins of groundnut oil', po.status, 201);
+    const vt = (await call('/auth/login', null, { phone: '9111100001', pin: '2222' })).body.token;
+    check('the new vendor sees it', (await call('/vendor/pos', vt)).body.orders.some((o) => o.id === po.body.id));
+    check('the demo vendor does not', !(await call('/vendor/pos', T.vendor)).body.orders.some((o) => o.id === po.body.id));
+    eq('receiving more than ordered is refused', (await call('/admin/pos/' + po.body.id + '/receive', T.admin, { got: { it_goil: { qty: 5 } } })).status, 400);
+    const oil0 = await gq('it_goil', 'loc_g1');
+    eq('3 tins arrive, at ₹2520', (await call('/admin/pos/' + po.body.id + '/receive', T.admin, { got: { it_goil: { qty: 3, cost: 2520 } }, updateCost: true })).status, 200);
+    eq('the godown gains 45 litres (3 × 15)', await gq('it_goil', 'loc_g1'), oil0 + 45);
+    eq('the tin\'s cost becomes what was paid', (await call('/items/it_goil', T.admin)).body.units.find((u) => u.code === 'tin').cost, 2520);
+    const recd = (await call('/admin/pos', T.admin)).body.find((p) => p.id === po.body.id);
+    check('what arrived is on record', recd.received[0].qty === 3 && recd.received[0].cost === 2520);
+    const oilMove = (await call('/items/it_goil/moves', T.admin)).body.find((m) => m.ref === 'order ' + recd.no);
+    eq('and the short tin in the ledger', oilMove && oilMove.note, '1 tin short');
+    const po2 = await call('/admin/pos', T.admin, { supplierId: sup.body.id, to: 'loc_g1', lines: [{ itemId: 'it_goil', unit: 'tin', qty: 1, cost: 2500 }] });
+    eq('an order can be cancelled before dispatch', (await call('/admin/pos/' + po2.body.id + '/cancel', T.admin, {})).status, 200);
+    eq('a dispatched one cannot', (await call('/admin/pos/po_2/cancel', T.admin, {})).status, 409);
+    eq('a vendor cannot cancel', (await call('/admin/pos/' + po2.body.id + '/cancel', vt, {})).status, 403);
+
     // ---- reset brings it all back
     eq('the demo resets', (await call('/demo/reset', null, {})).status, 200);
     const again = await as('admin');

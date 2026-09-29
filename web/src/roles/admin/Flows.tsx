@@ -74,65 +74,6 @@ export function BillsPage() {
   );
 }
 
-// ---------------------------------------------------------------- purchase orders
-
-export function PurchasesPage() {
-  const bi = useBi();
-  const livePos = useLive('pos');
-  const { lang } = useSession();
-  const [version, setVersion] = useState(0);
-  const { items, locs } = useCatalog(version);
-  const { value, error } = useLoad(async () => {
-    const [pos, sups] = await Promise.all([http.get<PurchaseOrder[]>('/admin/pos'), http.get<Supplier[]>('/admin/suppliers')]);
-    return { pos, sups };
-  }, [version, livePos]);
-  if (error) return <div className="msg err">{error}</div>;
-  if (!value) return <Loading />;
-  const receive = async (p: PurchaseOrder) => {
-    await http.post('/admin/pos/' + p.id + '/receive', {});
-    setVersion((v) => v + 1);
-  };
-  return (
-    <>
-      <h1 className="title">{bi('Purchase orders', 'ಖರೀದಿ ಆರ್ಡರ್‌ಗಳು')}</h1>
-      <p className="muted">{bi('Suppliers', 'ಸರಬರಾಜುದಾರರು')}: {value.sups.map((s) => s.name).join(' · ')}</p>
-      {value.pos.map((p) => (
-        <div className="card" key={p.id}>
-          <div className="bar" style={{ justifyContent: 'space-between' }}>
-            <span className="name">
-              #{p.no} · {value.sups.find((s) => s.id === p.supplierId)?.name} → {placeName(locs, p.to, lang)}
-            </span>
-            <Status s={p.status} label={statusWord(p.status, lang)} />
-          </div>
-          <div className="muted">
-            {when(p.at, lang)}
-            {p.invoiceNo && ' · ' + bi('invoice', 'ಇನ್‌ವಾಯ್ಸ್') + ' ' + p.invoiceNo}
-            {p.vehicle && ' · ' + p.vehicle}
-            {p.eta && ' · ETA ' + p.eta}
-          </div>
-          <ul className="lines">
-            {p.lines.map((l) => (
-              <li key={l.itemId}>
-                {itemName(items, l.itemId, lang)} · {l.qty} {l.unit} × {formatRupees(l.cost)}
-              </li>
-            ))}
-          </ul>
-          <div className="bar">
-            <b className="grow">
-              <Money v={p.lines.reduce((s, l) => s + l.qty * l.cost, 0)} />
-            </b>
-            {(p.status === 'dispatched' || p.status === 'confirmed') && (
-              <button className="btn primary" onClick={() => receive(p)}>
-                {bi('Goods received', 'ಸಾಮಾನು ಬಂದಿದೆ')}
-              </button>
-            )}
-          </div>
-        </div>
-      ))}
-    </>
-  );
-}
-
 // ---------------------------------------------------------------- deliveries
 
 export function DeliveriesPage() {

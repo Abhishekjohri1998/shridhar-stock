@@ -10,6 +10,7 @@ import {
   type OrderRequest,
   type PurchaseOrder,
   type StockMove,
+  type Supplier,
   type Transfer,
 } from '@stock/core';
 import { requireRole } from '../auth';
@@ -264,6 +265,40 @@ actionRoutes.post(
   }),
 );
 
+// ---------------------------------------------------------------- suppliers
+
+const supplierBody = z.object({
+  name: z.string().trim().min(1, 'Give the supplier a name').max(80),
+  phone: z.string().trim().max(20).default(''),
+  address: z.string().trim().max(200).optional(),
+  active: z.boolean().optional(),
+});
+
+actionRoutes.post(
+  '/admin/suppliers',
+  admin,
+  handler(async (req, res) => {
+    const b = supplierBody.parse(req.body);
+    const s: Supplier = { id: newId('sup'), name: b.name, phone: b.phone, ...(b.address ? { address: b.address } : {}), active: true };
+    await getRepo().putDoc('suppliers', s);
+    res.status(201).json(s);
+  }),
+);
+
+actionRoutes.put(
+  '/admin/suppliers/:id',
+  admin,
+  handler(async (req, res) => {
+    const b = supplierBody.parse(req.body);
+    const repo = getRepo();
+    const old = await repo.getDoc<Supplier>('suppliers', String(req.params.id));
+    if (!old) throw new HttpError(404, 'No such supplier');
+    const s: Supplier = { ...old, name: b.name, phone: b.phone, ...(b.address != null ? { address: b.address } : {}), active: b.active ?? old.active };
+    await repo.putDoc('suppliers', s);
+    res.json(s);
+  }),
+);
+
 // ---------------------------------------------------------------- purchase orders
 
 actionRoutes.post(
@@ -274,7 +309,14 @@ actionRoutes.post(
       .object({ supplierId: z.string(), to: z.string(), lines: z.array(z.object({ itemId: z.string(), unit: z.string(), qty: z.number().positive(), cost: z.number().min(0) })).min(1).max(100) })
       .parse(req.body);
     const repo = getRepo();
-    if (!(await repo.getDoc('suppliers', body.supplierId))) throw new HttpError(404, 'No such supplier');
+    const sup = await repo.getDoc<Supplier>('suppliers', body.supplierId);
+    if (!sup || !sup.active) throw new HttpError(404, 'No such supplier');
+    if (!(await repo.listLocations()).some((l) => l.id === body.to && l.active)) throw new HttpError(400, 'Choose where the goods go');
+    for (const l of body.lines) {
+      const item = await repo.getItem(l.itemId);
+      if (!item) throw new HttpError(400, 'An item on this order does not exist');
+      if (!findUnit(item, l.unit)) throw new HttpError(400, item.nameEn + ' has no unit "' + l.unit + '"');
+    }
     const no = await repo.nextNo('po');
     const p: PurchaseOrder = { id: 'po_' + no, no, supplierId: body.supplierId, to: body.to, lines: body.lines, status: 'ordered', at: now(), times: { ordered: now() } };
     await repo.putDoc('pos', p);
@@ -322,18 +364,55 @@ actionRoutes.post(
 );
 
 actionRoutes.post(
+  '/admin/pos/:id/cancel',
+  admin,
+  handler(async (req, res) => {
+    const p = await loadPo(req);
+    if (p.status !== 'ordered' && p.status !== 'confirmed') throw new HttpError(409, p.status === 'dispatched' ? 'Already dispatched: receive it, with what arrives' : 'Already ' + p.status);
+    p.status = 'cancelled';
+    p.times.cancelled = now();
+    await getRepo().putDoc('pos', p);
+    emit('pos', { supplierId: p.supplierId }, p.id);
+    res.json({ ok: true });
+  }),
+);
+
+actionRoutes.post(
   '/admin/pos/:id/receive',
   admin,
   handler(async (req, res) => {
+    const body = z
+      .object({
+        /** Per item: what arrived (in the order's unit) and what it cost per unit. */
+        got: z.record(z.string(), z.object({ qty: z.number().min(0).max(1e6), cost: z.number().min(0).max(1e7).optional() })).optional(),
+        updateCost: z.boolean().default(false),
+      })
+      .parse(req.body ?? {});
     const p = await loadPo(req);
     if (p.status === 'received' || p.status === 'cancelled') throw new HttpError(409, 'Already ' + p.status);
     const repo = getRepo();
     const moves: StockMove[] = [];
+    const received: { itemId: string; qty: number; cost: number }[] = [];
     for (const l of p.lines) {
+      const g = body.got?.[l.itemId];
+      const qty = g?.qty ?? l.qty;
+      const cost = g?.cost ?? l.cost;
+      if (qty > l.qty) throw new HttpError(400, 'More received than ordered: count again, or order the rest separately.');
+      received.push({ itemId: l.itemId, qty, cost });
       const item = await repo.getItem(l.itemId);
-      if (!item) continue;
-      moves.push({ id: newId('mv'), key: 'po:' + p.no + ':' + l.itemId, at: now(), kind: 'purchase', itemId: l.itemId, to: p.to, qty: toBase(item, l.unit, l.qty), ref: 'order ' + p.no, by: req.person!.id });
+      if (!item || qty === 0) continue;
+      moves.push({ id: newId('mv'), key: 'po:' + p.no + ':' + l.itemId, at: now(), kind: 'purchase', itemId: l.itemId, to: p.to, qty: toBase(item, l.unit, qty), ref: 'order ' + p.no, by: req.person!.id, ...(qty < l.qty ? { note: l.qty - qty + ' ' + l.unit + ' short' } : {}) });
+      // The price paid becomes the item's cost for that unit, when the admin says so.
+      if (body.updateCost) {
+        const u = item.units.find((x) => x.code === l.unit);
+        if (u && u.cost !== cost) {
+          u.cost = cost;
+          item.updatedAt = now();
+          await repo.saveItem(item);
+        }
+      }
     }
+    (p as PurchaseOrder & { received?: typeof received }).received = received;
     p.status = 'received';
     p.times.received = now();
     await repo.putDoc('pos', p);
