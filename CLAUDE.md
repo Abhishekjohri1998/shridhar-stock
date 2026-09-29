@@ -54,6 +54,7 @@ waits for the client's explicit yes. That covers:
 - **W4 done:** live updates (`server/src/events.ts`, `web/src/lib/live.ts`, `npm run livetest`).
 - **W5 done:** refill with editable trips, transfers between any places, cancel, received-vs-sent (`web/src/roles/admin/Moving.tsx`).
 - **W6 done:** suppliers, purchase orders from the buy list, receive with actual quantity and cost (`web/src/roles/admin/Buying.tsx`).
-- **Next:** W7 deliveries; the paid reader eval on real shop handwriting when the owner says.
+- **W7 done:** deliveries from bills, reassign, landmarks kept on the stock side (`web/src/roles/admin/Deliver.tsx`).
+- **Next:** W8 customer and owner screens, reports; the paid reader eval on real shop handwriting when the owner says.
 - **Real handwriting for the demo:** export a billing backup to Downloads, then extract strokes
   only into the gitignored `scripts/demo-ink.json`.

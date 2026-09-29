@@ -146,7 +146,7 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limit = 10
       key,
       name: c.name,
       ...(c.nameKn ? { nameKn: c.nameKn } : {}),
-      ...(c.address ? { address: c.address } : {}),
+      ...(c.address ? { address: c.address } : before?.address ? { address: before.address } : {}),
       // Stock's own addition for deliveries, kept across syncs.
       ...(before?.landmark ? { landmark: before.landmark } : {}),
       balance: c.balance ?? 0,

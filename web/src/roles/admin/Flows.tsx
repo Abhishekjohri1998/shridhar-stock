@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   formatRupees,
   pickName,
@@ -21,7 +22,7 @@ import { Empty, InkView, Loading, Money, Status, useBi, when } from '../../compo
 
 export function BillsPage() {
   const bi = useBi();
-  const { lang } = useSession();
+  const { lang, me } = useSession();
   const { items } = useCatalog();
   const live = useLive('bills');
   const { value, error } = useLoad(() => http.get<BillMirror[]>('/admin/bills?limit=100'), [live]);
@@ -41,6 +42,11 @@ export function BillsPage() {
             <span className="muted">
               {when(b.at, lang)} · <Money v={b.total} />
               {b.balance > 0 && <span className="pill warn"> {bi('due', 'ಬಾಕಿ')} {formatRupees(b.balance)}</span>}
+              {me?.role === 'admin' && b.customer && !b.cancelled && (
+                <Link className="btn small" to={'/admin/deliveries?bill=' + b.no} style={{ marginLeft: 8 }}>
+                  🛵 {bi('Deliver', 'ಡೆಲಿವರಿ')}
+                </Link>
+              )}
             </span>
           </div>
           <table className="list plain">
@@ -68,42 +74,6 @@ export function BillsPage() {
               ))}
             </tbody>
           </table>
-        </div>
-      ))}
-    </>
-  );
-}
-
-// ---------------------------------------------------------------- deliveries
-
-export function DeliveriesPage() {
-  const bi = useBi();
-  const { lang } = useSession();
-  const live = useLive('deliveries');
-  const { value, error } = useLoad(() => http.get<Delivery[]>('/admin/deliveries'), [live]);
-  if (error) return <div className="msg err">{error}</div>;
-  if (!value) return <Loading />;
-  return (
-    <>
-      <h1 className="title">{bi('Deliveries', 'ಡೆಲಿವರಿಗಳು')}</h1>
-      {value.map((d) => (
-        <div className="card" key={d.id}>
-          <div className="bar" style={{ justifyContent: 'space-between' }}>
-            <span className="name">
-              {bi('Bill', 'ಬಿಲ್')} #{d.billNo} · {d.name}
-            </span>
-            <Status s={d.status} label={statusWord(d.status, lang)} />
-          </div>
-          <div className="muted">
-            {d.address}
-            {d.landmark && ' · ' + d.landmark} · {d.vehicle ?? ''} · {when(d.at, lang)}
-          </div>
-          {d.amountDue > 0 && (
-            <div>
-              {bi('To collect', 'ವಸೂಲಿ')}: <Money v={d.amountDue} />
-            </div>
-          )}
-          {d.note && <div className="muted">“{d.note}”</div>}
         </div>
       ))}
     </>

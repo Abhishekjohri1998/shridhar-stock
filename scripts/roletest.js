@@ -186,6 +186,30 @@ async function main() {
     eq('a dispatched one cannot', (await call('/admin/pos/po_2/cancel', T.admin, {})).status, 409);
     eq('a vendor cannot cancel', (await call('/admin/pos/' + po2.body.id + '/cancel', vt, {})).status, 403);
 
+    // ---- deliveries from bills
+    const lak = (await call('/admin/customers', T.admin)).body.find((c) => c.key === '9000000017');
+    eq('a landmark is kept on the stock side', (await call('/admin/customers/' + lak.id, T.admin, { landmark: 'Blue gate, next to the well' })).status, 200);
+    const dl = await call('/admin/deliveries', T.admin, { billNo: 51, personId: 'p_delivery', vehicle: 'Scooter' });
+    eq('bill 51 goes out for delivery', dl.status, 201);
+    check('with the customer\'s address from billing and the landmark from here', dl.body.address === 'Near water tank, 5th ward' && dl.body.landmark === 'Blue gate, next to the well', JSON.stringify(dl.body));
+    eq('the amount to collect is the bill\'s balance (paid)', dl.body.amountDue, 0);
+    eq('the same bill twice is refused', (await call('/admin/deliveries', T.admin, { billNo: 51, personId: 'p_delivery' })).status, 409);
+    eq('only a delivery person can take it', (await call('/admin/deliveries', T.admin, { billNo: 52, personId: 'p_worker' })).status, 400);
+    eq('a bill that does not exist is refused', (await call('/admin/deliveries', T.admin, { billNo: 999, personId: 'p_delivery' })).status, 404);
+    eq('a delivery person cannot hand out deliveries', (await call('/admin/deliveries', T.delivery, { billNo: 52, personId: 'p_delivery' })).status, 403);
+    check('Kiran sees the new drop', (await call('/delivery/mine', T.delivery)).body.some((d) => d.id === dl.body.id));
+    const second = await call('/people', T.admin, { name: 'Suma (delivery)', phone: '9111100002', role: 'delivery', pin: '3333' });
+    eq('a second delivery person', second.status, 201);
+    eq('the drop is given to Suma', (await call('/admin/deliveries/' + dl.body.id + '/assign', T.admin, { personId: second.body.id })).status, 200);
+    check('Kiran no longer has it', !(await call('/delivery/mine', T.delivery)).body.some((d) => d.id === dl.body.id));
+    const suma = (await call('/auth/login', null, { phone: '9111100002', pin: '3333' })).body.token;
+    check('Suma does', (await call('/delivery/mine', suma)).body.some((d) => d.id === dl.body.id));
+    eq('Kiran cannot mark it any more', (await call('/deliveries/' + dl.body.id + '/status', T.delivery, { status: 'out' })).status, 403);
+    eq('Suma delivers it', (await call('/deliveries/' + dl.body.id + '/status', suma, { status: 'out' })).status, 200);
+    eq('', (await call('/deliveries/' + dl.body.id + '/status', suma, { status: 'delivered' })).status, 200);
+    eq('a delivered drop cannot be reassigned', (await call('/admin/deliveries/' + dl.body.id + '/assign', T.admin, { personId: 'p_delivery' })).status, 409);
+    eq('once delivered, the bill can go out again (a second trip)', (await call('/admin/deliveries', T.admin, { billNo: 51, personId: 'p_delivery' })).status, 201);
+
     // ---- reset brings it all back
     eq('the demo resets', (await call('/demo/reset', null, {})).status, 200);
     const again = await as('admin');

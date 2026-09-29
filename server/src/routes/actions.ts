@@ -11,6 +11,7 @@ import {
   type PurchaseOrder,
   type StockMove,
   type Supplier,
+  type CustomerProfile,
   type Transfer,
 } from '@stock/core';
 import { requireRole } from '../auth';
@@ -423,6 +424,103 @@ actionRoutes.post(
 );
 
 // ---------------------------------------------------------------- deliveries
+
+async function deliveryPerson(id: string) {
+  const p = await getRepo().getPerson(id);
+  if (!p || !p.active || p.role !== 'delivery') throw new HttpError(400, 'Choose a delivery person');
+  return p;
+}
+
+/**
+ * A bill goes out for delivery. Where to and who to call come from the customer billing knows,
+ * with the landmark stock keeps; what to collect is what is still due on the bill.
+ */
+actionRoutes.post(
+  '/admin/deliveries',
+  admin,
+  handler(async (req, res) => {
+    const body = z
+      .object({
+        billNo: z.number().int().positive(),
+        personId: z.string(),
+        vehicle: z.string().trim().max(40).optional(),
+        note: z.string().trim().max(200).optional(),
+        address: z.string().trim().max(200).optional(),
+      })
+      .parse(req.body);
+    const repo = getRepo();
+    const bill = await repo.getDoc<BillMirror>('bills', String(body.billNo));
+    if (!bill) throw new HttpError(404, 'No such bill');
+    if (bill.cancelled) throw new HttpError(400, 'This bill was cancelled');
+    await deliveryPerson(body.personId);
+    const open = (await repo.listDocs<Delivery>('deliveries')).find((d) => d.billNo === bill.no && d.status !== 'delivered');
+    if (open) throw new HttpError(409, 'This bill is already out for delivery. Change who takes it instead.');
+    const customer = bill.customer ? (await repo.listDocs<CustomerProfile>('customers')).find((c) => c.key === bill.customer!.key) : undefined;
+    const address = body.address || customer?.address || '';
+    if (!address) throw new HttpError(400, 'Where to? This customer has no address: type one');
+    const d: Delivery = {
+      id: newId('dl'),
+      billNo: bill.no,
+      customerKey: bill.customer?.key ?? '',
+      name: customer?.name ?? bill.customer?.name ?? 'Customer',
+      phone: bill.customer?.phone ?? '',
+      address,
+      ...(customer?.landmark ? { landmark: customer.landmark } : {}),
+      personId: body.personId,
+      ...(body.vehicle ? { vehicle: body.vehicle } : {}),
+      status: 'pending',
+      amountDue: Math.max(0, bill.balance),
+      ...(body.note ? { note: body.note } : {}),
+      at: now(),
+      times: { pending: now() },
+    };
+    await repo.putDoc('deliveries', d);
+    emit('deliveries', { personId: d.personId! }, d.id);
+    res.status(201).json(d);
+  }),
+);
+
+/** Someone else takes it: both the old and the new person's screens update. */
+actionRoutes.post(
+  '/admin/deliveries/:id/assign',
+  admin,
+  handler(async (req, res) => {
+    const body = z.object({ personId: z.string(), vehicle: z.string().trim().max(40).optional() }).parse(req.body);
+    const repo = getRepo();
+    const d = await repo.getDoc<Delivery>('deliveries', String(req.params.id));
+    if (!d) throw new HttpError(404, 'No such delivery');
+    if (d.status === 'delivered') throw new HttpError(409, 'Already delivered');
+    await deliveryPerson(body.personId);
+    const before = d.personId;
+    d.personId = body.personId;
+    if (body.vehicle) d.vehicle = body.vehicle;
+    if (d.status === 'out' || d.status === 'failed') {
+      d.status = 'pending';
+      d.times.pending = now();
+    }
+    await repo.putDoc('deliveries', d);
+    emit('deliveries', { personId: body.personId }, d.id);
+    if (before && before !== body.personId) emit('deliveries', { personId: before }, d.id);
+    res.json(d);
+  }),
+);
+
+/** The landmark and a second address line: stock's own additions to billing's customer. */
+actionRoutes.post(
+  '/admin/customers/:id',
+  admin,
+  handler(async (req, res) => {
+    const body = z.object({ landmark: z.string().trim().max(120).optional(), address: z.string().trim().max(200).optional() }).parse(req.body);
+    const repo = getRepo();
+    const c = await repo.getDoc<CustomerProfile>('customers', String(req.params.id));
+    if (!c) throw new HttpError(404, 'No such customer');
+    if (body.landmark != null) c.landmark = body.landmark;
+    if (body.address) c.address = body.address;
+    await repo.putDoc('customers', c);
+    res.json(c);
+  }),
+);
+
 
 actionRoutes.post(
   '/deliveries/:id/status',
