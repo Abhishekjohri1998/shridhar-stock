@@ -28,6 +28,8 @@ die() { printf '\n\033[1;31mxx\033[0m %s\n\n' "$1" >&2; exit 1; }
 [ "$(id -u)" -ne 0 ] || die "Run this as the ubuntu user, not root. It uses sudo where it needs to."
 [ -f "$SRC/server/src/index.ts" ] || die "Run this from the unpacked stock code."
 command -v node >/dev/null || die "Node is not installed. The billing setup installs it; run that first."
+# The handwriting reader draws its PNGs with zlib.crc32, which Node has from 22.2.
+node -e "process.exit(require('zlib').crc32 ? 0 : 1)" || die "Node $(node -v) is too old: 22.2 or newer is needed (the billing box has 22)."
 [ "$APP_DIR" != "/opt/shridhar" ] || die "That is the billing app's folder."
 [ "$PORT" != "4000" ] || die "Port 4000 is the billing app's."
 
@@ -43,7 +45,7 @@ say "Copying the code to $APP_DIR"
 sudo mkdir -p "$APP_DIR"
 sudo chown "$USER:$USER" "$APP_DIR"
 # Everything except the secrets and data already there.
-rsync -a --delete --exclude server/.env --exclude server/.data --exclude node_modules --exclude app "$SRC/" "$APP_DIR/"
+rsync -a --delete --exclude server/.env --exclude 'server/.data*' --exclude node_modules --exclude scripts/demo-ink.json "$SRC/" "$APP_DIR/"
 
 if [ ! -f "$APP_DIR/server/.env" ]; then
   say "The secrets (written straight to $APP_DIR/server/.env, nothing is echoed)"
@@ -54,6 +56,9 @@ if [ ! -f "$APP_DIR/server/.env" ]; then
   esac
   read -r -p "First admin's phone (10 digits): " ADMIN_PHONE
   read -r -s -p "First admin's PIN (4 to 6 digits): " ADMIN_PIN; echo
+  echo "    The link to billing reads bills from the billing server on this same box."
+  read -r -s -p "The shop's billing PIN (the one the counter types; empty to leave the link off for now): " BILLING_PIN_IN; echo
+  read -r -s -p "Anthropic API key for reading handwriting (empty to leave it off for now): " KEY_IN; echo
   umask 077
   cat > "$APP_DIR/server/.env" <<ENV
 MONGO_URI=$MONGO_IN
@@ -65,6 +70,11 @@ CORS_ORIGIN=https://$HOST
 SEED_ADMIN_PHONE=$ADMIN_PHONE
 SEED_ADMIN_PIN=$ADMIN_PIN
 SEED_ADMIN_NAME=Admin
+BILLING_URL=${BILLING_PIN_IN:+http://127.0.0.1:4000}
+BILLING_PIN=$BILLING_PIN_IN
+BILLING_EVERY_MS=15000
+ANTHROPIC_API_KEY=$KEY_IN
+READER_CAP_RUPEES=500
 ENV
   echo "    Written. The first admin is made on first start; this script removes the seed after."
 else
@@ -73,10 +83,10 @@ fi
 
 say "Installing and building (a few minutes)"
 cd "$APP_DIR"
-# The admin app is built on the laptop, not here.
-node -e "const p=require('./package.json');p.workspaces=p.workspaces.filter(w=>w!=='app');require('fs').writeFileSync('package.json',JSON.stringify(p,null,2))"
 npm install --no-audit --no-fund
 npm run build
+
+grep -q '^DEMO=1' "$APP_DIR/server/.env" && die "server/.env has DEMO=1: demo mode is for a laptop, never the shop's server."
 
 say "The service: shridhar-stock on port $PORT"
 sudo tee /etc/systemd/system/shridhar-stock.service >/dev/null <<UNIT
@@ -118,7 +128,9 @@ else
   sudo tee -a /etc/caddy/Caddyfile >/dev/null <<CADDY
 
 $HOST {
-	reverse_proxy 127.0.0.1:$PORT
+	reverse_proxy 127.0.0.1:$PORT {
+		flush_interval -1
+	}
 	request_body {
 		max_size 4MB
 	}
