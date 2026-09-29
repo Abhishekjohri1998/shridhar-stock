@@ -353,7 +353,29 @@ export function RequestsPage() {
 
 export function SettingsPage() {
   const bi = useBi();
-  const { value } = useLoad(() => http.get<{ link: { ok: boolean; message?: string; lastBillNo?: number } | null; reader: { enabled: boolean; message?: string; monthLines: number; monthCostRupees: number; capRupees: number } | null }>('/admin/summary'));
+  const { lang } = useSession();
+  const [version, setVersion] = useState(0);
+  const [syncMsg, setSyncMsg] = useState('');
+  const { value } = useLoad(
+    () =>
+      http.get<{
+        link: { ok: boolean; message?: string; lastBillNo?: number; at?: string; lastOkAt?: string } | null;
+        reader: { enabled: boolean; message?: string; monthLines: number; monthCostRupees: number; capRupees: number } | null;
+      }>('/admin/summary'),
+    [version],
+  );
+  const syncNow = async () => {
+    setSyncMsg('');
+    try {
+      const r = await http.post<{ newBills: number; posted: number; reversed: number; toConfirm: number }>('/admin/link/sync', {});
+      setSyncMsg(
+        bi('Read. New bills: ', 'ಓದಲಾಯಿತು. ಹೊಸ ಬಿಲ್: ') + r.newBills + bi(', stock moves: ', ', ಸ್ಟಾಕ್ ಬದಲಾವಣೆ: ') + (r.posted + r.reversed) + bi(', to confirm: ', ', ಖಚಿತಪಡಿಸಬೇಕು: ') + r.toConfirm,
+      );
+    } catch (e) {
+      setSyncMsg((e as Error).message);
+    }
+    setVersion((v) => v + 1);
+  };
   return (
     <>
       <h1 className="title">{bi('Settings', 'ಸೆಟ್ಟಿಂಗ್ಸ್')}</h1>
@@ -362,7 +384,19 @@ export function SettingsPage() {
         <p>
           {bi('Bills are read from the billing server every 15 seconds. Stock never writes to billing.', 'ಪ್ರತಿ 15 ಸೆಕೆಂಡಿಗೆ ಬಿಲ್ಲಿಂಗ್ ಸರ್ವರ್‌ನಿಂದ ಬಿಲ್‌ಗಳನ್ನು ಓದಲಾಗುತ್ತದೆ. ಸ್ಟಾಕ್ ಬಿಲ್ಲಿಂಗ್‌ಗೆ ಬರೆಯುವುದಿಲ್ಲ.')}
         </p>
-        <p className="muted">{value?.link?.message ?? '—'}</p>
+        {value?.link ? (
+          <p className={value.link.ok ? '' : 'qty-neg'}>
+            {value.link.ok ? '● ' + bi('Working', 'ಸರಿಯಾಗಿದೆ') : '○ ' + bi('Not reachable', 'ಸಿಗುತ್ತಿಲ್ಲ')} · {value.link.message}
+            {value.link.lastBillNo ? ' · ' + bi('last bill', 'ಕೊನೆಯ ಬಿಲ್') + ' #' + value.link.lastBillNo : ''}
+            {value.link.lastOkAt ? ' · ' + bi('last read', 'ಕೊನೆಯ ಓದು') + ' ' + when(value.link.lastOkAt, lang) : ''}
+          </p>
+        ) : (
+          <p className="muted">{bi('Not set up. On the server, BILLING_URL and BILLING_PIN go in server/.env.', 'ಹೊಂದಿಸಿಲ್ಲ. ಸರ್ವರ್‌ನ server/.env ನಲ್ಲಿ BILLING_URL ಮತ್ತು BILLING_PIN.')}</p>
+        )}
+        {syncMsg && <div className="msg ok">{syncMsg}</div>}
+        <button className="btn" onClick={syncNow}>
+          ↻ {bi('Read bills now', 'ಈಗಲೇ ಬಿಲ್ ಓದಿ')}
+        </button>
       </div>
       <div className="card">
         <h2 className="subtitle" style={{ marginTop: 0 }}>{bi('Handwriting reader', 'ಕೈಬರಹ ಓದುವಿಕೆ')}</h2>

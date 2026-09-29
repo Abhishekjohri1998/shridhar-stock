@@ -100,6 +100,20 @@ actionRoutes.post(
   }),
 );
 
+// ---------------------------------------------------------------- the billing link
+
+actionRoutes.post(
+  '/admin/link/sync',
+  admin,
+  handler(async (_req, res) => {
+    const { linkConfigured, syncNow } = await import('../billing/link');
+    if (!linkConfigured()) throw new HttpError(400, 'The link to billing is not set up (BILLING_URL and BILLING_PIN on the server)');
+    const r = await syncNow();
+    if (!r) throw new HttpError(502, 'Could not read from billing. See the link status.');
+    res.json(r);
+  }),
+);
+
 // ---------------------------------------------------------------- transfers
 
 const transferLines = z.array(z.object({ itemId: z.string(), qty: z.number().positive().max(1e6) })).min(1).max(100);

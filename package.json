@@ -18,9 +18,10 @@
     "unittest": "node scripts/unittest.js",
     "schematest": "node scripts/schematest.js",
     "apitest": "node scripts/apitest.js",
-    "test": "npm run typecheck && npm run unittest && npm run schematest && npm run apitest && npm run roletest",
+    "test": "npm run typecheck && npm run unittest && npm run schematest && npm run apitest && npm run roletest && npm run linktest",
     "roletest": "node scripts/roletest.js",
-    "demo": "bash scripts/demo.sh"
+    "demo": "bash scripts/demo.sh",
+    "linktest": "node scripts/linktest.js"
   },
   "devDependencies": {
     "typescript": "^5.7.2"

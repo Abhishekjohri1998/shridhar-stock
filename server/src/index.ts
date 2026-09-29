@@ -9,6 +9,7 @@ import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
 import { demoRoutes } from './routes/demo';
 import { roleRoutes } from './routes/roles';
+import { startLink } from './billing/link';
 import { seedDemo } from './demo/seed';
 import { ensureShop, seedAdmin } from './setup';
 import { getRepo, initRepo } from './store';
@@ -68,6 +69,8 @@ async function main(): Promise<void> {
       .catch((err) => console.error('[stock] reconcile failed', err));
   await check();
   setInterval(check, RECONCILE_EVERY_MS).unref();
+
+  startLink();
 
   app.listen(env.port, () => {
     console.log('[server] listening on http://localhost:' + env.port);

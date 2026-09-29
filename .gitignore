@@ -9,3 +9,4 @@ dist/
 .expo/
 scripts/demo-ink.json
 server/.data-demo/
+server/.data-billing-demo/

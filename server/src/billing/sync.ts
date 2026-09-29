@@ -1,0 +1,216 @@
+import {
+  hasInk,
+  priceFor,
+  searchKey,
+  unitKey,
+  type BillMirror,
+  type CustomerProfile,
+  type Ink,
+  type Item,
+  type MirrorLine,
+  type StockMove,
+} from '@stock/core';
+import { post } from '../posting';
+import type { InvRepo } from '../store/types';
+import type { BillingClient } from './client';
+
+/** A bill as the billing server sends it. Only the fields stock reads. */
+export interface BillingBill {
+  no: number;
+  at: string;
+  customer?: { id: string; name: string; nameKn?: string; phone: string };
+  lines: { nameKn?: string; nameEn?: string; ink?: Ink; moreInk?: Ink[]; lastMode?: 'ink' | 'text'; qty: number; rate: number }[];
+  total: number;
+  paid: number;
+  balance: number;
+  cancelled?: boolean;
+}
+
+export interface BillingCustomer {
+  id: string;
+  name: string;
+  nameKn?: string;
+  phone: string;
+  address?: string;
+  balance?: number;
+}
+
+/**
+ * Which item a typed name means: its name, or another name it is billed as, in either script.
+ * Only an exact match on the whole name counts, and only when exactly one item has it; anything
+ * less goes to a person, because a wrong match silently moves the wrong stock.
+ *
+ * A leading quantity or unit is allowed around the name: "Sugar 2kg", "2 kg sugar".
+ */
+export function matchTyped(items: Item[], text: string): { item: Item; unit?: string } | null {
+  const words = String(text ?? '').trim().toLowerCase();
+  if (!words) return null;
+  const stripped = words
+    .replace(/\b\d+(\.\d+)?\s*(kg|g|gm|l|ltr|ml|pc|pcs)?\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const keys = new Set([searchKey(words), searchKey(stripped)].filter(Boolean));
+  const hits: { item: Item; unit?: string }[] = [];
+  for (const item of items) {
+    if (!item.active) continue;
+    const names: { text: string; unit?: string }[] = [{ text: item.nameEn }, { text: item.nameKn }, ...item.aliases];
+    const hit = names.find((n) => n.text && keys.has(searchKey(n.text)));
+    if (hit) hits.push({ item, ...(hit.unit ? { unit: hit.unit } : {}) });
+  }
+  return hits.length === 1 ? hits[0]! : null;
+}
+
+/** Picks the unit a billed rate fits best, when the name did not say one. */
+function unitForRate(item: Item, qty: number, rate: number, named?: string): string {
+  if (named && item.units.some((u) => unitKey(u.code) === unitKey(named))) return named;
+  let best = item.units[0]!.code;
+  let bestGap = Infinity;
+  for (const u of item.units) {
+    const gap = Math.abs(priceFor(item, u.code, qty).rate - rate);
+    if (gap < bestGap) {
+      bestGap = gap;
+      best = u.code;
+    }
+  }
+  return best;
+}
+
+/** One billing line as stock sees it. Existing lines keep what a person or the reader decided. */
+function toMirrorLine(items: Item[], raw: BillingBill['lines'][number], i: number, before?: MirrorLine): MirrorLine {
+  /*
+   * Billing fills both names when only one was typed ("Sugar 2kg" in English and Kannada alike),
+   * so the two are de-duplicated, and each is tried on its own for a match.
+   */
+  const names = raw.lastMode === 'ink' ? [] : [...new Set([raw.nameEn, raw.nameKn].map((n) => String(n ?? '').trim()).filter(Boolean))];
+  const text = names.join(' / ');
+  const inks = [raw.ink, ...(raw.moreInk ?? [])].filter((x): x is Ink => hasInk(x));
+  const ink = raw.lastMode === 'text' ? undefined : inks[0];
+  const base: MirrorLine = {
+    i,
+    name: text,
+    ...(ink ? { ink } : {}),
+    qty: raw.qty,
+    rate: raw.rate,
+    amount: Math.round(raw.qty * raw.rate * 100) / 100,
+    state: 'to-confirm',
+  };
+  if (before && before.state !== 'to-confirm') {
+    return { ...base, state: before.state, itemId: before.itemId, unit: before.unit, baseQty: before.baseQty, reading: before.reading, fetched: before.fetched };
+  }
+  if (before?.reading) base.reading = before.reading;
+  if (before?.fetched) base.fetched = before.fetched;
+  if (!text && !ink) return { ...base, state: 'not-item' }; // a price with nothing written
+  if (names.length) {
+    const m = names.map((n) => matchTyped(items, n)).find((x) => x) ?? null;
+    if (m) {
+      const unit = unitForRate(m.item, raw.qty, raw.rate, m.unit);
+      return { ...base, state: 'typed-match', itemId: m.item.id, unit, baseQty: priceFor(m.item, unit, raw.qty).baseQty };
+    }
+  }
+  return base; // handwritten, or a typed name no item has: waits for the reader or a person
+}
+
+export interface SyncResult {
+  bills: number;
+  newBills: number;
+  posted: number;
+  reversed: number;
+  toConfirm: number;
+  customers: number;
+}
+
+/**
+ * Reads the latest bills and every customer from billing, and brings stock up to date.
+ *
+ * - A matched line posts a sale from the shop (key sale:<bill>:<line>, so a restart or a second
+ *   run never posts it again).
+ * - A cancelled bill posts the reverse of every sale it made (key cancel:<bill>:<line>).
+ * - Handwritten and unmatched lines wait in "To confirm".
+ */
+export async function syncOnce(repo: InvRepo, billing: BillingClient, limit = 100): Promise<SyncResult> {
+  const [bills, customers, items, locs] = await Promise.all([
+    billing.get<BillingBill[]>('/api/bills?limit=' + limit),
+    billing.get<BillingCustomer[]>('/api/customers'),
+    repo.listItems(),
+    repo.listLocations(),
+  ]);
+  const shop = locs.find((l) => l.kind === 'shop');
+  if (!shop) throw new Error('No shop place');
+  const result: SyncResult = { bills: bills.length, newBills: 0, posted: 0, reversed: 0, toConfirm: 0, customers: 0 };
+
+  for (const c of customers) {
+    const key = c.phone || c.id;
+    const before = await repo.getDoc<CustomerProfile>('customers', 'c_' + key);
+    await repo.putDoc<CustomerProfile>('customers', {
+      id: 'c_' + key,
+      key,
+      name: c.name,
+      ...(c.nameKn ? { nameKn: c.nameKn } : {}),
+      ...(c.address ? { address: c.address } : {}),
+      // Stock's own addition for deliveries, kept across syncs.
+      ...(before?.landmark ? { landmark: before.landmark } : {}),
+      balance: c.balance ?? 0,
+    });
+    result.customers++;
+  }
+
+  for (const b of bills) {
+    const id = String(b.no);
+    const before = await repo.getDoc<BillMirror>('bills', id);
+    if (!before) result.newBills++;
+    const lines = b.lines.map((l, i) => toMirrorLine(items, l, i, before?.lines[i]));
+    const mirror: BillMirror = {
+      id,
+      no: b.no,
+      at: b.at,
+      ...(b.customer ? { customer: { key: b.customer.phone || b.customer.id, name: b.customer.name, phone: b.customer.phone } } : {}),
+      lines,
+      total: b.total,
+      paid: b.paid,
+      balance: b.balance,
+      ...(b.cancelled ? { cancelled: true } : {}),
+    };
+    await repo.putDoc('bills', mirror);
+
+    const moved = lines.filter((l) => l.itemId && l.baseQty && (l.state === 'typed-match' || l.state === 'read-auto' || l.state === 'confirmed'));
+    if (!b.cancelled) {
+      const sales: StockMove[] = moved.map((l) => ({
+        id: 'mv_sale_' + b.no + '_' + l.i,
+        key: 'sale:' + b.no + ':' + l.i,
+        at: b.at,
+        kind: 'sale',
+        itemId: l.itemId!,
+        from: shop.id,
+        qty: l.baseQty!,
+        ref: 'bill ' + b.no + ' line ' + (l.i + 1),
+        by: 'billing',
+      }));
+      result.posted += (await post(repo, sales)).length;
+      result.toConfirm += lines.filter((l) => l.state === 'to-confirm').length;
+    } else {
+      // Only what was actually sold comes back: reverse the sale moves that exist.
+      const sold = await repo.listMoves({});
+      const reverse: StockMove[] = sold
+        .filter((m) => m.kind === 'sale' || m.kind === 'digitise')
+        .filter((m) => m.key.startsWith('sale:' + b.no + ':'))
+        .map((m) => ({ id: 'mv_cancel_' + m.key, key: 'cancel:' + m.key.slice(5), at: new Date().toISOString(), kind: 'cancel', itemId: m.itemId, to: m.from!, qty: m.qty, ref: 'bill ' + b.no + ' cancelled', by: 'billing' }));
+      result.reversed += (await post(repo, reverse)).length;
+    }
+  }
+  return result;
+}
+
+/** The link's health, for the admin's screens. */
+export async function recordLink(repo: InvRepo, ok: boolean, detail: { lastBillNo?: number; message: string }): Promise<void> {
+  const meta = (await repo.getDoc<{ id: string; link?: unknown; reader?: unknown }>('meta', 'status')) ?? { id: 'status' };
+  const prev = (meta.link ?? {}) as { lastOkAt?: string };
+  await repo.putDoc('meta', {
+    ...meta,
+    link: {
+      ok,
+      at: new Date().toISOString(),
+      ...(ok ? { lastOkAt: new Date().toISOString() } : prev.lastOkAt ? { lastOkAt: prev.lastOkAt } : {}),
+      ...detail,
+    },
+  });
+}

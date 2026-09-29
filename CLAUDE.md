@@ -48,7 +48,8 @@ waits for the client's explicit yes. That covers:
 - **Plan:** `docs/PLAN.md` (phases W1–W10).
 - **W1 done:** every role's screens working on demo data. Run `bash scripts/demo.sh` and open
   http://localhost:4200/walkthrough (demo PIN 1111; file store only, refuses a database).
-- **Next:** W2, the read-only billing sync, then W3, the Claude handwriting reader (needs the
+- **W2 done:** the read-only billing link (`server/src/billing/`), `npm run linktest`; `scripts/demo.sh` runs a scratch billing server beside the demo.
+- **Next:** W3, the Claude handwriting reader (needs the
   owner's `ANTHROPIC_API_KEY` in `server/.env`).
 - **Real handwriting for the demo:** export a billing backup to Downloads, then extract strokes
   only into the gitignored `scripts/demo-ink.json`.

@@ -25,6 +25,13 @@ export const env = {
   seedAdminPin: str('SEED_ADMIN_PIN', ''),
   seedAdminName: str('SEED_ADMIN_NAME', 'Admin'),
   isProduction: str('NODE_ENV', 'development') === 'production',
+  /**
+   * The billing server to read bills from, and the shop PIN to sign in with. Both empty means no
+   * link. The PIN is a secret: it lives only in server/.env on the server.
+   */
+  billingUrl: str('BILLING_URL', ''),
+  billingPin: str('BILLING_PIN', ''),
+  billingEveryMs: Number(str('BILLING_EVERY_MS', '15000')),
   /** Demo mode: sample data, "log in as" any role, and the walkthrough. File store only. */
   demo: str('DEMO', '') === '1',
 };
