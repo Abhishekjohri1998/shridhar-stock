@@ -1,7 +1,7 @@
 # Shridhar Stock (inventory): notes for Claude
 
 This folder is the **stock / inventory system** for Shridhar Kirani Stores. It is the only place
-the stock server, the stock website and the stock admin APK are built from.
+the stock server and the stock website are built from.
 
 - **Website only.** There is no stock APK: the admin APK was removed at the owner's request (it
   is in git history). Every role, the admin included, signs in on the website.
