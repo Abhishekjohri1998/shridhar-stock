@@ -1,4 +1,4 @@
-// Copied from the billing app (shridhar project/shared/src/kannada.ts) so the two repos never depend
+// Copied from the billing app (Shridhar/billing-app/shared/src/kannada.ts) so the two repos never depend
 // on each other. The billing app is the original: if its search rules change, copy them here.
 
 /**

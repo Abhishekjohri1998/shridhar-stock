@@ -19,7 +19,7 @@ The repo is not on GitHub yet, so the code is copied up as one file. `git archiv
 what is committed. It never includes `.env`, data, or the signing key.
 
 ```bash
-cd "/d/shridhar inventory"
+cd "/d/Shridhar/stock-app"
 git archive --format=tar.gz -o shridhar-stock.tar.gz HEAD
 scp -i <your-key.pem> shridhar-stock.tar.gz ubuntu@3.111.82.220:~
 ```

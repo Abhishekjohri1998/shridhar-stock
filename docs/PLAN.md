@@ -18,7 +18,7 @@ What was decided:
 
 | | Decision |
 |---|---|
-| Code | A new folder and git repo, `D:\shridhar inventory`. Nothing in `D:\shridhar project` changes. |
+| Code | A new folder and git repo, `D:\Shridhar\stock-app`. Nothing in `D:\Shridhar\billing-app` changes. |
 | Admin | **Both** a separate admin APK ("Shridhar Stock", installed next to the billing app) **and** the same admin screens on the website |
 | Other users | The same website, one screen per role: shop worker, godown, vendor, delivery, customer, owner/partner |
 | Login | Phone + PIN set by the admin |
@@ -52,9 +52,9 @@ Everything else in the brief is fully covered by the new system.
 ## A1. Layout
 
 ```
- D:\shridhar project  (billing, UNCHANGED) ── server 3.111.82.220.sslip.io ── Atlas db: billing
+ D:\Shridhar\billing-app  (billing, UNCHANGED) ── server 3.111.82.220.sslip.io ── Atlas db: billing
                                                         ▲  read-only GET /api/bills
- D:\shridhar inventory (NEW repo)                        │  (every 30 s + on demand)
+ D:\Shridhar\stock-app (NEW repo)                        │  (every 30 s + on demand)
   core/     shared rules: types, pricing, units, csv, refill, roles, kannada search, i18n
   server/   Express + Mongoose, port 4200 ── Atlas db: inventory
   web/      one website: /admin (admin) + /worker /godown /vendor /delivery /customer /owner
@@ -253,7 +253,7 @@ One function, `post(moves)`, makes every change:
 Each phase ships on its own, with tests.
 
 ## Phase 0: Repo and foundations
-- Create `D:\shridhar inventory` with its workspaces, TypeScript, and `npm test`.
+- Create `D:\Shridhar\stock-app` with its workspaces, TypeScript, and `npm test`.
 - Copy the Kannada search and the design tokens into `core/`.
 - Server: env, health endpoint, file and Mongo stores behind one interface, people and PIN login, the login limit, `requireRole`, and the seed admin.
 - Website: login and the role redirect.
@@ -357,9 +357,9 @@ Each phase ships on its own, with tests.
 1. `npm test` in the new repo, and `tsc --noEmit` for server, web and app.
 2. **Scratch servers only:**
    - inventory on port 4200 with the file store;
-   - for phase 4 on, a scratch billing server as well: `cd "D:\shridhar project\server" && MONGO_URI= PORT=4100 AUTH_PIN=246810 JWT_SECRET=scratch node dist/index.js`. That runs billing's code unchanged and only reads from it, and its `.data` is deleted afterwards.
+   - for phase 4 on, a scratch billing server as well: `cd "D:\Shridhar\billing-app\server" && MONGO_URI= PORT=4100 AUTH_PIN=246810 JWT_SECRET=scratch node dist/index.js`. That runs billing's code unchanged and only reads from it, and its `.data` is deleted afterwards.
    - Drive the website in the in-app browser.
-3. `git status` in `D:\shridhar project` shows no changes at the end of every phase.
+3. `git status` in `D:\Shridhar\billing-app` shows no changes at the end of every phase.
 4. The APK is checked on the tablet, and the billing APK's behaviour is unchanged.
 
 ## I will ask you before
