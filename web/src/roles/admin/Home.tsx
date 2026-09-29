@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { http } from '../../lib/api';
+import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
 import { Loading, Money, useBi, when } from '../../components/ui';
 
@@ -35,7 +36,8 @@ function Tile({ n, label, to, tone }: { n: number | string; label: string; to: s
 export function AdminHome() {
   const bi = useBi();
   const { lang } = useSession();
-  const { value: s, error } = useLoad(() => http.get<Summary>('/admin/summary'));
+  const live = useLive('bills', 'stock', 'transfers', 'pos', 'deliveries', 'orders', 'link');
+  const { value: s, error } = useLoad(() => http.get<Summary>('/admin/summary'), [live]);
   if (error) return <div className="msg err">{error}</div>;
   if (!s) return <Loading />;
   const rate = s.handwrittenLines ? Math.round((s.autoRead / s.handwrittenLines) * 100) : 0;

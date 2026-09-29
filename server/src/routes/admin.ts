@@ -23,6 +23,7 @@ import { post, reconcile } from '../posting';
 import { getRepo } from '../store';
 import { newId } from '../store/types';
 import { shopOf } from '../setup';
+import { dropPerson, emit } from '../events';
 
 export const adminRoutes = Router();
 
@@ -115,6 +116,7 @@ adminRoutes.put(
       // A change of role or switching off takes effect on every device at once.
       ...(role !== p.role || active !== p.active ? { tv: p.tv + 1 } : {}),
     });
+    if (!changed!.active || changed!.role !== p.role) dropPerson(p.id);
     res.json(publicPerson(changed!));
   }),
 );
@@ -130,6 +132,7 @@ adminRoutes.post(
     const p = await repo.getPerson(String(req.params.id));
     if (!p) throw new HttpError(404, 'No such person');
     await repo.updatePerson(p.id, { pinHash: hashPin(pin), tv: p.tv + 1 });
+    dropPerson(p.id);
     res.json({ ok: true });
   }),
 );
@@ -238,6 +241,7 @@ adminRoutes.post(
     const input = await dropUnknownPlaces(checked(req.body));
     const item: Item = { ...input, id: newId('it'), active: true, updatedAt: new Date().toISOString() };
     await getRepo().saveItem(item);
+    emit('items');
     res.status(201).json(item);
   }),
 );
@@ -252,6 +256,7 @@ adminRoutes.put(
     const input = await dropUnknownPlaces(checked(req.body));
     const item: Item = { ...input, id: old.id, active: input.active ?? old.active, updatedAt: new Date().toISOString() };
     await repo.saveItem(item);
+    emit('items');
     res.json(item);
   }),
 );

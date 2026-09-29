@@ -1,4 +1,5 @@
 import type { StockLevel, StockMove } from '@stock/core';
+import { emit } from './events';
 import type { InvRepo } from './store/types';
 
 /**
@@ -25,6 +26,10 @@ export async function post(repo: InvRepo, moves: StockMove[]): Promise<StockMove
       // The move is in the ledger; the next reconcile brings the cache into line with it.
       console.error('[stock] cache update failed for ' + m.key + ', reconcile will fix it', err);
     }
+  }
+  if (posted.length) {
+    const places = [...new Set(posted.flatMap((m) => [m.from, m.to]).filter((x): x is string => !!x))];
+    emit('stock', { locationIds: places });
   }
   return posted;
 }

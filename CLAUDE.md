@@ -51,6 +51,7 @@ waits for the client's explicit yes. That covers:
 - **W2 done:** the read-only billing link (`server/src/billing/`), `npm run linktest`; `scripts/demo.sh` runs a scratch billing server beside the demo.
 - **W3 done:** the handwriting reader (`server/src/reader/`, `npm run readertest`). Real reading needs the
   owner's `ANTHROPIC_API_KEY` in `server/.env`; without it lines wait for a person.
-- **Next:** W4, the live stream and worker screen; the paid reader eval on real shop handwriting when the owner says.
+- **W4 done:** live updates (`server/src/events.ts`, `web/src/lib/live.ts`, `npm run livetest`).
+- **Next:** W5 godowns and refill in depth; the paid reader eval on real shop handwriting when the owner says.
 - **Real handwriting for the demo:** export a billing backup to Downloads, then extract strokes
   only into the gitignored `scripts/demo-ink.json`.

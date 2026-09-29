@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { describeQty, formatRupees, itemMatches, pickName, type Delivery, type Ink, type ItemUnit, type OrderRequest, type Transfer } from '@stock/core';
 import { http } from '../lib/api';
+import { useLive } from '../lib/live';
 import { useLoad, useSession } from '../lib/session';
 import { statusWord } from '../lib/words';
 import { Empty, InkView, Loading, Money, Status, Tabs, useBi, when } from '../components/ui';
 import { WriteToFind, type WrittenResult } from '../components/WriteToFind';
 import type { Summary } from './admin/Home';
 
-/** Screens refresh on their own every few seconds; the live stream replaces this in W4. */
+/** A slow safety net under the live stream, for a phone whose stream quietly stalled. */
 function useTick(ms: number) {
   const [n, setN] = useState(0);
   useEffect(() => {
@@ -21,7 +22,8 @@ function useTick(ms: number) {
 
 export function OwnerHome() {
   const bi = useBi();
-  const { value: s, error } = useLoad(() => http.get<Summary>('/admin/summary'));
+  const live = useLive('bills', 'stock', 'transfers', 'pos', 'deliveries', 'orders');
+  const { value: s, error } = useLoad(() => http.get<Summary>('/admin/summary'), [live]);
   if (error) return <div className="msg err">{error}</div>;
   if (!s) return <Loading />;
   const rate = s.handwrittenLines ? Math.round((s.autoRead / s.handwrittenLines) * 100) : 0;
@@ -81,9 +83,10 @@ interface WorkerBill {
 export function WorkerHome({ screen = false }: { screen?: boolean }) {
   const bi = useBi();
   const { lang } = useSession();
-  const tick = useTick(5000);
+  const live = useLive('bills', 'items');
+  const tick = useTick(60_000);
   const [version, setVersion] = useState(0);
-  const { value, error } = useLoad(() => http.get<WorkerBill[]>('/worker/bills'), [tick, version]);
+  const { value, error } = useLoad(() => http.get<WorkerBill[]>('/worker/bills'), [live, tick, version]);
   const [open, setOpen] = useState<number | null>(null);
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
@@ -119,6 +122,9 @@ export function WorkerHome({ screen = false }: { screen?: boolean }) {
         </span>
       </div>
       <p className="muted">{when(bill.at, lang)}</p>
+      {done === bill.lines.length && (
+        <div className="banner ok">✓ {bi('Everything on this bill is fetched.', 'ಈ ಬಿಲ್‌ನ ಎಲ್ಲವನ್ನೂ ತರಲಾಗಿದೆ.')}</div>
+      )}
       {[...groups.entries()].map(([rack, lines]) => (
         <div key={rack} className="card">
           <div className="rack">📍 {rack}</div>
@@ -162,10 +168,11 @@ export function GodownHome() {
   const { lang, me } = useSession();
   const [tab, setTab] = useState<'requests' | 'incoming' | 'stock'>('requests');
   const [version, setVersion] = useState(0);
+  const live = useLive('transfers', 'stock', 'items');
   const { value, error } = useLoad(async () => {
     const [transfers, stock] = await Promise.all([http.get<Transfer[]>('/godown/transfers'), http.get<GItem[]>('/godown/stock')]);
     return { transfers, stock };
-  }, [version]);
+  }, [version, live]);
   const [q, setQ] = useState('');
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
@@ -335,7 +342,8 @@ export function VendorHome() {
   const bi = useBi();
   const { lang } = useSession();
   const [version, setVersion] = useState(0);
-  const { value, error } = useLoad(() => http.get<{ supplier: { name: string } | null; orders: VendorPo[] }>('/vendor/pos'), [version]);
+  const live = useLive('pos');
+  const { value, error } = useLoad(() => http.get<{ supplier: { name: string } | null; orders: VendorPo[] }>('/vendor/pos'), [version, live]);
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
   return (
@@ -424,7 +432,8 @@ export function DeliveryHome() {
   const bi = useBi();
   const { lang } = useSession();
   const [version, setVersion] = useState(0);
-  const { value, error } = useLoad(() => http.get<Drop[]>('/delivery/mine'), [version]);
+  const live = useLive('deliveries', 'bills');
+  const { value, error } = useLoad(() => http.get<Drop[]>('/delivery/mine'), [version, live]);
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
   const setStatus = async (d: Drop, status: 'out' | 'delivered' | 'failed') => {
@@ -520,9 +529,10 @@ export function CustomerHome() {
   const { lang } = useSession();
   const [tab, setTab] = useState<'bills' | 'items' | 'order'>('bills');
   const [version, setVersion] = useState(0);
-  const bills = useLoad(() => http.get<{ name: string; balance: number; bills: CBill[] }>('/customer/bills'), [version]);
-  const cat = useLoad(() => http.get<CItem[]>('/customer/catalogue'));
-  const orders = useLoad(() => http.get<OrderRequest[]>('/customer/orders'), [version]);
+  const live = useLive('bills', 'orders', 'items', 'stock');
+  const bills = useLoad(() => http.get<{ name: string; balance: number; bills: CBill[] }>('/customer/bills'), [version, live]);
+  const cat = useLoad(() => http.get<CItem[]>('/customer/catalogue'), [live]);
+  const orders = useLoad(() => http.get<OrderRequest[]>('/customer/orders'), [version, live]);
   const [q, setQ] = useState('');
   const [cart, setCart] = useState<Record<string, { unit: string; qty: number }>>({});
   const [note, setNote] = useState('');

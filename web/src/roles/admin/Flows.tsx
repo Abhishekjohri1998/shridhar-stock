@@ -11,6 +11,7 @@ import {
   type Transfer,
 } from '@stock/core';
 import { http } from '../../lib/api';
+import { useLive } from '../../lib/live';
 import { itemName, placeName, qtyText, useCatalog } from '../../lib/catalog';
 import { useLoad, useSession } from '../../lib/session';
 import { statusWord } from '../../lib/words';
@@ -22,7 +23,8 @@ export function BillsPage() {
   const bi = useBi();
   const { lang } = useSession();
   const { items } = useCatalog();
-  const { value, error } = useLoad(() => http.get<BillMirror[]>('/admin/bills?limit=100'));
+  const live = useLive('bills');
+  const { value, error } = useLoad(() => http.get<BillMirror[]>('/admin/bills?limit=100'), [live]);
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
   return (
@@ -79,7 +81,8 @@ export function RefillPage() {
   const { lang } = useSession();
   const [version, setVersion] = useState(0);
   const { items, locs } = useCatalog(version);
-  const { value, error } = useLoad(() => http.get<Refill>('/admin/refill'), [version]);
+  const live = useLive('stock', 'items');
+  const { value, error } = useLoad(() => http.get<Refill>('/admin/refill'), [version, live]);
   const [msg, setMsg] = useState('');
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
@@ -153,7 +156,8 @@ export function TransfersPage() {
   const { lang } = useSession();
   const [version, setVersion] = useState(0);
   const { items, locs } = useCatalog(version);
-  const { value, error } = useLoad(() => http.get<Transfer[]>('/admin/transfers'), [version]);
+  const live = useLive('transfers');
+  const { value, error } = useLoad(() => http.get<Transfer[]>('/admin/transfers'), [version, live]);
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
   const receive = async (t: Transfer) => {
@@ -205,13 +209,14 @@ export function TransfersPage() {
 
 export function PurchasesPage() {
   const bi = useBi();
+  const livePos = useLive('pos');
   const { lang } = useSession();
   const [version, setVersion] = useState(0);
   const { items, locs } = useCatalog(version);
   const { value, error } = useLoad(async () => {
     const [pos, sups] = await Promise.all([http.get<PurchaseOrder[]>('/admin/pos'), http.get<Supplier[]>('/admin/suppliers')]);
     return { pos, sups };
-  }, [version]);
+  }, [version, livePos]);
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
   const receive = async (p: PurchaseOrder) => {
@@ -264,7 +269,8 @@ export function PurchasesPage() {
 export function DeliveriesPage() {
   const bi = useBi();
   const { lang } = useSession();
-  const { value, error } = useLoad(() => http.get<Delivery[]>('/admin/deliveries'));
+  const live = useLive('deliveries');
+  const { value, error } = useLoad(() => http.get<Delivery[]>('/admin/deliveries'), [live]);
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
   return (
@@ -298,13 +304,14 @@ export function DeliveriesPage() {
 
 export function RequestsPage() {
   const bi = useBi();
+  const liveOrders = useLive('orders');
   const { lang } = useSession();
   const [version, setVersion] = useState(0);
   const { items } = useCatalog(version);
   const { value, error } = useLoad(async () => {
     const [orders, customers] = await Promise.all([http.get<OrderRequest[]>('/admin/orders'), http.get<{ key: string; name: string }[]>('/admin/customers')]);
     return { orders, customers };
-  }, [version]);
+  }, [version, liveOrders]);
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
   const set = async (o: OrderRequest, status: 'done' | 'declined') => {

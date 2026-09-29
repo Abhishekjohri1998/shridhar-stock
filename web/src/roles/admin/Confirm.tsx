@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { formatRupees, itemMatches, pickName, priceFor, type Item, type MirrorLine } from '@stock/core';
 import { http } from '../../lib/api';
+import { useLive } from '../../lib/live';
 import { itemName, useCatalog } from '../../lib/catalog';
 import { useLoad, useSession } from '../../lib/session';
 import { Empty, InkView, Loading, useBi, when } from '../../components/ui';
@@ -22,7 +23,8 @@ export function ConfirmPage() {
   const bi = useBi();
   const [version, setVersion] = useState(0);
   const { items } = useCatalog(version);
-  const { value, error } = useLoad(() => http.get<Pending[]>('/admin/confirm'), [version]);
+  const live = useLive('bills');
+  const { value, error } = useLoad(() => http.get<Pending[]>('/admin/confirm'), [version, live]);
   const [note, setNote] = useState('');
 
   if (error) return <div className="msg err">{error}</div>;

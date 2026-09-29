@@ -17,6 +17,7 @@ import { handler, HttpError } from '../http';
 import { post } from '../posting';
 import { getRepo } from '../store';
 import { newId } from '../store/types';
+import { emit } from '../events';
 
 /**
  * The things people do, each checked for who may do it and on what, and each moving stock
@@ -62,6 +63,7 @@ actionRoutes.post(
     if (body.notItem) {
       line.state = 'not-item';
       await repo.putDoc('bills', bill);
+      emit('bills');
       res.json({ ok: true });
       return;
     }
@@ -96,6 +98,8 @@ actionRoutes.post(
         learnt = said;
       }
     }
+    emit('bills');
+    if (learnt) emit('items');
     res.json({ ok: true, learnt });
   }),
 );
@@ -170,6 +174,7 @@ actionRoutes.post(
     const no = await repo.nextNo('transfer');
     const t: Transfer = { id: 'tr_' + no, no, from: body.from, to: body.to, lines: body.lines, status: 'requested', at: now(), times: { requested: now() }, ...(body.note ? { note: body.note } : {}) };
     await repo.putDoc('transfers', t);
+    emit('transfers', { locationIds: [t.from, t.to] }, t.id);
     res.status(201).json(t);
   }),
 );
@@ -208,6 +213,7 @@ actionRoutes.post(
     const moves: StockMove[] = t.lines.map((l) => ({ id: newId('mv'), key: 'xfer:' + t.no + ':out:' + l.itemId, at: now(), kind: 'transfer_out', itemId: l.itemId, from: t.from, qty: l.sent ?? 0, ref: 'transfer ' + t.no, by: req.person!.id }));
     await getRepo().putDoc('transfers', t);
     await post(getRepo(), moves);
+    emit('transfers', { locationIds: [t.from, t.to] }, t.id);
     res.json(t);
   }),
 );
@@ -227,6 +233,7 @@ actionRoutes.post(
     const moves: StockMove[] = t.lines.map((l) => ({ id: newId('mv'), key: 'xfer:' + t.no + ':in:' + l.itemId, at: now(), kind: 'transfer_in', itemId: l.itemId, to: t.to, qty: l.received ?? 0, ref: 'transfer ' + t.no, by: req.person!.id, ...((l.received ?? 0) < (l.sent ?? 0) ? { note: (l.sent! - l.received!) + ' short' } : {}) }));
     await getRepo().putDoc('transfers', t);
     await post(getRepo(), moves);
+    emit('transfers', { locationIds: [t.from, t.to] }, t.id);
     res.json(t);
   }),
 );
@@ -245,6 +252,7 @@ actionRoutes.post(
     const no = await repo.nextNo('po');
     const p: PurchaseOrder = { id: 'po_' + no, no, supplierId: body.supplierId, to: body.to, lines: body.lines, status: 'ordered', at: now(), times: { ordered: now() } };
     await repo.putDoc('pos', p);
+    emit('pos', { supplierId: p.supplierId }, p.id);
     res.status(201).json(p);
   }),
 );
@@ -266,6 +274,7 @@ actionRoutes.post(
     p.status = 'confirmed';
     p.times.confirmed = now();
     await getRepo().putDoc('pos', p);
+    emit('pos', { supplierId: p.supplierId }, p.id);
     res.json({ ok: true });
   }),
 );
@@ -281,6 +290,7 @@ actionRoutes.post(
     p.times.dispatched = now();
     Object.assign(p, body);
     await getRepo().putDoc('pos', p);
+    emit('pos', { supplierId: p.supplierId }, p.id);
     res.json({ ok: true });
   }),
 );
@@ -302,6 +312,7 @@ actionRoutes.post(
     p.times.received = now();
     await repo.putDoc('pos', p);
     await post(repo, moves);
+    emit('pos', { supplierId: p.supplierId }, p.id);
     res.json({ ok: true });
   }),
 );
@@ -323,6 +334,7 @@ actionRoutes.post(
     d.times[body.status] = now();
     if (body.note) d.note = body.note;
     await repo.putDoc('deliveries', d);
+    emit('deliveries', { personId: d.personId ?? '' }, d.id);
     res.json(d);
   }),
 );
@@ -349,6 +361,7 @@ actionRoutes.post(
       ...(body.note ? { note: body.note } : {}),
     };
     await getRepo().putDoc('orders', o);
+    emit('orders', { customerKey: o.customerKey }, o.id);
     res.status(201).json(o);
   }),
 );
@@ -364,6 +377,7 @@ actionRoutes.post(
     o.status = body.status;
     if (body.billNo) o.billNo = body.billNo;
     await repo.putDoc('orders', o);
+    emit('orders', { customerKey: o.customerKey }, o.id);
     res.json(o);
   }),
 );

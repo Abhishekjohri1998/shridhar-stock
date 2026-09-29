@@ -1,6 +1,7 @@
 import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { ROLE_HOME, type MsgKey, type Role } from '@stock/core';
 import { useSession } from './lib/session';
+import { stopLive, useLiveStatus } from './lib/live';
 import { LoginPage } from './pages/Login';
 import { PinPage } from './pages/Pin';
 import { WalkthroughPage } from './pages/Walkthrough';
@@ -49,6 +50,18 @@ const NAV: Record<Role, [string, string, string][]> = {
   customer: [['/customer', 'My shop', 'ನನ್ನ ಅಂಗಡಿ']],
 };
 
+function LiveDot() {
+  const s = useLiveStatus();
+  const { lang } = useSession();
+  if (s === 'off') return null;
+  const label = s === 'live' ? (lang === 'kn' ? 'ನೇರ' : 'Live') : lang === 'kn' ? 'ಸಂಪರ್ಕಿಸುತ್ತಿದೆ' : 'Connecting';
+  return (
+    <span className={'live-dot ' + s} title={label}>
+      ● {label}
+    </span>
+  );
+}
+
 function Top() {
   const { me, t, lang, setLang, signOut } = useSession();
   return (
@@ -57,6 +70,7 @@ function Top() {
       <button className="btn ghost small" onClick={() => setLang(lang === 'kn' ? 'en' : 'kn')}>
         {t('common.lang')}
       </button>
+      {me && <LiveDot />}
       {me && (
         <span className="who">
           {me.name} · {t(('role.' + me.role) as MsgKey)}
@@ -69,7 +83,7 @@ function Top() {
             {t('login.changePin')}
           </NavLink>{' '}
           ·{' '}
-          <a href="#" className="muted" onClick={(e) => (e.preventDefault(), signOut())}>
+          <a href="#" className="muted" onClick={(e) => (e.preventDefault(), stopLive(), signOut())}>
             {t('common.signOut')}
           </a>
         </span>

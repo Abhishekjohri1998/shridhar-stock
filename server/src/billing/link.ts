@@ -1,6 +1,7 @@
 import { env } from '../env';
 import { getRepo } from '../store';
 import { billingClient } from './client';
+import { emit } from '../events';
 import { pickReader, readPending } from '../reader';
 import { recordLink, syncOnce, type SyncResult } from './sync';
 
@@ -26,6 +27,8 @@ export function syncNow(): Promise<SyncResult | null> {
         return null;
       });
       if (read) Object.assign(r, { read: read.read, autoRead: read.auto });
+      if (r.newBills || r.posted || r.reversed || read?.read) emit('bills');
+      emit('link', { roles: [] });
       const bills = await repo.listDocs<{ id: string; no: number }>('bills');
       await recordLink(repo, true, {
         lastBillNo: bills.reduce((m, b) => Math.max(m, b.no), 0),

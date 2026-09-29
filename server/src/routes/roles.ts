@@ -13,6 +13,7 @@ import {
 } from '@stock/core';
 import { requireRole } from '../auth';
 import { handler, HttpError } from '../http';
+import { emit } from '../events';
 import { getRepo } from '../store';
 
 /**
@@ -157,7 +158,8 @@ roleRoutes.get(
     res.json(
       bills
         .filter((b) => b.at >= today && !b.cancelled)
-        .sort(byNoDesc)
+        // Newest first by the time it was made: the bill just written is the one to fetch.
+        .sort((a, b) => b.at.localeCompare(a.at) || b.no - a.no)
         .map((b) => ({
           no: b.no,
           at: b.at,
@@ -197,6 +199,7 @@ roleRoutes.post(
     if (!line) throw new HttpError(404, 'No such line');
     line.fetched = fetched;
     await repo.putDoc('bills', bill);
+    emit('bills', {}, String(bill.no));
     res.json({ ok: true });
   }),
 );
