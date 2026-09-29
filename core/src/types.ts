@@ -125,3 +125,182 @@ export interface StockLevel {
 
 export const ADJUST_REASONS = ['counted', 'damaged', 'expired', 'other'] as const;
 export type AdjustReason = (typeof ADJUST_REASONS)[number];
+
+// ------------------------------------------------------------------ handwriting
+
+/** Pen strokes, in the billing app's own format: each stroke is [x0, y0, x1, y1, ...]. */
+export interface Ink {
+  w: number;
+  h: number;
+  strokes: number[][];
+}
+
+/** What the handwriting reader made of one written line. */
+export interface Reading {
+  /** The words as read, in the script they were written in. */
+  readText: string;
+  itemId?: string;
+  unit?: string;
+  qty?: number;
+  /** 0 to 1: how sure the reader is that it is this item. */
+  confidence: number;
+  alternatives: { itemId: string; confidence: number }[];
+  /** 'reader' for the machine, or the person who confirmed it. */
+  by: string;
+  at: string;
+}
+
+// ------------------------------------------------------------------ bills, from billing
+
+/**
+ * How a bill line was turned into stock:
+ * - typed-match: typed, and matched one item by name
+ * - read-auto: handwritten, and the reader was sure
+ * - to-confirm: waiting for a person (unsure reading, no match, or no reader)
+ * - confirmed: a person chose the item
+ * - not-item: a person said it is not stock (a service, a note)
+ */
+export type LineState = 'typed-match' | 'read-auto' | 'to-confirm' | 'confirmed' | 'not-item';
+
+export interface MirrorLine {
+  i: number;
+  /** The typed name, empty when the line is handwritten only. */
+  name: string;
+  ink?: Ink;
+  qty: number;
+  rate: number;
+  amount: number;
+  state: LineState;
+  itemId?: string;
+  unit?: string;
+  baseQty?: number;
+  reading?: Reading;
+  /** The worker's tick: brought from the rack. */
+  fetched?: boolean;
+}
+
+/** A bill as read from the billing server. Stock never writes to billing. */
+export interface BillMirror {
+  id: string;
+  no: number;
+  at: string;
+  customer?: { key: string; name: string; phone: string };
+  lines: MirrorLine[];
+  total: number;
+  paid: number;
+  balance: number;
+  cancelled?: boolean;
+}
+
+/** A customer, from billing, plus what deliveries need that billing does not keep. */
+export interface CustomerProfile {
+  id: string;
+  /** The phone number, which is what ties a customer's login to their bills. */
+  key: string;
+  name: string;
+  nameKn?: string;
+  address?: string;
+  landmark?: string;
+  balance: number;
+}
+
+// ------------------------------------------------------------------ movement between places
+
+export type TransferStatus = 'requested' | 'sent' | 'received' | 'cancelled';
+
+export interface TransferLine {
+  itemId: string;
+  /** Asked for, in base units. */
+  qty: number;
+  sent?: number;
+  received?: number;
+}
+
+export interface Transfer {
+  id: string;
+  no: number;
+  from: string;
+  to: string;
+  lines: TransferLine[];
+  status: TransferStatus;
+  vehicle?: string;
+  driver?: string;
+  note?: string;
+  noteInk?: Ink;
+  at: string;
+  times: Partial<Record<TransferStatus, string>>;
+}
+
+// ------------------------------------------------------------------ buying
+
+export interface Supplier {
+  id: string;
+  name: string;
+  phone: string;
+  address?: string;
+  active: boolean;
+}
+
+export type POStatus = 'ordered' | 'confirmed' | 'dispatched' | 'received' | 'cancelled';
+
+export interface POLine {
+  itemId: string;
+  unit: string;
+  qty: number;
+  /** Cost per unit. The vendor sees this; they never see the shop's sale price. */
+  cost: number;
+}
+
+export interface PurchaseOrder {
+  id: string;
+  no: number;
+  supplierId: string;
+  to: string;
+  lines: POLine[];
+  status: POStatus;
+  invoiceNo?: string;
+  vehicle?: string;
+  eta?: string;
+  at: string;
+  times: Partial<Record<POStatus, string>>;
+}
+
+// ------------------------------------------------------------------ deliveries and orders
+
+export type DeliveryStatus = 'pending' | 'out' | 'delivered' | 'failed';
+
+export interface Delivery {
+  id: string;
+  billNo: number;
+  customerKey: string;
+  name: string;
+  phone: string;
+  address: string;
+  landmark?: string;
+  personId?: string;
+  vehicle?: string;
+  status: DeliveryStatus;
+  amountDue: number;
+  note?: string;
+  at: string;
+  times: Partial<Record<DeliveryStatus, string>>;
+}
+
+export interface OrderLine {
+  text?: string;
+  ink?: Ink;
+  itemId?: string;
+  unit?: string;
+  qty?: number;
+}
+
+export interface OrderRequest {
+  id: string;
+  personId: string;
+  customerKey: string;
+  lines: OrderLine[];
+  note?: string;
+  status: 'new' | 'done' | 'declined';
+  billNo?: number;
+  at: string;
+}

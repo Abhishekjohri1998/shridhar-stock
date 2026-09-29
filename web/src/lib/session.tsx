@@ -9,6 +9,8 @@ interface Session {
   t: T;
   setLang: (l: Lang) => void;
   signIn: (phone: string, pin: string) => Promise<void>;
+  /** Demo only: become the demo person for a role, no PIN. */
+  signInAs: (role: Person['role']) => Promise<void>;
   signOut: () => void;
 }
 
@@ -53,12 +55,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setMe(r.person);
   }, []);
 
+  const signInAs = useCallback(async (role: Person['role']) => {
+    const r = await api.loginAs(role);
+    setToken(r.token);
+    setMe(r.person);
+  }, []);
+
   const signOut = useCallback(() => {
     setToken('');
     setMe(null);
   }, []);
 
-  const value = useMemo(() => ({ ready, me, lang, t: makeT(lang), setLang, signIn, signOut }), [ready, me, lang, setLang, signIn, signOut]);
+  const value = useMemo(() => ({ ready, me, lang, t: makeT(lang), setLang, signIn, signInAs, signOut }), [ready, me, lang, setLang, signIn, signInAs, signOut]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

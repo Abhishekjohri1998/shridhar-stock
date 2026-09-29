@@ -3,13 +3,12 @@
 This folder is the **stock / inventory system** for Shridhar Kirani Stores. It is the only place
 the stock server, the stock website and the stock admin APK are built from.
 
-- The admin APK is package `com.shridhar.stock`, app name "Shridhar Stock", with the marigold
-  crates icon. It installs **beside** the billing app on the shop's tablet.
+- **Website only.** There is no stock APK: the admin APK was removed at the owner's request (it
+  is in git history). Every role, the admin included, signs in on the website.
 - npm workspaces:
   - `core/`: shared rules, i18n in EN and KN;
   - `server/`: Express + Mongo, database `inventory`, port 4200;
-  - `web/`: the website, with `/admin` and one screen per role;
-  - `app/`: the Expo admin APK.
+  - `web/`: the website, with `/admin`, one screen per role, and `/walkthrough` in demo mode.
 - The full plan with every phase is in `docs/PLAN.md`. Deploying to the EC2 box, beside billing,
   is `docs/deploy.md`.
 
@@ -46,10 +45,10 @@ waits for the client's explicit yes. That covers:
 
 ## Status
 
-- **Built:** phases 0–3, which cover:
-  - sign-in and roles;
-  - items, units, slabs, range and CSV;
-  - places, the stock ledger, corrections and recount;
-  - the admin APK, version 0.1.0 build 1.
-- **Not deployed yet:** the owner runs `deploy/setup-stock.sh` on EC2.
-- **Next:** phase 4, the read-only billing link and the digitise queue.
+- **Plan:** `docs/PLAN.md` (phases W1–W10).
+- **W1 done:** every role's screens working on demo data. Run `bash scripts/demo.sh` and open
+  http://localhost:4200/walkthrough (demo PIN 1111; file store only, refuses a database).
+- **Next:** W2, the read-only billing sync, then W3, the Claude handwriting reader (needs the
+  owner's `ANTHROPIC_API_KEY` in `server/.env`).
+- **Real handwriting for the demo:** export a billing backup to Downloads, then extract strokes
+  only into the gitignored `scripts/demo-ink.json`.

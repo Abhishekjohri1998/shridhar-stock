@@ -14,7 +14,7 @@ import {
 import { api } from '../../lib/api';
 import { useLoad, useSession } from '../../lib/session';
 
-export function StockPage() {
+export function StockPage({ readOnly = false }: { readOnly?: boolean }) {
   const { t, lang } = useSession();
   const [params, setParams] = useSearchParams();
   const onlyLow = params.get('low') === '1';
@@ -51,9 +51,11 @@ export function StockPage() {
           <input type="checkbox" checked={onlyLow} onChange={(e) => setParams(e.target.checked ? { low: '1' } : {})} />
           {t('stock.onlyLow')}
         </label>
-        <button className="btn" onClick={recount}>
-          {t('stock.recount')}
-        </button>
+        {!readOnly && (
+          <button className="btn" onClick={recount}>
+            {t('stock.recount')}
+          </button>
+        )}
       </div>
       {shown.length === 0 ? (
         <div className="card">{t('common.none')}</div>
@@ -73,7 +75,7 @@ export function StockPage() {
             <tbody>
               {shown.map((i) => (
                 <Fragment key={i.id}>
-                  <tr className="link" onClick={() => setOpen(open === i.id ? null : i.id)}>
+                  <tr className={readOnly ? '' : 'link'} onClick={() => !readOnly && setOpen(open === i.id ? null : i.id)}>
                     <td className="name">{pickName(i.nameEn, i.nameKn, lang)}</td>
                     {locs.map((l) => {
                       const v = qtyOf(i, l);

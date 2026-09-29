@@ -6,8 +6,7 @@
   "workspaces": [
     "core",
     "server",
-    "web",
-    "app"
+    "web"
   ],
   "scripts": {
     "build:core": "npm run build --workspace @stock/core",
@@ -19,7 +18,9 @@
     "unittest": "node scripts/unittest.js",
     "schematest": "node scripts/schematest.js",
     "apitest": "node scripts/apitest.js",
-    "test": "npm run typecheck && npm run unittest && npm run schematest && npm run apitest"
+    "test": "npm run typecheck && npm run unittest && npm run schematest && npm run apitest && npm run roletest",
+    "roletest": "node scripts/roletest.js",
+    "demo": "bash scripts/demo.sh"
   },
   "devDependencies": {
     "typescript": "^5.7.2"

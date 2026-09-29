@@ -205,6 +205,44 @@ check('every role has a home screen', C.ROLES.every((r) => typeof C.ROLE_HOME[r]
   check('Kannada keeps every {placeholder}', mismatched.length === 0, mismatched.join(', '));
 }
 
+// ---------------------------------------------------------------- refill trips
+{
+  const L = (id, kind) => ({ id, name: id, nameKn: '', kind, active: true });
+  const locs = [L('shop', 'shop'), L('g1', 'godown'), L('g2', 'godown')];
+  const it = (id, reorder) => ({ id, nameEn: id, nameKn: '', units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 1 }], aliases: [], racks: {}, reorderAt: { shop: reorder }, active: true, updatedAt: '' });
+  const items = [it('a', 10), it('b', 10), it('c', 10), it('d', 10), it('e', 10)];
+  const st = (itemId, locationId, qty) => ({ itemId, locationId, qty });
+  const stock = [
+    st('a', 'shop', 4), st('a', 'g1', 100), st('a', 'g2', 5),
+    st('b', 'shop', 2), st('b', 'g1', 3),
+    st('c', 'shop', 50), st('c', 'g1', 100),
+    st('d', 'shop', -2),
+    st('e', 'shop', 1), st('e', 'g2', 40),
+  ];
+  const r = C.proposeRefill(items, stock, locs);
+  const trip = (g) => r.trips.find((t) => t.from === g);
+  check('low items from one godown make one trip', trip('g1') && trip('g1').lines.map((l) => l.itemId).join() === 'a,b', JSON.stringify(r.trips));
+  check('the godown with the most is chosen', trip('g1').lines[0].itemId === 'a' && !trip('g2').lines.some((l) => l.itemId === 'a'));
+  check('topped up to twice the level', trip('g1').lines[0].qty === 16);
+  check('never more than the godown has', trip('g1').lines[1].qty === 3);
+  check('what is still short is to buy', r.buy.some((b) => b.itemId === 'b' && b.qty === 15));
+  check('an item no godown has is to buy, from below zero', r.buy.some((b) => b.itemId === 'd' && b.qty === 22));
+  check('an item that is not low is left alone', !r.trips.some((t) => t.lines.some((l) => l.itemId === 'c')));
+  check('the busiest trip comes first', r.trips[0].from === 'g1');
+  check('no shop, no trips', C.proposeRefill(items, stock, [L('g1', 'godown')]).trips.length === 0);
+}
+
+// ---------------------------------------------------------------- handwriting drawn on screen
+{
+  const ink = { w: 100, h: 40, strokes: [[10, 10, 20, 30, 40, 20], [50, 5], []] };
+  const d = C.inkPath(ink);
+  check('a stroke becomes a path', d.startsWith('M10 10L20 30L40 20'), d);
+  check('a single tap is still a visible dot', d.includes('M50 5l0.01 0'));
+  const b = C.inkBounds(ink);
+  check('the writing\'s box is found', b.minX === 10 && b.maxX === 50 && b.minY === 5 && b.maxY === 30, JSON.stringify(b));
+  check('empty ink is not writing', !C.hasInk({ w: 1, h: 1, strokes: [[]] }) && C.hasInk(ink));
+}
+
 // ---------------------------------------------------------------- posting and reconcile (server code, file store)
 async function ledger() {
   const out = path.join(__dirname, '..', '.test-build');

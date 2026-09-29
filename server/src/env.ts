@@ -25,6 +25,8 @@ export const env = {
   seedAdminPin: str('SEED_ADMIN_PIN', ''),
   seedAdminName: str('SEED_ADMIN_NAME', 'Admin'),
   isProduction: str('NODE_ENV', 'development') === 'production',
+  /** Demo mode: sample data, "log in as" any role, and the walkthrough. File store only. */
+  demo: str('DEMO', '') === '1',
 };
 
 export function warnAboutDefaults(): void {

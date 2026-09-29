@@ -7,7 +7,5 @@ dist/
 *.tsbuildinfo
 .test-build/
 .expo/
-app/android/
-app/ios/
-app/dist/
-app/dist-apk/
+scripts/demo-ink.json
+server/.data-demo/

@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Item, Location, StockLevel, StockMove } from '@stock/core';
-import { levelsFromMoves, type InvRepo, type MoveQuery, type PersonRecord } from './types';
+import { levelsFromMoves, type DocCollection, type InvRepo, type MoveQuery, type PersonRecord } from './types';
 
 interface Db {
   people: PersonRecord[];
@@ -9,9 +9,11 @@ interface Db {
   items: Item[];
   moves: StockMove[];
   stock: StockLevel[];
+  docs: Partial<Record<DocCollection, Record<string, unknown>>>;
+  counters: Record<string, number>;
 }
 
-const empty = (): Db => ({ people: [], locations: [], items: [], moves: [], stock: [] });
+const empty = (): Db => ({ people: [], locations: [], items: [], moves: [], stock: [], docs: {}, counters: {} });
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 /**
@@ -124,6 +126,27 @@ export async function createFileRepo(dir: string): Promise<InvRepo> {
     setStock: (itemId, locationId, qty) =>
       write(() => {
         stockRow(itemId, locationId).qty = qty;
+      }),
+
+    listDocs: <T>(col: DocCollection) => serial(() => clone(Object.values(db.docs[col] ?? {})) as T[]),
+    getDoc: <T>(col: DocCollection, id: string) => serial(() => clone((db.docs[col]?.[id] ?? null) as T | null)),
+    putDoc: (col, doc) =>
+      write(() => {
+        (db.docs[col] ??= {})[doc.id] = clone(doc);
+      }),
+    deleteDoc: (col, id) =>
+      write(() => {
+        delete db.docs[col]?.[id];
+      }),
+    nextNo: (series) =>
+      write(() => {
+        db.counters[series] = (db.counters[series] ?? 0) + 1;
+        return db.counters[series]!;
+      }),
+
+    eraseAll: () =>
+      write(() => {
+        db = empty();
       }),
 
     close: () => serial(() => undefined),

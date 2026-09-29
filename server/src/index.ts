@@ -4,8 +4,12 @@ import express, { Router } from 'express';
 import { env, warnAboutDefaults } from './env';
 import { errorMiddleware, handler } from './http';
 import { reconcile } from './posting';
+import { actionRoutes } from './routes/actions';
 import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
+import { demoRoutes } from './routes/demo';
+import { roleRoutes } from './routes/roles';
+import { seedDemo } from './demo/seed';
 import { ensureShop, seedAdmin } from './setup';
 import { getRepo, initRepo } from './store';
 
@@ -13,7 +17,14 @@ const RECONCILE_EVERY_MS = 5 * 60 * 1000;
 
 async function main(): Promise<void> {
   warnAboutDefaults();
+  if (env.demo && env.mongoUri) {
+    throw new Error('DEMO=1 with MONGO_URI set: demo mode only runs on the local file store, never a database.');
+  }
   const repo = await initRepo();
+  if (env.demo && (await repo.countPeople()) === 0) {
+    await seedDemo(repo);
+    console.log('[demo] sample data loaded');
+  }
   await ensureShop(repo);
   await seedAdmin(repo);
 
@@ -33,6 +44,9 @@ async function main(): Promise<void> {
   );
   api.use(authRoutes);
   api.use(adminRoutes);
+  api.use(roleRoutes);
+  api.use(actionRoutes);
+  if (env.demo) api.use(demoRoutes);
   api.use((_req, res) => {
     res.status(404).json({ error: 'No such address' });
   });

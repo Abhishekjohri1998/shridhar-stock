@@ -193,3 +193,55 @@ input[type='checkbox'] { width: auto; min-height: 0; }
   .hide-sm { display: none; }
   .page { padding: 10px; }
 }
+
+/* ---- role screens ------------------------------------------------------ */
+.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.banner { padding: 10px 14px; border-radius: var(--r-sm); margin-bottom: var(--gap); border: 1px solid var(--line); background: var(--paper-1); }
+.banner.ok { background: var(--brand-wash); border-color: var(--brand-edge); color: var(--brand-700); }
+.banner.warn { background: var(--gold-wash); border-color: var(--line-strong); color: var(--gold-600); font-weight: 600; }
+.banner.bad { background: var(--danger-wash); border-color: var(--danger-edge); color: var(--danger-600); }
+.pill.ok { background: var(--brand-wash); color: var(--brand-700); }
+.pill.info { background: var(--paper-2); color: var(--ink-700); border: 1px solid var(--line-strong); }
+.pill.muted { background: var(--paper-2); color: var(--ink-400); }
+.tabs { display: flex; gap: 4px; margin-bottom: var(--gap); overflow-x: auto; }
+.tab { flex: none; padding: 10px 14px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--paper-1); font-weight: 600; color: var(--ink-500); cursor: pointer; }
+.tab.on { background: var(--brand-wash); border-color: var(--brand-edge); color: var(--brand-700); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--paper-1); cursor: pointer; font-weight: 600; color: var(--ink-700); }
+.chip.on { background: var(--brand-wash); border-color: var(--brand-500); color: var(--brand-700); }
+.ink { color: var(--ink-900); vertical-align: middle; max-width: 100%; }
+.list.plain { box-shadow: none; background: transparent; margin-top: 6px; }
+.list.plain td, .list.plain th { padding: 6px 4px; }
+ul.lines { margin: 6px 0; padding-left: 18px; }
+ul.lines li { margin: 3px 0; }
+.tiles.roles { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+.role-card { text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 4px; font: inherit; }
+.role-card b { font-size: 1.2rem; }
+.story { padding: 0; list-style: none; counter-reset: step; }
+.story li { counter-increment: step; }
+.story li .pill::before { content: counter(step) '. '; }
+
+/* confirm cards */
+.confirm-ink { display: flex; align-items: center; justify-content: space-between; gap: var(--gap); padding: 12px; margin: 8px 0; background: var(--receipt); border: 1px dashed var(--line-strong); border-radius: var(--r-sm); flex-wrap: wrap; }
+.confirm-ink .typed { font-size: 1.15rem; color: var(--ink-900); }
+.confirm-price { color: var(--ink-700); }
+
+/* worker pick list */
+.rack { font-weight: 700; color: var(--brand-700); margin-bottom: 6px; }
+.pick { display: flex; align-items: center; gap: var(--gap); padding: 10px 0; border-top: 1px solid var(--line); }
+.pick:first-of-type { border-top: 0; }
+.pick.got { opacity: 0.55; }
+.pick .grow { flex: 1; min-width: 0; }
+.pick-name { font-size: 1.1rem; color: var(--ink-900); font-weight: 600; }
+.fetch { min-width: 92px; min-height: 52px; border-radius: var(--r-md); border: 2px solid var(--brand-500); background: var(--paper-1); color: var(--brand-700); font-weight: 700; font-size: 1rem; cursor: pointer; }
+.fetch.on { background: var(--brand-600); color: var(--paper-1); border-color: var(--brand-700); font-size: 1.4rem; display: inline-flex; align-items: center; justify-content: center; }
+.worker.screen .pick-name { font-size: 1.6rem; }
+.worker.screen .title { font-size: 2rem; }
+
+/* customer slip */
+.slip { background: var(--receipt); }
+.slip-line { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px dotted var(--line-strong); }
+.slip-line .grow { flex: 1; }
+.slip-total { display: flex; justify-content: space-between; padding-top: 8px; font-size: 1.1rem; color: var(--ink-900); }
+.item-row { display: flex; align-items: center; gap: var(--gap); }
+.item-row .grow { flex: 1; }

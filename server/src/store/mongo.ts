@@ -1,7 +1,7 @@
 import mongoose, { Schema } from 'mongoose';
 import type { Item, Location, StockLevel, StockMove } from '@stock/core';
 import { MOVE_KINDS, ROLES } from '@stock/core';
-import type { InvRepo, MoveQuery, PersonRecord } from './types';
+import { DOC_COLLECTIONS, type DocCollection, type InvRepo, type MoveQuery, type PersonRecord } from './types';
 
 /*
  * Schema style, as in the billing app: no __v, no _id on subdocuments, and an optional field is
@@ -108,7 +108,16 @@ const stockSchema = new Schema(
 );
 stockSchema.index({ itemId: 1, locationId: 1 }, { unique: true });
 
+/**
+ * Whole documents (bills from billing, transfers, orders...). Their shape is checked by the
+ * routes with zod before they are written, so the schema only insists on the id.
+ */
+const docSchema = new Schema({ id: { type: String, required: true, unique: true } }, { versionKey: false, strict: false, minimize: false });
+const counterSchema = new Schema({ series: { type: String, required: true, unique: true }, value: { type: Number, required: false, default: 0 } }, { versionKey: false });
+
 export const schemas = {
+  Docs: docSchema,
+  Counters: counterSchema,
   People: personSchema,
   Locations: locationSchema,
   Items: itemSchema,
@@ -133,7 +142,17 @@ export async function createMongoRepo(uri: string, dbName: string): Promise<InvR
   const Items = conn.model('Items', itemSchema, 'items');
   const Moves = conn.model('StockMoves', moveSchema, 'stockmoves');
   const Stock = conn.model('Stock', stockSchema, 'stock');
-  await Promise.all([People.syncIndexes(), Locations.syncIndexes(), Items.syncIndexes(), Moves.syncIndexes(), Stock.syncIndexes()]);
+  const Counters = conn.model('Counters', counterSchema, 'counters');
+  const Docs = Object.fromEntries(DOC_COLLECTIONS.map((c) => [c, conn.model("Doc_" + c, docSchema, c)])) as unknown as Record<DocCollection, mongoose.Model<{ id: string }>>;
+  await Promise.all([
+    People.syncIndexes(),
+    Locations.syncIndexes(),
+    Items.syncIndexes(),
+    Moves.syncIndexes(),
+    Stock.syncIndexes(),
+    Counters.syncIndexes(),
+    ...Object.values(Docs).map((m) => m.syncIndexes()),
+  ]);
 
   const isDuplicate = (err: unknown) => (err as { code?: number })?.code === 11000;
 
@@ -227,6 +246,22 @@ export async function createMongoRepo(uri: string, dbName: string): Promise<InvR
     },
     setStock: async (itemId, locationId, qty) => {
       await Stock.updateOne({ itemId, locationId }, { $set: { qty } }, { upsert: true });
+    },
+
+    listDocs: async <T>(col: DocCollection) => (await Docs[col].find().lean()).map((d) => strip<T>(d)),
+    getDoc: async <T>(col: DocCollection, id: string) => {
+      const d = await Docs[col].findOne({ id }).lean();
+      return d ? strip<T>(d) : null;
+    },
+    putDoc: async (col, doc) => {
+      await Docs[col].replaceOne({ id: doc.id }, doc, { upsert: true });
+    },
+    deleteDoc: async (col, id) => {
+      await Docs[col].deleteOne({ id });
+    },
+    nextNo: async (series) => {
+      const d = await Counters.findOneAndUpdate({ series }, { $inc: { value: 1 } }, { upsert: true, new: true }).lean();
+      return (d as unknown as { value: number }).value;
     },
 
     close: () => conn.close(),

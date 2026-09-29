@@ -10,7 +10,6 @@ core/     rules shared by the server, the website and the admin app: types, pric
           CSV, item checks, Kannada search, every string in English and Kannada
 server/   Express + MongoDB (its own database, "inventory") or a JSON file for tests
 web/      the website: /admin for the admin, and one screen per role for everyone else
-app/      the admin APK, "Shridhar Stock" (com.shridhar.stock), installed beside the billing app
 deploy/   putting it on the server beside billing (docs/deploy.md)
 scripts/  tests
 ```
@@ -29,15 +28,14 @@ setup never touches a database.
 For live reload while working on the website, run the scratch server, then `npm run dev:web`
 and open http://localhost:5174.
 
-## The admin APK
+## The walkthrough
 
 ```bash
-bash app/build-apk.sh
+bash scripts/demo.sh
 ```
 
-This builds a signed APK into `app/dist-apk/`. It has its own package and its own signing key (`C:/Users/hp/.keystores/shridhar-stock.*`, kept outside the repo), so it never updates over the billing app and the billing app never updates over it. **Back up that key.** Without it, no update can be installed over this app again.
-
-The app talks only to the stock server (`https://stock.3.111.82.220.sslip.io` by default, and the sign-in screen can change it). It has no code that reaches the billing server.
+Open http://localhost:4200/walkthrough, sign in as any role in one click, and follow "a day at
+the shop". It uses demo data in `server/.data-demo` only, and refuses to run against a database.
 
 ## Tests
 

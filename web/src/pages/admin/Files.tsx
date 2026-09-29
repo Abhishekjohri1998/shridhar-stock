@@ -4,7 +4,7 @@ import { useSession } from '../../lib/session';
 
 const today = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
 
-export function FilesPage() {
+export function FilesPage({ readOnly = false }: { readOnly?: boolean }) {
   const { t } = useSession();
   const [from, setFrom] = useState(today());
   const [to, setTo] = useState(today());
@@ -75,6 +75,7 @@ export function FilesPage() {
         </div>
       </div>
 
+      {!readOnly && (
       <div className="card">
         <h2 className="subtitle" style={{ marginTop: 0 }}>{t('files.import')}</h2>
         {done && <div className="msg ok">{done}</div>}
@@ -103,6 +104,7 @@ export function FilesPage() {
           </>
         )}
       </div>
+      )}
     </>
   );
 }

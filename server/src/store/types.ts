@@ -8,6 +8,13 @@ export interface PersonRecord extends Person {
   createdAt: string;
 }
 
+/**
+ * The kinds of record kept as whole documents, each with an `id`: bills read from billing,
+ * customers read from billing, and everything that moves stock between people.
+ */
+export const DOC_COLLECTIONS = ['bills', 'customers', 'transfers', 'suppliers', 'pos', 'deliveries', 'orders', 'meta'] as const;
+export type DocCollection = (typeof DOC_COLLECTIONS)[number];
+
 export interface MoveQuery {
   itemId?: string;
   locationId?: string;
@@ -48,6 +55,17 @@ export interface InvRepo {
   listStock(itemIds?: string[]): Promise<StockLevel[]>;
   incStock(itemId: string, locationId: string, delta: number): Promise<void>;
   setStock(itemId: string, locationId: string, qty: number): Promise<void>;
+
+  listDocs<T extends { id: string }>(col: DocCollection): Promise<T[]>;
+  getDoc<T extends { id: string }>(col: DocCollection, id: string): Promise<T | null>;
+  /** Adds or replaces the whole document. */
+  putDoc<T extends { id: string }>(col: DocCollection, doc: T): Promise<void>;
+  deleteDoc(col: DocCollection, id: string): Promise<void>;
+  /** The next number in a series (transfers, purchase orders), starting at 1. */
+  nextNo(series: string): Promise<number>;
+
+  /** Demo only, and only on the file store: empties everything. The Mongo store has none. */
+  eraseAll?(): Promise<void>;
 
   close(): Promise<void>;
 }

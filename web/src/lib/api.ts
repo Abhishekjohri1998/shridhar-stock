@@ -93,7 +93,16 @@ export interface ImportReport {
   applied: boolean;
 }
 
+/** For the role screens: plain reads and posts against the API. */
+export const http = {
+  get: <T>(path: string) => request<T>(path),
+  post: <T>(path: string, body: unknown) => request<T>(path, send('POST', body)),
+};
+
 export const api = {
+  demoPeople: () => request<{ role: Role; name: string; phone: string }[]>('/demo/people'),
+  loginAs: (role: Role) => request<{ token: string; person: Person }>('/demo/login-as', send('POST', { role })),
+  resetDemo: () => request<{ ok: true }>('/demo/reset', { method: 'POST' }),
   login: (phone: string, pin: string) => request<{ token: string; person: Person }>('/auth/login', send('POST', { phone, pin })),
   me: () => request<Person>('/me'),
   changePin: (oldPin: string, newPin: string) => request<{ ok: true }>('/auth/pin', send('POST', { oldPin, newPin })),
