@@ -114,6 +114,47 @@ actionRoutes.post(
   }),
 );
 
+actionRoutes.post(
+  '/admin/reader/run',
+  admin,
+  handler(async (_req, res) => {
+    const { pickReader, readPending } = await import('../reader');
+    res.json(await readPending(getRepo(), pickReader().fn));
+  }),
+);
+
+/** Writing done on this website, read into an item: "write instead of type". */
+const readsByPerson = new Map<string, number[]>();
+const READS_PER_HOUR = 60;
+
+actionRoutes.post(
+  '/read',
+  requireRole('admin', 'godown', 'customer'),
+  handler(async (req, res) => {
+    const { ink } = z.object({ ink: inkBody.unwrap() }).parse(req.body);
+    const { pickReader } = await import('../reader');
+    const reader = pickReader();
+    if (!reader.fn) throw new HttpError(503, 'Handwriting reading is not switched on. Type the name instead.');
+    const now = Date.now();
+    const recent = (readsByPerson.get(req.person!.id) ?? []).filter((t) => now - t < 3600_000);
+    if (recent.length >= READS_PER_HOUR) throw new HttpError(429, 'Too many readings this hour. Type the name instead.');
+    readsByPerson.set(req.person!.id, [...recent, now]);
+    const items = (await getRepo().listItems()).filter((i) => i.active);
+    const r = await reader.fn(ink as Ink, { items, qty: 1, rate: 0, examples: '' });
+    if (!r.reading) throw new HttpError(422, 'Could not read that. Try writing it again, larger.');
+    const known = new Set(items.map((i) => i.id));
+    res.json({
+      readText: r.reading.readText,
+      matches: [
+        ...(r.reading.itemId && known.has(r.reading.itemId) ? [{ itemId: r.reading.itemId, confidence: r.reading.confidence }] : []),
+        ...r.reading.alternatives.filter((a) => known.has(a.itemId)),
+      ].slice(0, 4),
+      unit: r.reading.unit,
+      qty: r.reading.qty,
+    });
+  }),
+);
+
 // ---------------------------------------------------------------- transfers
 
 const transferLines = z.array(z.object({ itemId: z.string(), qty: z.number().positive().max(1e6) })).min(1).max(100);

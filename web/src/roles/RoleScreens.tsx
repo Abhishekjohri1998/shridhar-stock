@@ -4,6 +4,7 @@ import { http } from '../lib/api';
 import { useLoad, useSession } from '../lib/session';
 import { statusWord } from '../lib/words';
 import { Empty, InkView, Loading, Money, Status, Tabs, useBi, when } from '../components/ui';
+import { WriteToFind, type WrittenResult } from '../components/WriteToFind';
 import type { Summary } from './admin/Home';
 
 /** Screens refresh on their own every few seconds; the live stream replaces this in W4. */
@@ -526,13 +527,19 @@ export function CustomerHome() {
   const [cart, setCart] = useState<Record<string, { unit: string; qty: number }>>({});
   const [note, setNote] = useState('');
   const [sent, setSent] = useState('');
+  const [written, setWritten] = useState<WrittenResult[]>([]);
   const items = cat.value ?? [];
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
 
   const placeOrder = async () => {
-    const lines = Object.entries(cart).map(([itemId, v]) => ({ itemId, unit: v.unit, qty: v.qty }));
+    const lines = [
+      ...Object.entries(cart).map(([itemId, v]) => ({ itemId, unit: v.unit, qty: v.qty })),
+      // A written line goes as the writing itself, what it was read as, and the item when sure.
+      ...written.map((w) => ({ ink: w.ink, ...(w.readText ? { text: w.readText } : {}), ...(w.matches[0] && w.matches[0].confidence >= 0.85 ? { itemId: w.matches[0].itemId } : {}), ...(w.qty ? { qty: w.qty } : {}), ...(w.unit ? { unit: w.unit } : {}) })),
+    ];
     await http.post('/customer/orders', { lines, ...(note ? { note } : {}) });
     setCart({});
+    setWritten([]);
     setNote('');
     setSent(bi('Sent to the shop. You will see it here when it is billed.', 'ಅಂಗಡಿಗೆ ಕಳುಹಿಸಲಾಗಿದೆ. ಬಿಲ್ ಆದಾಗ ಇಲ್ಲಿ ಕಾಣುತ್ತದೆ.'));
     setVersion((v) => v + 1);
@@ -612,14 +619,26 @@ export function CustomerHome() {
       {tab === 'order' && (
         <>
           {sent && <div className="msg ok">{sent}</div>}
-          {Object.keys(cart).length === 0 ? (
+          <div className="bar" style={{ marginBottom: 10 }}>
+            <WriteToFind label={bi('Write a line by hand', 'ಕೈಯಿಂದ ಬರೆಯಿರಿ')} onResult={(r) => setWritten((w) => [...w, r])} />
+          </div>
+          {written.map((w, i) => (
+            <div className="card bar" key={i}>
+              <InkView ink={w.ink} height={30} />
+              <span className="grow muted">{w.readText}</span>
+              <button className="btn ghost small" onClick={() => setWritten(written.filter((_, j) => j !== i))}>
+                ✕
+              </button>
+            </div>
+          ))}
+          {Object.keys(cart).length === 0 && written.length === 0 ? (
             <Empty>{bi('Add items from “Shop items”.', '“ಅಂಗಡಿ ಸಾಮಾನು” ನಿಂದ ಸೇರಿಸಿ.')}</Empty>
           ) : (
             <div className="card">
               {Object.entries(cart).map(([id, v]) => {
                 const it = byId.get(id);
                 return (
-                  <div className="bar" key={id}>
+                  <div className="bar" key={id} style={{ marginBottom: 6 }}>
                     <span className="grow name">{it ? pickName(it.nameEn, it.nameKn, lang) : id}</span>
                     <select value={v.unit} onChange={(e) => setCart({ ...cart, [id]: { ...v, unit: e.target.value } })} style={{ width: 'auto' }}>
                       {it?.units.map((u) => (

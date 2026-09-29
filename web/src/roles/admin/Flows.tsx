@@ -412,6 +412,20 @@ export function SettingsPage() {
           </p>
         )}
         <p className="muted">{value?.reader?.message ?? ''}</p>
+        <button
+          className="btn"
+          onClick={async () => {
+            try {
+              const r = await http.post<{ read: number; auto: number; queued: number; skipped: string | null }>('/admin/reader/run', {});
+              setSyncMsg(r.skipped === 'no-reader' ? bi('No reader key set on the server.', 'ಸರ್ವರ್‌ನಲ್ಲಿ ಕೀ ಇಲ್ಲ.') : bi('Read ', 'ಓದಿದ್ದು ') + r.read + ' · ' + bi('by themselves ', 'ತಾನಾಗಿ ') + r.auto + ' · ' + bi('to confirm ', 'ಖಚಿತಪಡಿಸಬೇಕು ') + r.queued);
+            } catch (e) {
+              setSyncMsg((e as Error).message);
+            }
+            setVersion((v) => v + 1);
+          }}
+        >
+          ✎ {bi('Read waiting handwriting now', 'ಬಾಕಿ ಕೈಬರಹ ಈಗ ಓದಿ')}
+        </button>
       </div>
     </>
   );

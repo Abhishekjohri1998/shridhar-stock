@@ -4,6 +4,7 @@ import { http } from '../../lib/api';
 import { itemName, useCatalog } from '../../lib/catalog';
 import { useLoad, useSession } from '../../lib/session';
 import { Empty, InkView, Loading, useBi, when } from '../../components/ui';
+import { WriteToFind } from '../../components/WriteToFind';
 
 interface Pending {
   billNo: number;
@@ -137,7 +138,10 @@ function ConfirmCard({ p, items, onDone }: { p: Pending; items: Map<string, Item
           ))}
         </div>
       )}
-      <input placeholder={bi('Or search another item…', 'ಅಥವಾ ಬೇರೆ ಸಾಮಾನು ಹುಡುಕಿ…')} value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="bar">
+        <input className="grow" placeholder={bi('Or search another item…', 'ಅಥವಾ ಬೇರೆ ಸಾಮಾನು ಹುಡುಕಿ…')} value={q} onChange={(e) => setQ(e.target.value)} />
+        <WriteToFind onResult={(r) => r.matches[0] && pick(r.matches[0].itemId)} />
+      </div>
       {found.length > 0 && (
         <div className="chips" style={{ marginTop: 6 }}>
           {found.map((i) => (

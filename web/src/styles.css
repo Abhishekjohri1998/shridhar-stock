@@ -245,3 +245,7 @@ ul.lines li { margin: 3px 0; }
 .slip-total { display: flex; justify-content: space-between; padding-top: 8px; font-size: 1.1rem; color: var(--ink-900); }
 .item-row { display: flex; align-items: center; gap: var(--gap); }
 .item-row .grow { flex: 1; }
+
+/* the writing strip, when opened inside a row, takes the whole row */
+.bar > .card { flex-basis: 100%; }
+.inkpad canvas { display: block; background: var(--paper-1); border: 1px dashed var(--line-strong); border-radius: var(--r-sm); color: var(--ink-900); max-width: 100%; }

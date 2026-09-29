@@ -67,10 +67,18 @@ async function main() {
   await new Promise((r) => fake.listen(0, r));
   const billingUrl = 'http://localhost:' + fake.address().port;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-link-'));
+  // A stand-in for the handwriting reader: fixed answers by ink, no API calls.
+  const { inkHash } = require(path.join(out, 'reader', 'render.js'));
+  const penInk = { w: 200, h: 60, strokes: [[5, 5, 40, 40]] };
+  const fakeFile = path.join(dir, 'readings.json');
+  fs.writeFileSync(fakeFile, JSON.stringify({
+    [inkHash(ink)]: { readText: 'ಸಕ್ಕರೆ', itemId: 'ITEM_SUGAR', unit: 'kg', qty: 1, confidence: 0.97, alternatives: [] },
+    [inkHash(penInk)]: { readText: 'parle', itemId: 'ITEM_PARLE', unit: null, qty: null, confidence: 0.9, alternatives: [] },
+  }));
   const port = 4600 + Math.floor(Math.random() * 300);
   const base = 'http://localhost:' + port;
   const proc = spawn(process.execPath, [path.join(out, 'index.js')], {
-    env: { ...process.env, MONGO_URI: '', DEMO: '', PORT: String(port), DATA_DIR: dir, JWT_SECRET: 'linktest', SEED_ADMIN_PHONE: '9000000001', SEED_ADMIN_PIN: '4821', BILLING_URL: billingUrl, BILLING_PIN: PIN, BILLING_EVERY_MS: '600000' },
+    env: { ...process.env, MONGO_URI: '', DEMO: '', PORT: String(port), DATA_DIR: dir, JWT_SECRET: 'linktest', SEED_ADMIN_PHONE: '9000000001', SEED_ADMIN_PIN: '4821', BILLING_URL: billingUrl, BILLING_PIN: PIN, BILLING_EVERY_MS: '600000', READER_FAKE: fakeFile },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let log = '';
@@ -96,6 +104,8 @@ async function main() {
     const mk = (b) => call('/items', b);
     const sugar = (await mk({ nameEn: 'Sugar', nameKn: 'ಸಕ್ಕರೆ', units: [{ code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price: 46 }], aliases: [], racks: {}, reorderAt: {} })).body;
     const parle = (await mk({ nameEn: 'Parle-G', nameKn: '', units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 5 }, { code: 'pack', label: 'Pack', labelKn: '', perBase: 24, price: 110 }], aliases: [{ text: 'parle pack', unit: 'pack' }], racks: {}, reorderAt: {} })).body;
+    // Point the stand-in's answers at the real item ids, now they exist.
+    fs.writeFileSync(fakeFile, fs.readFileSync(fakeFile, 'utf8').replace('ITEM_SUGAR', sugar.id).replace('ITEM_PARLE', parle.id));
     await call('/stock/open', { itemId: sugar.id, locationId: 'loc_shop', qty: 100 });
     await call('/stock/open', { itemId: parle.id, locationId: 'loc_shop', qty: 480 });
     const qty = async (id) => ((await call('/stock')).body.find((s) => s.itemId === id && s.locationId === 'loc_shop') ?? { qty: 0 }).qty;
@@ -111,7 +121,9 @@ async function main() {
 
     const bills = (await call('/admin/bills')).body;
     const b1 = bills.find((b) => b.no === 1);
-    eq('the handwritten line waits for a person', b1.lines[1].state, 'to-confirm');
+    // Read as ಸಕ್ಕರೆ with 97% confidence, but billed at ₹90 against sugar's ₹46: it asks.
+    eq('the handwritten line is read but waits: the price does not fit', b1.lines[1].state, 'to-confirm');
+    check('with the reading ready for a one-tap confirm', b1.lines[1].reading && b1.lines[1].reading.readText === 'ಸಕ್ಕರೆ' && b1.lines[1].reading.itemId === sugar.id, JSON.stringify(b1.lines[1].reading));
     check('with its ink', b1.lines[1].ink && b1.lines[1].ink.strokes.length === 1);
     eq('a name no item has waits too', b1.lines[2].state, 'to-confirm');
     eq('a price with nothing written is not stock', b1.lines[3].state, 'not-item');
@@ -156,6 +168,13 @@ async function main() {
     const down = (await call('/admin/summary')).body.link;
     check('the link shows as down with the reason', down.ok === false && down.message && down.lastOkAt, JSON.stringify(down));
     eq('the rest of stock still works', (await call('/stock')).status, 200);
+
+    // Writing on the website is read by the same reader.
+    // (billing is gone by now; the reader does not need it.)
+    const read = await call('/read', { ink: penInk });
+    eq('writing on the website is read', read.status, 200);
+    check('into the item it is', read.body.readText === 'parle' && read.body.matches[0].itemId === parle.id, JSON.stringify(read.body));
+    eq('writing it cannot read gives a clear answer', (await call('/read', { ink: { w: 10, h: 10, strokes: [[1, 1, 2, 2]] } })).status, 422);
 
     // The client module cannot write.
     const { billingClient } = require(path.join(out, 'billing', 'client.js'));

@@ -32,6 +32,14 @@ export const env = {
   billingUrl: str('BILLING_URL', ''),
   billingPin: str('BILLING_PIN', ''),
   billingEveryMs: Number(str('BILLING_EVERY_MS', '15000')),
+  /**
+   * The handwriting reader. The key is the owner's own, set in server/.env only. Without it every
+   * handwritten line waits for a person. READER_FAKE is for the tests: a file of fixed readings.
+   */
+  anthropicKey: str('ANTHROPIC_API_KEY', ''),
+  readerFake: str('READER_FAKE', ''),
+  readerCapRupees: Number(str('READER_CAP_RUPEES', '500')),
+  rupeesPerDollar: Number(str('RUPEES_PER_DOLLAR', '86')),
   /** Demo mode: sample data, "log in as" any role, and the walkthrough. File store only. */
   demo: str('DEMO', '') === '1',
 };

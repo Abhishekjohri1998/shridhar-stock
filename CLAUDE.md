@@ -49,7 +49,8 @@ waits for the client's explicit yes. That covers:
 - **W1 done:** every role's screens working on demo data. Run `bash scripts/demo.sh` and open
   http://localhost:4200/walkthrough (demo PIN 1111; file store only, refuses a database).
 - **W2 done:** the read-only billing link (`server/src/billing/`), `npm run linktest`; `scripts/demo.sh` runs a scratch billing server beside the demo.
-- **Next:** W3, the Claude handwriting reader (needs the
-  owner's `ANTHROPIC_API_KEY` in `server/.env`).
+- **W3 done:** the handwriting reader (`server/src/reader/`, `npm run readertest`). Real reading needs the
+  owner's `ANTHROPIC_API_KEY` in `server/.env`; without it lines wait for a person.
+- **Next:** W4, the live stream and worker screen; the paid reader eval on real shop handwriting when the owner says.
 - **Real handwriting for the demo:** export a billing backup to Downloads, then extract strokes
   only into the gitignored `scripts/demo-ink.json`.
