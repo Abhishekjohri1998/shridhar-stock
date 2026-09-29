@@ -347,7 +347,13 @@ roleRoutes.get(
         paid: b.paid,
         balance: b.balance,
         cancelled: !!b.cancelled,
-        lines: b.lines.map((l) => ({ name: l.name, ink: l.ink, qty: l.qty, amount: l.amount })),
+        lines: b.lines.map((l) => ({
+          name: l.name,
+          ink: l.ink,
+          qty: l.qty,
+          amount: l.amount,
+          ...(l.itemId && l.state !== 'to-confirm' && l.state !== 'not-item' ? { itemId: l.itemId, unit: l.unit } : {}),
+        })),
       })),
     });
   }),

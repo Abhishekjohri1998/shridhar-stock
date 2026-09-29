@@ -501,7 +501,7 @@ interface CBill {
   paid: number;
   balance: number;
   cancelled: boolean;
-  lines: { name: string; ink?: Ink; qty: number; amount: number }[];
+  lines: { name: string; ink?: Ink; qty: number; amount: number; itemId?: string; unit?: string }[];
 }
 interface CItem {
   id: string;
@@ -526,6 +526,7 @@ export function CustomerHome() {
   const [note, setNote] = useState('');
   const [sent, setSent] = useState('');
   const [written, setWritten] = useState<WrittenResult[]>([]);
+  const [cat2, setCat2] = useState('');
   const items = cat.value ?? [];
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
 
@@ -580,6 +581,22 @@ export function CustomerHome() {
                 <span>{bi('Total', 'ಒಟ್ಟು')}</span>
                 <b className="num">{formatRupees(b.total)}</b>
               </div>
+              {b.lines.some((l) => l.itemId && byId.get(l.itemId)?.available) && (
+                <button
+                  className="btn small"
+                  style={{ marginTop: 8 }}
+                  onClick={() => {
+                    const next = { ...cart };
+                    for (const l of b.lines) {
+                      if (l.itemId && l.unit && byId.get(l.itemId)?.available) next[l.itemId] = { unit: l.unit, qty: (next[l.itemId]?.qty ?? 0) + l.qty };
+                    }
+                    setCart(next);
+                    setTab('order');
+                  }}
+                >
+                  ↻ {bi('Order these again', 'ಇವನ್ನೇ ಮತ್ತೆ ಆರ್ಡರ್ ಮಾಡಿ')}
+                </button>
+              )}
               {b.balance > 0 && (
                 <div className="muted">
                   {bi('Paid', 'ಪಾವತಿ')} {formatRupees(b.paid)} · {bi('Balance', 'ಬಾಕಿ')} {formatRupees(b.balance)}
@@ -593,8 +610,17 @@ export function CustomerHome() {
       {tab === 'items' && (
         <>
           <input placeholder={bi('Search in Kannada or English', 'ಕನ್ನಡ ಅಥವಾ ಇಂಗ್ಲಿಷ್‌ನಲ್ಲಿ ಹುಡುಕಿ')} value={q} onChange={(e) => setQ(e.target.value)} style={{ marginBottom: 10 }} />
+          {!q.trim() && (
+            <div className="chips" style={{ marginBottom: 10 }}>
+              {[...new Set(items.map((i) => i.category).filter(Boolean))].sort().map((c) => (
+                <button key={c} className={'chip ' + (cat2 === c ? 'on' : '')} onClick={() => setCat2(cat2 === c ? '' : c)}>
+                  {c}
+                </button>
+              ))}
+            </div>
+          )}
           {items
-            .filter((i) => !q.trim() || itemMatches(i, q))
+            .filter((i) => (!q.trim() || itemMatches(i, q)) && (q.trim() || !cat2 || i.category === cat2))
             .map((i) => (
               <div className="card item-row" key={i.id}>
                 <div className="grow">

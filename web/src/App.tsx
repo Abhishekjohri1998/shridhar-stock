@@ -9,6 +9,7 @@ import { AdminHome } from './roles/admin/Home';
 import { ConfirmPage } from './roles/admin/Confirm';
 import { BillsPage, RequestsPage, SettingsPage } from './roles/admin/Flows';
 import { DeliveriesPage } from './roles/admin/Deliver';
+import { ReportsPage } from './roles/Reports';
 import { PurchasesPage } from './roles/admin/Buying';
 import { RefillPage, TransfersPage } from './roles/admin/Moving';
 import { CustomerHome, DeliveryHome, GodownHome, OwnerHome, VendorHome, WorkerHome } from './roles/RoleScreens';
@@ -31,6 +32,7 @@ const NAV: Record<Role, [string, string, string][]> = {
     ['/admin/purchases', 'Purchases', 'ಖರೀದಿ'],
     ['/admin/deliveries', 'Deliveries', 'ಡೆಲಿವರಿ'],
     ['/admin/requests', 'Requests', 'ಬೇಡಿಕೆ'],
+    ['/admin/reports', 'Reports', 'ವರದಿ'],
     ['/admin/items', 'Items', 'ಸಾಮಾನು'],
     ['/admin/places', 'Places', 'ಸ್ಥಳಗಳು'],
     ['/admin/people', 'People', 'ಜನರು'],
@@ -40,6 +42,7 @@ const NAV: Record<Role, [string, string, string][]> = {
   owner: [
     ['/owner', 'Overview', 'ಸಾರಾಂಶ'],
     ['/owner/bills', 'Bills', 'ಬಿಲ್‌ಗಳು'],
+    ['/owner/reports', 'Reports', 'ವರದಿ'],
     ['/owner/stock', 'Stock', 'ಸ್ಟಾಕ್'],
     ['/owner/files', 'Excel', 'ಎಕ್ಸೆಲ್'],
   ],
@@ -150,6 +153,7 @@ export function App() {
               <Route path="/admin/deliveries" element={<DeliveriesPage />} />
               <Route path="/admin/requests" element={<RequestsPage />} />
               <Route path="/admin/settings" element={<SettingsPage />} />
+              <Route path="/admin/reports" element={<ReportsPage />} />
               <Route path="/admin/items" element={<ItemsPage />} />
               <Route path="/admin/items/new" element={<ItemEditor />} />
               <Route path="/admin/items/:id" element={<ItemEditor />} />
@@ -163,6 +167,7 @@ export function App() {
             <>
               <Route path="/owner" element={<OwnerHome />} />
               <Route path="/owner/bills" element={<BillsPage />} />
+              <Route path="/owner/reports" element={<ReportsPage />} />
               <Route path="/owner/stock" element={<StockPage readOnly />} />
               <Route path="/owner/files" element={<FilesPage readOnly />} />
             </>

@@ -92,6 +92,31 @@ async function main() {
     check('the worker sees today\'s bills, newest first', worker.length === 4 && worker[0].no === 54);
     check('lines carry their rack', worker[0].lines.some((l) => l.rack === 'Rack 5'));
 
+    // ---- reports
+    const rep = await call('/reports', T.owner);
+    eq('the owner reads reports', rep.status, 200);
+    eq('a worker cannot', (await call('/reports', T.worker)).status, 403);
+    eq('a customer cannot', (await call('/reports', T.customer)).status, 403);
+    const S = rep.body.sales;
+    const billsNow = (await call('/admin/bills', T.admin)).body;
+    const takings = Math.round(billsNow.filter((b) => !b.cancelled).reduce((a, b) => a + b.total, 0) * 100) / 100;
+    eq('takings add up to the bills', S.total, takings);
+    eq('linked + not linked + not stock = takings', Math.round((S.linked + S.unlinked + S.notStock) * 100) / 100, S.total);
+    check('handwriting still to confirm shows as not linked', S.unlinked > 0 && S.unlinkedLines === 4, JSON.stringify({ u: S.unlinked, n: S.unlinkedLines }));
+    const rice = S.rows.find((r) => r.itemId === 'it_rice');
+    const riceLedger = (await call('/items/it_rice/moves?limit=200', T.admin)).body.filter((m) => m.kind === 'sale').reduce((a, m) => a + m.qty, 0);
+    eq('rice sold agrees with the ledger', rice.baseQty, riceLedger);
+    check('best sellers first', S.rows.every((r, i) => i === 0 || S.rows[i - 1].amount >= r.amount));
+    check('stock value adds up across places', Math.abs(rep.body.value.places.reduce((a, p) => a + p.value, 0) - rep.body.value.total) < 0.01);
+    check('fast movers have sold something', rep.body.movers.fast.every((x) => x.sold > 0));
+    check('a quiet day is a bad date range', (await call('/reports?from=2026-01-10&to=2026-01-01', T.owner)).status === 400);
+    const csvRes = await fetch(base + '/api/reports/sales.csv', { headers: { Authorization: 'Bearer ' + T.owner } });
+    const csvText = new TextDecoder('utf-8', { ignoreBOM: true }).decode(await csvRes.arrayBuffer());
+    check('the sales report downloads for Excel', csvRes.status === 200 && csvText.charCodeAt(0) === 0xfeff && csvText.includes('Not yet linked'));
+    const cbill = (await call('/customer/bills', T.customer)).body.bills.find((b) => b.no === 52);
+    check('a customer\'s bill says which item each line was, for ordering again', cbill.lines.some((l) => l.itemId === 'it_goil' && l.unit === 'l'));
+    check('but never a cost', !JSON.stringify(cbill).includes('cost'));
+
     // ---- confirming a handwritten line moves stock once and learns the name
     const shopQty = async (itemId) => ((await call('/stock', T.admin)).body.find((s) => s.itemId === itemId && s.locationId === 'loc_shop') ?? { qty: 0 }).qty;
     const coffee0 = await shopQty('it_coffee');
