@@ -30,8 +30,17 @@ export function InkView({ ink, height = 40, className }: { ink: Ink; height?: nu
   );
 }
 
+/**
+ * Money as the shop reads it: Indian grouping (₹1,83,106), and whole rupees once it is in the
+ * thousands, where paise are noise on a summary. Bills and slips keep their exact amounts.
+ */
+export function inr(v: number): string {
+  const big = Math.abs(v) >= 1000;
+  return '₹' + v.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: big ? 0 : 2 });
+}
+
 export function Money({ v }: { v: number }) {
-  return <span className="num">{formatRupees(v)}</span>;
+  return <span className="num">{inr(v)}</span>;
 }
 
 export function when(iso: string, lang: Lang): string {
