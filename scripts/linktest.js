@@ -106,6 +106,9 @@ async function main() {
     const parle = (await mk({ nameEn: 'Parle-G', nameKn: '', units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 5 }, { code: 'pack', label: 'Pack', labelKn: '', perBase: 24, price: 110 }], aliases: [{ text: 'parle pack', unit: 'pack' }], racks: {}, reorderAt: {} })).body;
     // Point the stand-in's answers at the real item ids, now they exist.
     fs.writeFileSync(fakeFile, fs.readFileSync(fakeFile, 'utf8').replace('ITEM_SUGAR', sugar.id).replace('ITEM_PARLE', parle.id));
+    // The server may have read the line in between; changing an item makes it read it again,
+    // as it would when the shop adds a missing item.
+    await fetch(base + '/api/items/' + sugar.id, { method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ nameEn: 'Sugar', nameKn: 'ಸಕ್ಕರೆ', units: [{ code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price: 46 }], aliases: [], racks: {}, reorderAt: {} }) });
     await call('/stock/open', { itemId: sugar.id, locationId: 'loc_shop', qty: 100 });
     await call('/stock/open', { itemId: parle.id, locationId: 'loc_shop', qty: 480 });
     const qty = async (id) => ((await call('/stock')).body.find((s) => s.itemId === id && s.locationId === 'loc_shop') ?? { qty: 0 }).qty;
