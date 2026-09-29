@@ -170,7 +170,10 @@ actionRoutes.post(
     const body = z.object({ from: z.string(), to: z.string(), lines: transferLines, note: z.string().max(200).optional() }).parse(req.body);
     const repo = getRepo();
     const locs = await repo.listLocations();
-    if (!locs.some((l) => l.id === body.from) || !locs.some((l) => l.id === body.to) || body.from === body.to) throw new HttpError(400, 'Choose two different places');
+    if (!locs.some((l) => l.id === body.from && l.active) || !locs.some((l) => l.id === body.to && l.active) || body.from === body.to) throw new HttpError(400, 'Choose two different places');
+    const known = new Set((await repo.listItems()).map((i) => i.id));
+    if (body.lines.some((l) => !known.has(l.itemId))) throw new HttpError(400, 'An item on this transfer does not exist');
+    if (new Set(body.lines.map((l) => l.itemId)).size !== body.lines.length) throw new HttpError(400, 'An item is on this transfer twice');
     const no = await repo.nextNo('transfer');
     const t: Transfer = { id: 'tr_' + no, no, from: body.from, to: body.to, lines: body.lines, status: 'requested', at: now(), times: { requested: now() }, ...(body.note ? { note: body.note } : {}) };
     await repo.putDoc('transfers', t);
@@ -194,6 +197,20 @@ function mayAct(req: import('express').Request, place: string) {
 }
 
 actionRoutes.post(
+  '/transfers/:id/cancel',
+  admin,
+  handler(async (req, res) => {
+    const t = await loadTransfer(String(req.params.id));
+    if (t.status !== 'requested') throw new HttpError(409, t.status === 'sent' ? 'It is already on the way: receive it, with what actually arrives' : 'Already ' + t.status);
+    t.status = 'cancelled';
+    t.times.cancelled = now();
+    await getRepo().putDoc('transfers', t);
+    emit('transfers', { locationIds: [t.from, t.to] }, t.id);
+    res.json(t);
+  }),
+);
+
+actionRoutes.post(
   '/transfers/:id/send',
   requireRole('admin', 'godown'),
   handler(async (req, res) => {
@@ -203,6 +220,11 @@ actionRoutes.post(
     const t = await loadTransfer(String(req.params.id));
     mayAct(req, t.from);
     if (t.status !== 'requested') throw new HttpError(409, 'Already ' + t.status);
+    for (const l of t.lines) {
+      const v = body.sent?.[l.itemId];
+      if (v != null && v > l.qty) throw new HttpError(400, 'Cannot send more than was asked for. Ask the shop to change the request.');
+    }
+    if (t.lines.every((l) => (body.sent?.[l.itemId] ?? l.qty) === 0)) throw new HttpError(400, 'Nothing is being sent. Cancel the request instead.');
     t.lines = t.lines.map((l) => ({ ...l, sent: body.sent?.[l.itemId] ?? l.qty }));
     t.status = 'sent';
     t.times.sent = now();
@@ -226,6 +248,10 @@ actionRoutes.post(
     const t = await loadTransfer(String(req.params.id));
     mayAct(req, t.to);
     if (t.status !== 'sent') throw new HttpError(409, t.status === 'requested' ? 'Not sent yet' : 'Already ' + t.status);
+    for (const l of t.lines) {
+      const v = body.received?.[l.itemId];
+      if (v != null && v > (l.sent ?? l.qty)) throw new HttpError(400, 'More received than was sent: count again, or record the extra as a correction.');
+    }
     t.lines = t.lines.map((l) => ({ ...l, received: body.received?.[l.itemId] ?? l.sent ?? l.qty }));
     t.status = 'received';
     t.times.received = now();

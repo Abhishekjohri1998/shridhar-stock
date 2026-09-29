@@ -117,6 +117,34 @@ async function main() {
     const t3 = (await call('/admin/transfers', T.admin)).body.find((t) => t.id === 'tr_3');
     check('the transfer records asked, sent and received', t3.lines.find((l) => l.itemId === 'it_clinic').qty === 128 && t3.lines.find((l) => l.itemId === 'it_clinic').sent === 120);
 
+    // ---- transfer rules
+    const gq = async (itemId, loc) => ((await call('/stock', T.admin)).body.find((x) => x.itemId === itemId && x.locationId === loc) ?? { qty: 0 }).qty;
+    const g2g = await call('/admin/transfers', T.admin, { from: 'loc_g1', to: 'loc_g2', lines: [{ itemId: 'it_rice', qty: 25 }] });
+    eq('a transfer between two godowns can be asked for', g2g.status, 201);
+    eq('the same place twice is refused', (await call('/admin/transfers', T.admin, { from: 'loc_g1', to: 'loc_g1', lines: [{ itemId: 'it_rice', qty: 1 }] })).status, 400);
+    eq('an item that does not exist is refused', (await call('/admin/transfers', T.admin, { from: 'loc_g1', to: 'loc_shop', lines: [{ itemId: 'it_nope', qty: 1 }] })).status, 400);
+    eq('an item twice is refused', (await call('/admin/transfers', T.admin, { from: 'loc_g1', to: 'loc_shop', lines: [{ itemId: 'it_rice', qty: 1 }, { itemId: 'it_rice', qty: 2 }] })).status, 400);
+    eq('a godown cannot ask for transfers', (await call('/admin/transfers', T.godown, { from: 'loc_g1', to: 'loc_shop', lines: [{ itemId: 'it_rice', qty: 1 }] })).status, 403);
+    const id = g2g.body.id;
+    eq('sending more than was asked for is refused', (await call('/transfers/' + id + '/send', T.godown, { sent: { it_rice: 30 } })).status, 400);
+    eq('sending nothing is refused (cancel instead)', (await call('/transfers/' + id + '/send', T.godown, { sent: { it_rice: 0 } })).status, 400);
+    const r0g1 = await gq('it_rice', 'loc_g1');
+    const r0g2 = await gq('it_rice', 'loc_g2');
+    eq('the main godown sends 20 of the 25', (await call('/transfers/' + id + '/send', T.godown, { sent: { it_rice: 20 }, vehicle: 'Tempo' })).status, 200);
+    eq('it cannot be cancelled once on the way', (await call('/transfers/' + id + '/cancel', T.admin, {})).status, 409);
+    eq('the main godown cannot receive at the other godown', (await call('/transfers/' + id + '/receive', T.godown, {})).status, 403);
+    eq('receiving more than was sent is refused', (await call('/transfers/' + id + '/receive', T.admin, { received: { it_rice: 21 } })).status, 400);
+    eq('19 arrive at the other godown', (await call('/transfers/' + id + '/receive', T.admin, { received: { it_rice: 19 } })).status, 200);
+    eq('the main godown lost 20', await gq('it_rice', 'loc_g1'), r0g1 - 20);
+    eq('the other gained 19', await gq('it_rice', 'loc_g2'), r0g2 + 19);
+    const done = (await call('/admin/transfers', T.admin)).body.find((t) => t.id === id);
+    check('the 1 kg short is on record', done.lines[0].qty === 25 && done.lines[0].sent === 20 && done.lines[0].received === 19);
+    const shortMove = (await call('/items/it_rice/moves', T.admin)).body.find((m) => m.kind === 'transfer_in' && m.ref === 'transfer ' + done.no);
+    eq('and in the ledger', shortMove && shortMove.note, '1 short');
+    const c = await call('/admin/transfers', T.admin, { from: 'loc_g1', to: 'loc_shop', lines: [{ itemId: 'it_rice', qty: 5 }] });
+    eq('a request can be cancelled before it leaves', (await call('/transfers/' + c.body.id + '/cancel', T.admin, {})).status, 200);
+    eq('and then cannot be sent', (await call('/transfers/' + c.body.id + '/send', T.godown, {})).status, 409);
+
     // ---- vendor, purchase, delivery, customer order
     eq('the vendor confirms order 3', (await call('/pos/po_3/confirm', T.vendor, {})).status, 200);
     eq('and dispatches it', (await call('/pos/po_3/dispatch', T.vendor, { invoiceNo: 'SLT/1', vehicle: 'KA-02' })).status, 200);

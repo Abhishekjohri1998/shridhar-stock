@@ -220,19 +220,7 @@ export function GodownHome() {
         <>
           {incoming.length === 0 && <Empty>{bi('Nothing on the way to this godown.', 'ಈ ಗೋದಾಮಿಗೆ ಏನೂ ಬರುತ್ತಿಲ್ಲ.')}</Empty>}
           {incoming.map((t) => (
-            <div className="card" key={t.id}>
-              <div className="name">#{t.no}</div>
-              <ul className="lines">
-                {t.lines.map((l) => (
-                  <li key={l.itemId}>
-                    {nm(l.itemId)} · {dq(l.itemId, l.sent ?? l.qty)}
-                  </li>
-                ))}
-              </ul>
-              <button className="btn primary" onClick={async () => (await http.post('/transfers/' + t.id + '/receive', {}), setVersion((v) => v + 1))}>
-                {bi('All received', 'ಎಲ್ಲ ಬಂದಿದೆ')}
-              </button>
-            </div>
+            <ReceiveCard key={t.id} t={t} nm={nm} dq={dq} onDone={() => setVersion((v) => v + 1)} />
           ))}
         </>
       )}
@@ -693,5 +681,60 @@ export function CustomerHome() {
         </>
       )}
     </>
+  );
+}
+
+/** A godown receiving: what was sent, and what actually arrived, counted here. */
+function ReceiveCard({ t, nm, dq, onDone }: { t: Transfer; nm: (id: string) => string; dq: (id: string, q: number) => string; onDone: () => void }) {
+  const bi = useBi();
+  const { lang } = useSession();
+  const [got, setGot] = useState<Record<string, string>>(() => Object.fromEntries(t.lines.map((l) => [l.itemId, String(l.sent ?? l.qty)])));
+  const [error, setError] = useState('');
+  const receive = async () => {
+    setError('');
+    try {
+      await http.post('/transfers/' + t.id + '/receive', { received: Object.fromEntries(Object.entries(got).map(([k, v]) => [k, Number(v) || 0])) });
+      onDone();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  return (
+    <div className="card">
+      <div className="bar" style={{ justifyContent: 'space-between' }}>
+        <span className="name">#{t.no}</span>
+        <span className="muted">
+          {t.times.sent ? when(t.times.sent, lang) : ''} {t.vehicle ? '· 🚚 ' + t.vehicle : ''} {t.driver ? '· ' + t.driver : ''}
+        </span>
+      </div>
+      {error && <div className="msg err">{error}</div>}
+      <table className="list plain">
+        <thead>
+          <tr>
+            <th>{bi('Item', 'ಸಾಮಾನು')}</th>
+            <th className="num">{bi('Sent', 'ಕಳುಹಿಸಿದ್ದು')}</th>
+            <th className="num">{bi('Arrived', 'ಬಂದದ್ದು')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {t.lines.map((l) => {
+            const sent = l.sent ?? l.qty;
+            const short = Number(got[l.itemId]) < sent;
+            return (
+              <tr key={l.itemId}>
+                <td className="name">{nm(l.itemId)}</td>
+                <td className="num">{dq(l.itemId, sent)}</td>
+                <td className={'num ' + (short ? 'qty-neg' : '')}>
+                  <input inputMode="decimal" value={got[l.itemId] ?? ''} onChange={(e) => setGot({ ...got, [l.itemId]: e.target.value })} style={{ width: 80 }} />
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <button className="btn primary" onClick={receive}>
+        {bi('Received', 'ಬಂದಿದೆ')}
+      </button>
+    </div>
   );
 }

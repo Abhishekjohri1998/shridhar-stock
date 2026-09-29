@@ -253,3 +253,5 @@ ul.lines li { margin: 3px 0; }
 .live-dot { font-size: 0.8rem; font-weight: 600; color: var(--ink-400); }
 .live-dot.live { color: var(--brand-600); }
 .live-dot.connecting { color: var(--gold-600); }
+.qty-input { display: inline-flex; gap: 4px; align-items: center; }
+.qty-input select, .qty-input input { min-height: 36px; padding: 4px 6px; }
