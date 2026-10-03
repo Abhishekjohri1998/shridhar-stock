@@ -25,7 +25,7 @@ export function BillsPage() {
   const { lang, me } = useSession();
   const { items } = useCatalog();
   const live = useLive('bills');
-  const { value, error } = useLoad(() => http.get<BillMirror[]>('/admin/bills?limit=100'), [live]);
+  const { value, error } = useLoad(() => http.get<(BillMirror & { rounded: number; roundOff: number })[]>('/admin/bills?limit=100'), [live]);
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
   return (
@@ -40,7 +40,14 @@ export function BillsPage() {
               #{b.no} · {b.customer?.name ?? bi('walk-in', 'ಗ್ರಾಹಕ')}
             </span>
             <span className="muted">
-              {when(b.at, lang)} · <Money v={b.total} />
+              {when(b.at, lang)} · <Money v={b.rounded} />
+              {b.roundOff !== 0 && (
+                <span className="muted">
+                  {' '}
+                  ({bi('round off', 'ರೌಂಡ್ ಆಫ್')} {b.roundOff > 0 ? '+' : '−'}
+                  {formatRupees(Math.abs(b.roundOff))})
+                </span>
+              )}
               {b.balance > 0 && <span className="pill warn"> {bi('due', 'ಬಾಕಿ')} {formatRupees(b.balance)}</span>}
               {me?.role === 'admin' && b.customer && !b.cancelled && (
                 <Link className="btn small" to={'/admin/deliveries?bill=' + b.no} style={{ marginLeft: 8 }}>
@@ -143,6 +150,15 @@ export function SettingsPage() {
   const { lang } = useSession();
   const [version, setVersion] = useState(0);
   const [syncMsg, setSyncMsg] = useState('');
+  const { value: settings } = useLoad(() => http.get<{ roundTo: number }>('/admin/settings'), [version]);
+  const setRound = async (roundTo: number) => {
+    try {
+      await http.put('/admin/settings', { roundTo });
+    } catch (e) {
+      setSyncMsg((e as Error).message);
+    }
+    setVersion((v) => v + 1);
+  };
   const { value } = useLoad(
     () =>
       http.get<{
@@ -169,7 +185,7 @@ export function SettingsPage() {
       <div className="card">
         <h2 className="subtitle" style={{ marginTop: 0 }}>{bi('Link to billing', 'ಬಿಲ್ಲಿಂಗ್ ಸಂಪರ್ಕ')}</h2>
         <p>
-          {bi('Bills are read from the billing server every 15 seconds. Stock never writes to billing.', 'ಪ್ರತಿ 15 ಸೆಕೆಂಡಿಗೆ ಬಿಲ್ಲಿಂಗ್ ಸರ್ವರ್‌ನಿಂದ ಬಿಲ್‌ಗಳನ್ನು ಓದಲಾಗುತ್ತದೆ. ಸ್ಟಾಕ್ ಬಿಲ್ಲಿಂಗ್‌ಗೆ ಬರೆಯುವುದಿಲ್ಲ.')}
+          {bi('Bills are read from the billing server every 3 seconds while a bill is open, and every 15 seconds when the shop is quiet. Stock never writes to billing.', 'ಬಿಲ್ ತೆರೆದಿರುವಾಗ ಪ್ರತಿ 3 ಸೆಕೆಂಡಿಗೆ, ಅಂಗಡಿ ಶಾಂತವಾಗಿರುವಾಗ ಪ್ರತಿ 15 ಸೆಕೆಂಡಿಗೆ ಬಿಲ್ಲಿಂಗ್ ಸರ್ವರ್‌ನಿಂದ ಬಿಲ್‌ಗಳನ್ನು ಓದಲಾಗುತ್ತದೆ. ಸ್ಟಾಕ್ ಬಿಲ್ಲಿಂಗ್‌ಗೆ ಬರೆಯುವುದಿಲ್ಲ.')}
         </p>
         {value?.link ? (
           <p className={value.link.ok ? '' : 'qty-neg'}>
@@ -184,6 +200,19 @@ export function SettingsPage() {
         <button className="btn" onClick={syncNow}>
           ↻ {bi('Read bills now', 'ಈಗಲೇ ಬಿಲ್ ಓದಿ')}
         </button>
+      </div>
+      <div className="card">
+        <h2 className="subtitle" style={{ marginTop: 0 }}>{bi('Rounding off', 'ರೌಂಡ್ ಆಫ್')}</h2>
+        <p>
+          {bi('Bill totals on the worker’s screen, the bills list and reports are shown rounded to this, with the round-off as its own line.', 'ಕೆಲಸಗಾರರ ಪರದೆ, ಬಿಲ್ ಪಟ್ಟಿ ಮತ್ತು ವರದಿಗಳಲ್ಲಿ ಬಿಲ್ ಮೊತ್ತವನ್ನು ಇದಕ್ಕೆ ರೌಂಡ್ ಮಾಡಿ, ರೌಂಡ್ ಆಫ್ ಬೇರೆ ಸಾಲಿನಲ್ಲಿ ತೋರಿಸಲಾಗುತ್ತದೆ.')}
+        </p>
+        <div className="chips">
+          {[0, 1, 5, 10].map((n) => (
+            <button key={n} className={'chip ' + (settings?.roundTo === n ? 'on' : '')} onClick={() => setRound(n)}>
+              {n === 0 ? bi('No rounding', 'ರೌಂಡ್ ಬೇಡ') : '₹' + n}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="card">
         <h2 className="subtitle" style={{ marginTop: 0 }}>{bi('Handwriting reader', 'ಕೈಬರಹ ಓದುವಿಕೆ')}</h2>

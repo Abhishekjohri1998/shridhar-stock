@@ -15,6 +15,7 @@ import {
   type StockMove,
   type Supplier,
   type Transfer,
+  type Vehicle,
 } from '@stock/core';
 import { hashPin } from '../pin';
 import { post } from '../posting';
@@ -59,6 +60,11 @@ interface Spec {
   range?: Record<string, [number, number]>;
 }
 
+/*
+ * Parle-G and the shampoo sachets are the shop's own examples, and the tests lean on them: a
+ * piece of Parle-G is ₹5, a pack of 24 is ₹110 (not 24 × ₹5), a box is 6 packs; a "line" of
+ * shampoo is a strip of 16.
+ */
 const S: Spec[] = [
   { id: 'it_parle', en: 'Parle-G', kn: 'ಪಾರ್ಲೆ ಜಿ', cat: 'Biscuits', units: [['pc', 'Piece', 'ಪೀಸ್', 1, 5, 4.2], ['pack', 'Pack', 'ಪ್ಯಾಕ್', 24, 110, 98], ['box', 'Box', 'ಬಾಕ್ಸ್', 144, 640, 580]], aka: ['parle', 'parle g'], rack: 'Rack 1', rackG1: 'Bay A', reorder: 48, shop: 60, g1: 720, g2: 0, range: { pc: [5, 5.5] } },
   { id: 'it_goodday', en: 'Good Day', kn: 'ಗುಡ್ ಡೇ', cat: 'Biscuits', units: [['pc', 'Piece', 'ಪೀಸ್', 1, 10, 8.5], ['pack', 'Pack', 'ಪ್ಯಾಕ್', 12, 115, 100]], rack: 'Rack 1', reorder: 24, shop: 60, g1: 144, g2: 0 },
@@ -285,11 +291,20 @@ export async function seedDemo(repo: InvRepo): Promise<void> {
   for (const p of pos) await repo.putDoc('pos', p);
 
   const deliveries: Delivery[] = [
-    { id: 'dl_1', billNo: 53, customerKey: '9000000027', name: 'Hotel Annapoorna', phone: '9000000027', address: 'Main road', landmark: 'Next to the bank', personId: 'p_delivery', vehicle: 'Scooter', status: 'delivered', amountDue: 0, at: iso(70), times: { pending: iso(70), out: iso(60), delivered: iso(45) } },
-    { id: 'dl_2', billNo: 52, customerKey: '9000000007', name: 'Ramesh Gowda', phone: '9000000007', address: '3rd cross, Vinayaka nagar', landmark: 'Opposite the temple', personId: 'p_delivery', vehicle: 'Scooter', status: 'out', amountDue: 0, at: iso(110), times: { pending: iso(110), out: iso(15) } },
+    { id: 'dl_1', billNo: 53, customerKey: '9000000027', name: 'Hotel Annapoorna', phone: '9000000027', address: 'Main road', landmark: 'Next to the bank', personId: 'p_delivery', vehicle: 'KA-17 EF 5678', status: 'delivered', amountDue: 0, at: iso(70), times: { pending: iso(70), out: iso(60), delivered: iso(45) } },
+    { id: 'dl_2', billNo: 52, customerKey: '9000000007', name: 'Ramesh Gowda', phone: '9000000007', address: '3rd cross, Vinayaka nagar', landmark: 'Opposite the temple', personId: 'p_delivery', vehicle: 'KA-17 EF 5678', status: 'out', amountDue: 0, at: iso(110), times: { pending: iso(110), out: iso(15) } },
     { id: 'dl_3', billNo: 54, customerKey: '9000000007', name: 'Ramesh Gowda', phone: '9000000007', address: '3rd cross, Vinayaka nagar', landmark: 'Opposite the temple', personId: 'p_delivery', status: 'pending', amountDue: 1000 + 150 + 56 + 60, at: iso(10), times: { pending: iso(10) } },
   ];
   for (const d of deliveries) await repo.putDoc('deliveries', d);
+
+  // The shop's two vehicles: the godown tempo and the delivery scooter.
+  const vehicles: Vehicle[] = [
+    { id: 'veh_1', number: 'KA-17 AB 1234', type: 'Tempo', driverName: 'Manju', driverPhone: '9000000011', active: true },
+    { id: 'veh_2', number: 'KA-17 EF 5678', type: 'Scooter', driverName: 'Kiran', driverPhone: '9000000006', active: true },
+  ];
+  for (const v of vehicles) await repo.putDoc('vehicles', v);
+  // Bills rounded to the nearest ₹5, so the round-off line shows on the demo bills.
+  await repo.putDoc('meta', { id: 'settings', roundTo: 5 });
 
   const orders: OrderRequest[] = [
     { id: 'or_1', personId: 'p_customer', customerKey: '9000000007', status: 'new', at: iso(8), note: 'Please send by evening', lines: [{ itemId: 'it_rice', unit: 'kg', qty: 10, text: 'Sona masoori' }, { ink: handwrite('2 surf excel', 21), text: '2 surf excel' }, { itemId: 'it_milk', unit: 'pc', qty: 4 }] },

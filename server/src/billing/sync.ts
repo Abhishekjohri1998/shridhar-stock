@@ -214,3 +214,27 @@ export async function recordLink(repo: InvRepo, ok: boolean, detail: { lastBillN
     },
   });
 }
+
+/**
+ * How often billing is read. Quickly while the counter is busy, so a bill reaches the worker's
+ * pick list within seconds of being saved; slowly when the shop is quiet, to spare both servers.
+ */
+export const POLL_BUSY_MS = 3_000;
+export const POLL_IDLE_MS = 15_000;
+/** A bill made or changed this recently means the counter is busy. */
+export const POLL_ACTIVE_WINDOW_MS = 10 * 60_000;
+
+/**
+ * The wait before the next read: busy while a bill is still open at the counter (one made in
+ * the last ten minutes) or a recent read brought something new; idle otherwise.
+ */
+export function pollDelay(
+  bills: Pick<BillMirror, 'at' | 'cancelled'>[],
+  lastChangeAt: number,
+  now = Date.now(),
+  ms: { busy: number; idle: number; window: number } = { busy: POLL_BUSY_MS, idle: POLL_IDLE_MS, window: POLL_ACTIVE_WINDOW_MS },
+): number {
+  const since = now - ms.window;
+  const busy = lastChangeAt >= since || bills.some((b) => !b.cancelled && Date.parse(b.at) >= since);
+  return busy ? ms.busy : ms.idle;
+}

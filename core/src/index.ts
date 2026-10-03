@@ -12,3 +12,5 @@ export * from './phone';
 export * from './itemForm';
 export * from './refill';
 export * from './ink';
+export * from './xlsx';
+export * from './pick';

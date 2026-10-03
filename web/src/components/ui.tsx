@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { formatRupees, inkBounds, inkPath, type Ink, type Lang } from '@stock/core';
 import { useSession } from '../lib/session';
+import { http } from '../lib/api';
 
 /** English or Kannada, for the role screens' own words. Both are always written. */
 export function useBi() {
@@ -90,6 +91,33 @@ const TONE: Record<string, string> = {
 
 export function Status({ s, label }: { s: string; label: string }) {
   return <span className={'pill ' + (TONE[s] ?? '')}>{label}</span>;
+}
+
+/**
+ * The shop's vehicles as suggestions for a vehicle box: `<input list="vehicles">`. The box still
+ * takes anything typed, for a hired auto or a supplier's own lorry.
+ */
+export function VehicleOptions({ id = 'vehicles' }: { id?: string }) {
+  const [list, setList] = useState<{ number: string; type: string; driverName: string }[]>([]);
+  useEffect(() => {
+    let live = true;
+    http
+      .get<{ number: string; type: string; driverName: string }[]>('/vehicles')
+      .then((v) => live && setList(v))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+  return (
+    <datalist id={id}>
+      {list.map((v) => (
+        <option key={v.number} value={v.number}>
+          {[v.type, v.driverName].filter(Boolean).join(' · ')}
+        </option>
+      ))}
+    </datalist>
+  );
 }
 
 export function Loading() {

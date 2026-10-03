@@ -78,7 +78,7 @@ async function main() {
   const port = 4600 + Math.floor(Math.random() * 300);
   const base = 'http://localhost:' + port;
   const proc = spawn(process.execPath, [path.join(out, 'index.js')], {
-    env: { ...process.env, MONGO_URI: '', DEMO: '', PORT: String(port), DATA_DIR: dir, JWT_SECRET: 'linktest', SEED_ADMIN_PHONE: '9000000001', SEED_ADMIN_PIN: '4821', BILLING_URL: billingUrl, BILLING_PIN: PIN, BILLING_EVERY_MS: '600000', READER_FAKE: fakeFile },
+    env: { ...process.env, MONGO_URI: '', DEMO: '', PORT: String(port), DATA_DIR: dir, JWT_SECRET: 'linktest', SEED_ADMIN_PHONE: '9000000001', SEED_ADMIN_PIN: '4821', BILLING_URL: billingUrl, BILLING_PIN: PIN, BILLING_EVERY_MS: '600000', BILLING_BUSY_MS: '600000', READER_FAKE: fakeFile },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let log = '';

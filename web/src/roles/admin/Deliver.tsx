@@ -5,7 +5,7 @@ import { http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
 import { statusWord } from '../../lib/words';
-import { Empty, Loading, Money, Status, useBi, when } from '../../components/ui';
+import { Empty, Loading, Money, Status, useBi, VehicleOptions, when } from '../../components/ui';
 
 /** Deliveries: send a bill out, see where everything is, and hand a drop to someone else. */
 export function DeliveriesPage() {
@@ -209,7 +209,8 @@ function NewDelivery({
         </label>
         <label className="field">
           <span>{bi('Vehicle', 'ವಾಹನ')}</span>
-          <input value={vehicle} onChange={(e) => setVehicle(e.target.value)} placeholder={bi('Scooter', 'ಸ್ಕೂಟರ್')} />
+          <input list="vehicles" value={vehicle} onChange={(e) => setVehicle(e.target.value)} placeholder={bi('Scooter', 'ಸ್ಕೂಟರ್')} />
+          <VehicleOptions />
         </label>
       </div>
       {drivers.length === 0 && <div className="msg err">{bi('Add a delivery person under People first.', 'ಮೊದಲು “ಜನರು” ನಲ್ಲಿ ಡೆಲಿವರಿ ವ್ಯಕ್ತಿ ಸೇರಿಸಿ.')}</div>}

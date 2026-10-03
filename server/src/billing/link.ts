@@ -3,13 +3,15 @@ import { getRepo } from '../store';
 import { billingClient } from './client';
 import { emit } from '../events';
 import { pickReader, readPending } from '../reader';
-import { recordLink, syncOnce, type SyncResult } from './sync';
+import { pollDelay, recordLink, syncOnce, POLL_ACTIVE_WINDOW_MS, type SyncResult } from './sync';
 
 const reader = pickReader();
 console.log('[reader] handwriting reader: ' + reader.kind);
 
 let running: Promise<SyncResult | null> | null = null;
 let last: SyncResult | null = null;
+/** When a read last brought something new: keeps the quick polling going while the counter is busy. */
+let lastChangeAt = 0;
 
 export const linkConfigured = () => !!(env.billingUrl && env.billingPin);
 
@@ -27,7 +29,10 @@ export function syncNow(): Promise<SyncResult | null> {
         return null;
       });
       if (read) Object.assign(r, { read: read.read, autoRead: read.auto });
-      if (r.newBills || r.posted || r.reversed || read?.read) emit('bills');
+      if (r.newBills || r.posted || r.reversed || read?.read) {
+        lastChangeAt = Date.now();
+        emit('bills');
+      }
       emit('link', { roles: [] });
       const bills = await repo.listDocs<{ id: string; no: number }>('bills');
       await recordLink(repo, true, {
@@ -56,7 +61,16 @@ export function startLink(): void {
     console.log('[billing] BILLING_URL / BILLING_PIN not set: no link to billing');
     return;
   }
-  console.log('[billing] reading bills from ' + env.billingUrl + ' every ' + Math.round(env.billingEveryMs / 1000) + ' s');
-  void syncNow();
-  setInterval(() => void syncNow(), Math.max(5000, env.billingEveryMs)).unref();
+  const idle = Math.max(5000, env.billingEveryMs);
+  const busy = Math.max(1000, Math.min(idle, env.billingBusyMs));
+  console.log('[billing] reading bills from ' + env.billingUrl + ' every ' + Math.round(busy / 1000) + ' s while a bill is open, else ' + Math.round(idle / 1000) + ' s');
+  // One timer at a time, set after each read: a slow read never stacks the next on top of it.
+  const loop = async () => {
+    await syncNow();
+    const bills = await getRepo()
+      .listDocs<{ id: string; at: string; cancelled?: boolean }>('bills')
+      .catch(() => []);
+    setTimeout(() => void loop(), pollDelay(bills, lastChangeAt, Date.now(), { busy, idle, window: POLL_ACTIVE_WINDOW_MS })).unref();
+  };
+  void loop();
 }

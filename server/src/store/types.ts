@@ -12,7 +12,7 @@ export interface PersonRecord extends Person {
  * The kinds of record kept as whole documents, each with an `id`: bills read from billing,
  * customers read from billing, and everything that moves stock between people.
  */
-export const DOC_COLLECTIONS = ['bills', 'customers', 'transfers', 'suppliers', 'pos', 'deliveries', 'orders', 'meta'] as const;
+export const DOC_COLLECTIONS = ['bills', 'customers', 'transfers', 'suppliers', 'pos', 'deliveries', 'orders', 'vehicles', 'meta'] as const;
 export type DocCollection = (typeof DOC_COLLECTIONS)[number];
 
 export interface MoveQuery {

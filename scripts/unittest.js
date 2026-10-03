@@ -244,11 +244,103 @@ check('every role has a home screen', C.ROLES.every((r) => typeof C.ROLE_HOME[r]
 }
 
 // ---------------------------------------------------------------- posting and reconcile (server code, file store)
+// ---------------------------------------------------------------- round off
+{
+  const r = (t, step) => JSON.stringify(C.roundOff(t, step));
+  check('no rounding leaves the total alone', r(102.4, 0) === '{"rounded":102.4,"diff":0}', r(102.4, 0));
+  check('to the rupee: 102.40 is 102, off by -0.40', r(102.4, 1) === '{"rounded":102,"diff":-0.4}', r(102.4, 1));
+  check('to the rupee: 102.50 goes up to 103', r(102.5, 1) === '{"rounded":103,"diff":0.5}', r(102.5, 1));
+  check('to ₹5: 102.50 is 105', r(102.5, 5) === '{"rounded":105,"diff":2.5}', r(102.5, 5));
+  check('to ₹5: 1266 is 1265', r(1266, 5) === '{"rounded":1265,"diff":-1}', r(1266, 5));
+  check('to ₹10: 1265 goes up to 1270', r(1265, 10) === '{"rounded":1270,"diff":5}', r(1265, 10));
+  check('a round total has no round-off', r(110, 10) === '{"rounded":110,"diff":0}', r(110, 10));
+  check('no floating dust: 0.1 + 0.2 to the rupee', r(0.1 + 0.2, 1) === '{"rounded":0,"diff":-0.3}', r(0.1 + 0.2, 1));
+}
+
+// ---------------------------------------------------------------- the worker's walk
+{
+  const lines = [
+    { i: 0, place: 'Main godown', placeOrder: 1, rack: 'Bay A' },
+    { i: 1, place: 'Shop', placeOrder: 0, rack: 'Rack 10' },
+    { i: 2, rack: '' },
+    { i: 3, place: 'Shop', placeOrder: 0, rack: 'Rack 2' },
+    { i: 4, place: 'Shop', placeOrder: 0, rack: 'rack 2' },
+    { i: 5, place: 'Shop', placeOrder: 0, rack: 'Counter' },
+    { i: 6, place: 'Annex', placeOrder: 2, rack: 'Bay A' },
+  ];
+  const g = C.groupPick(lines);
+  const order = g.map((x) => (x.other ? 'other' : x.place + ':' + x.rack)).join(' > ');
+  check('shop racks first, in natural order, then godowns in order, then other', order === 'Shop:Counter > Shop:Rack 2 > Shop:Rack 10 > Main godown:Bay A > Annex:Bay A > other', order);
+  check('"Rack 2" and "rack 2" are one rack', g[1].lines.map((l) => l.i).join() === '3,4');
+  check('a line with no rack anywhere is in the last group', g[g.length - 1].other && g[g.length - 1].lines[0].i === 2);
+  check('every line is in exactly one group', g.reduce((a, x) => a + x.lines.length, 0) === lines.length);
+}
+
+// ---------------------------------------------------------------- Excel files
+{
+  const enc = new TextEncoder();
+  check('CRC32 of "123456789" is cbf43926', C.crc32(enc.encode('123456789')).toString(16) === 'cbf43926', C.crc32(enc.encode('123456789')).toString(16));
+  check('CRC32 of nothing is 0', C.crc32(new Uint8Array(0)) === 0);
+  const sheets = [
+    { name: 'Shop', header: ['name', 'qty'], rows: [['Parle-G', 60], ['ಸಕ್ಕರೆ <&> "x"', -2.5], ['=HYPERLINK("x")', null]] },
+    { name: 'Main/godown?', header: ['name'], rows: [['Bay A']] },
+  ];
+  const z = Buffer.from(C.toXlsx(sheets));
+  // Read the ZIP back the way Excel does: from the end of central directory.
+  const eocd = z.length - 22;
+  check('the file ends with an end-of-central-directory record', z.readUInt32LE(eocd) === 0x06054b50);
+  const count = z.readUInt16LE(eocd + 10);
+  const cenSize = z.readUInt32LE(eocd + 12);
+  const cenAt = z.readUInt32LE(eocd + 16);
+  check('it lists 6 files (4 parts and 2 sheets)', count === 6, count);
+  check('the central directory sits right before the end record', cenAt + cenSize === eocd);
+  const files = {};
+  let at = cenAt;
+  let localHeaders = 0;
+  for (let n = 0; n < count; n++) {
+    check('central header ' + n + ' has its signature', z.readUInt32LE(at) === 0x02014b50);
+    const crc = z.readUInt32LE(at + 16);
+    const size = z.readUInt32LE(at + 24);
+    const nameLen = z.readUInt16LE(at + 28);
+    const extraLen = z.readUInt16LE(at + 30);
+    const commentLen = z.readUInt16LE(at + 32);
+    const off = z.readUInt32LE(at + 42);
+    const name = z.toString('utf8', at + 46, at + 46 + nameLen);
+    if (z.readUInt32LE(off) === 0x04034b50) localHeaders++;
+    const dataAt = off + 30 + z.readUInt16LE(off + 26) + z.readUInt16LE(off + 28);
+    const data = z.subarray(dataAt, dataAt + size);
+    check(name + ' is stored, not compressed', z.readUInt16LE(off + 8) === 0);
+    check(name + ' has the right CRC', C.crc32(data) === crc);
+    files[name] = data.toString('utf8');
+    at += 46 + nameLen + extraLen + commentLen;
+  }
+  check('every entry has its local header', localHeaders === count, localHeaders);
+  const want = ['[Content_Types].xml', '_rels/.rels', 'xl/workbook.xml', 'xl/_rels/workbook.xml.rels', 'xl/worksheets/sheet1.xml', 'xl/worksheets/sheet2.xml'];
+  check('with the parts Excel needs', want.every((w) => w in files), Object.keys(files).join());
+  const s1 = files['xl/worksheets/sheet1.xml'] || '';
+  check('text is an inline string', s1.includes('<c r="A2" t="inlineStr"><is><t xml:space="preserve">Parle-G</t></is></c>'));
+  check('numbers are numbers', s1.includes('<c r="B2"><v>60</v></c>') && s1.includes('<c r="B3"><v>-2.5</v></c>'));
+  check('Kannada and XML characters survive, escaped', s1.includes('ಸಕ್ಕರೆ &lt;&amp;&gt; &quot;x&quot;'));
+  check('a formula is kept as text', s1.includes(">'=HYPERLINK(&quot;x&quot;)</t>"));
+  check('an empty cell is left out', !s1.includes('r="B4"'));
+  check('a sheet name Excel would refuse is cleaned', (files['xl/workbook.xml'] || '').includes('name="Main godown"'));
+}
+
 async function ledger() {
   const out = path.join(__dirname, '..', '.test-build');
   execSync('npx tsc -p server/tsconfig.json --outDir ' + JSON.stringify(out), { cwd: path.join(__dirname, '..'), stdio: 'inherit' });
   const { createFileRepo } = require(path.join(out, 'store', 'file.js'));
   const { post, reconcile } = require(path.join(out, 'posting.js'));
+  const { pollDelay, POLL_BUSY_MS, POLL_IDLE_MS } = require(path.join(out, 'billing', 'sync.js'));
+  {
+    const now = Date.parse('2026-10-03T10:00:00Z');
+    const ago = (min) => new Date(now - min * 60_000).toISOString();
+    check('billing is read every 3 s while a bill is open', pollDelay([{ at: ago(2) }], 0, now) === POLL_BUSY_MS && POLL_BUSY_MS === 3000);
+    check('and every 15 s when the shop is quiet', pollDelay([{ at: ago(30) }], 0, now) === POLL_IDLE_MS && POLL_IDLE_MS === 15000);
+    check('a cancelled bill does not keep it busy', pollDelay([{ at: ago(2), cancelled: true }], 0, now) === POLL_IDLE_MS);
+    check('a read that brought something new keeps it busy', pollDelay([], now - 60_000, now) === POLL_BUSY_MS);
+    check('no bills at all is quiet', pollDelay([], 0, now) === POLL_IDLE_MS);
+  }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-unit-'));
   try {
     const repo = await createFileRepo(dir);

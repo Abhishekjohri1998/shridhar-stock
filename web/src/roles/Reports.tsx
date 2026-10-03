@@ -14,7 +14,10 @@ interface Report {
     unlinked: number;
     unlinkedLines: number;
     notStock: number;
+    roundTo: number;
+    roundOff: number;
   };
+  trips: { vehicle: string; type: string; driver: string; transfers: number; deliveries: number }[];
   value: { places: { id: string; name: string; value: number; items: number; negative: number }[]; total: number; noCost: number };
   movers: {
     fast: { itemId: string; name: string; nameKn: string; unit: string; sold: number; perDay: number; have: number; daysLeft: number | null }[];
@@ -31,7 +34,7 @@ export function ReportsPage() {
   const { lang } = useSession();
   const [from, setFrom] = useState(day(29));
   const [to, setTo] = useState(day(0));
-  const [tab, setTab] = useState<'sales' | 'value' | 'movers' | 'prices'>('sales');
+  const [tab, setTab] = useState<'sales' | 'value' | 'movers' | 'prices' | 'trips'>('sales');
   const live = useLive('bills', 'stock', 'items');
   const { value: r, error } = useLoad(() => http.get<Report>('/reports?from=' + from + '&to=' + to), [from, to, live]);
   const nm = (x: { name: string; nameKn: string }) => pickName(x.name, x.nameKn, lang);
@@ -65,6 +68,7 @@ export function ReportsPage() {
           { key: 'value', label: bi('Stock value', 'ಸ್ಟಾಕ್ ಮೌಲ್ಯ') },
           { key: 'movers', label: bi('Fast and slow', 'ವೇಗ ಮತ್ತು ನಿಧಾನ') },
           { key: 'prices', label: bi('Prices outside range', 'ಮಿತಿ ಮೀರಿದ ಬೆಲೆ') + (r?.outOfRange.length ? ' (' + r.outOfRange.length + ')' : '') },
+          { key: 'trips', label: bi('Trips by vehicle', 'ವಾಹನದ ಪ್ರಕಾರ ಓಡಾಟ') },
         ]}
       />
       {error && <div className="msg err">{error}</div>}
@@ -88,6 +92,12 @@ export function ReportsPage() {
               <b><Money v={r.sales.notStock} /></b>
               {bi('Not stock (charges)', 'ಸ್ಟಾಕ್ ಅಲ್ಲ')}
             </div>
+            {r.sales.roundTo > 0 && (
+              <div className="tile">
+                <b><Money v={r.sales.roundOff} /></b>
+                {bi('Round off', 'ರೌಂಡ್ ಆಫ್')} (₹{r.sales.roundTo}) · {bi('collected', 'ಸಂಗ್ರಹ')} {formatRupees(r.sales.total + r.sales.roundOff)}
+              </div>
+            )}
           </div>
           {r.sales.unlinked > 0 && (
             <p className="muted">
@@ -180,6 +190,43 @@ export function ReportsPage() {
               ))}
             </div>
           </div>
+        </>
+      )}
+      {r && tab === 'trips' && (
+        <>
+          <p className="muted">
+            {bi('Transfers that left a place and deliveries that went out, by the vehicle written on them.', 'ಹೊರಟ ಸಾಗಣೆ ಮತ್ತು ಡೆಲಿವರಿಗಳು, ಅವುಗಳ ಮೇಲೆ ಬರೆದ ವಾಹನದ ಪ್ರಕಾರ.')}
+          </p>
+          <button className="btn small" onClick={() => csv('trips')} style={{ marginBottom: 10 }}>⬇ {bi('Excel', 'ಎಕ್ಸೆಲ್')}</button>
+          {r.trips.length === 0 ? (
+            <Empty>{bi('No trips in this period.', 'ಈ ಅವಧಿಯಲ್ಲಿ ಓಡಾಟ ಇಲ್ಲ.')}</Empty>
+          ) : (
+            <div className="scroll">
+              <table className="list">
+                <thead>
+                  <tr>
+                    <th>{bi('Vehicle', 'ವಾಹನ')}</th>
+                    <th className="num">{bi('Transfers', 'ಸಾಗಣೆ')}</th>
+                    <th className="num">{bi('Deliveries', 'ಡೆಲಿವರಿ')}</th>
+                    <th className="num">{bi('Trips', 'ಒಟ್ಟು')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {r.trips.map((x) => (
+                    <tr key={x.vehicle}>
+                      <td>
+                        <div className="name">{x.vehicle}</div>
+                        {(x.type || x.driver) && <div className="muted">{[x.type, x.driver].filter(Boolean).join(' · ')}</div>}
+                      </td>
+                      <td className="num">{x.transfers}</td>
+                      <td className="num">{x.deliveries}</td>
+                      <td className="num">{x.transfers + x.deliveries}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </>
       )}
       {r && tab === 'prices' && (

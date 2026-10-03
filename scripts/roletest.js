@@ -235,6 +235,89 @@ async function main() {
     eq('a delivered drop cannot be reassigned', (await call('/admin/deliveries/' + dl.body.id + '/assign', T.admin, { personId: 'p_delivery' })).status, 409);
     eq('once delivered, the bill can go out again (a second trip)', (await call('/admin/deliveries', T.admin, { billNo: 51, personId: 'p_delivery' })).status, 201);
 
+    // ---- rounding off, the worker's walk, select all
+    const send = async (method, p, token, body) => {
+      const r = await fetch(base + '/api' + p, {
+        method,
+        headers: { ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      let json = null;
+      try {
+        json = await r.json();
+      } catch {
+        /* none */
+      }
+      return { status: r.status, body: json };
+    };
+    eq('the demo rounds bills to ₹5', (await call('/admin/settings', T.admin)).body.roundTo, 5);
+    eq('the owner can read the setting', (await call('/admin/settings', T.owner)).status, 200);
+    eq('but not change it', (await send('PUT', '/admin/settings', T.owner, { roundTo: 1 })).status, 403);
+    eq('a worker cannot change it', (await send('PUT', '/admin/settings', T.worker, { roundTo: 1 })).status, 403);
+    eq('only none, 1, 5 or 10', (await send('PUT', '/admin/settings', T.admin, { roundTo: 3 })).status, 400);
+    const wb = (await call('/worker/bills', T.worker)).body;
+    check('every worker bill has its rounded total and round-off line', wb.every((b) => b.rounded % 5 === 0 && Math.abs(b.rounded - b.total - b.roundOff) < 0.001), JSON.stringify(wb.map((b) => [b.total, b.rounded, b.roundOff])));
+    const ab = (await call('/admin/bills', T.owner)).body;
+    check('so does the bills list', ab.every((b) => b.rounded % 5 === 0 && Math.abs(b.rounded - b.total - b.roundOff) < 0.001));
+    eq('the admin switches to the rupee', (await send('PUT', '/admin/settings', T.admin, { roundTo: 1 })).status, 200);
+    check('and totals follow', (await call('/worker/bills', T.worker)).body.every((b) => Number.isInteger(b.rounded)));
+    const rp = (await call('/reports', T.owner)).body;
+    check('reports carry the round-off for the period', rp.sales.roundTo === 1 && typeof rp.sales.roundOff === 'number');
+    const shopLine = wb[0].lines.find((l) => l.rack);
+    check('a line on a shop rack says it is in the shop', shopLine && shopLine.place === 'Shop' && shopLine.placeOrder === 0, JSON.stringify(shopLine));
+
+    const b54 = wb.find((b) => b.no === 54);
+    eq('a godown cannot tick a bill', (await call('/worker/bills/54/fetched', T.godown, { fetched: true })).status, 403);
+    eq('nor the owner', (await call('/worker/bills/54/fetched', T.owner, { fetched: true })).status, 403);
+    eq('the worker selects all', (await call('/worker/bills/54/fetched', T.worker, { fetched: true })).body.lines, b54.lines.length);
+    check('every line is ticked', (await call('/worker/bills', T.worker)).body.find((b) => b.no === 54).lines.every((l) => l.fetched));
+    eq('and selects none', (await call('/worker/bills/54/fetched', T.worker, { fetched: false })).status, 200);
+    check('every line is unticked', (await call('/worker/bills', T.worker)).body.find((b) => b.no === 54).lines.every((l) => !l.fetched));
+    eq('no such bill', (await call('/worker/bills/9999/fetched', T.worker, { fetched: true })).status, 404);
+
+    // ---- vehicles
+    const vlist = (await call('/admin/vehicles', T.admin)).body;
+    eq('the demo has two vehicles', vlist.length, 2);
+    for (const r of ['owner', 'worker', 'godown', 'vendor', 'delivery', 'customer']) {
+      eq(r + ' cannot manage vehicles', (await call('/admin/vehicles', T[r])).status, 403);
+    }
+    eq('a godown cannot add one', (await call('/admin/vehicles', T.godown, { number: 'KA-01 X 1' })).status, 403);
+    const pick = await call('/vehicles', T.godown);
+    check('the godown gets the pick list', pick.status === 200 && pick.body.length === 2);
+    check('without drivers\' phones', !JSON.stringify(pick.body).includes('9000000011'));
+    eq('the vendor gets it too', (await call('/vehicles', T.vendor)).status, 200);
+    eq('a customer does not', (await call('/vehicles', T.customer)).status, 403);
+    eq('a worker does not', (await call('/vehicles', T.worker)).status, 403);
+    const nv = await call('/admin/vehicles', T.admin, { number: 'KA-17 Z 99', type: 'Auto', driverName: 'Raju', driverPhone: '98450 12345' });
+    check('the admin adds a vehicle', nv.status === 201 && nv.body.driverPhone === '9845012345', JSON.stringify(nv.body));
+    eq('the same number again is refused', (await call('/admin/vehicles', T.admin, { number: 'ka17z99' })).status, 409);
+    eq('a number is needed', (await call('/admin/vehicles', T.admin, { number: ' ' })).status, 400);
+    eq('a bad phone is refused', (await call('/admin/vehicles', T.admin, { number: 'KA-1', driverPhone: '123' })).status, 400);
+    const ed = await send('PUT', '/admin/vehicles/' + nv.body.id, T.admin, { number: 'KA-17 Z 99', type: 'Auto', driverName: 'Raju', active: false });
+    check('the admin switches it off', ed.status === 200 && ed.body.active === false);
+    check('and it leaves the pick list', !(await call('/vehicles', T.godown)).body.some((v) => v.number === 'KA-17 Z 99'));
+    eq('the owner cannot remove one', (await send('DELETE', '/admin/vehicles/' + nv.body.id, T.owner)).status, 403);
+    eq('the admin removes it', (await send('DELETE', '/admin/vehicles/' + nv.body.id, T.admin)).status, 200);
+    eq('it is gone', (await call('/admin/vehicles', T.admin)).body.length, 2);
+    eq('removing it twice', (await send('DELETE', '/admin/vehicles/' + nv.body.id, T.admin)).status, 404);
+    const trips = (await call('/reports', T.owner)).body.trips;
+    const tempo = trips.find((t) => t.vehicle === 'KA-17 AB 1234');
+    check('trips by vehicle counts the tempo\'s transfers, however its number was typed', tempo && tempo.transfers >= 1, JSON.stringify(trips));
+    const scooter = trips.find((t) => t.vehicle === 'KA-17 EF 5678');
+    check('and the scooter\'s deliveries', scooter && scooter.deliveries >= 2, JSON.stringify(trips));
+    const tripsCsv = await fetch(base + '/api/reports/trips.csv', { headers: { Authorization: 'Bearer ' + T.owner } });
+    check('trips download for Excel', tripsCsv.status === 200 && (await tripsCsv.text()).includes('KA-17 AB 1234'));
+
+    // ---- Excel files
+    for (const [p, sheets] of [['/export/items.xlsx', 1], ['/export/stock.xlsx', 3]]) {
+      const x = await fetch(base + '/api' + p, { headers: { Authorization: 'Bearer ' + T.owner } });
+      const buf = Buffer.from(await x.arrayBuffer());
+      check(p + ' downloads as a ZIP', x.status === 200 && buf.readUInt32LE(0) === 0x04034b50 && /spreadsheetml/.test(x.headers.get('content-type') || ''));
+      eq(p + ' has a sheet per ' + (sheets > 1 ? 'place' : 'file'), buf.readUInt16LE(buf.length - 12), 4 + sheets);
+      check(p + ' has Parle-G in it', buf.includes(Buffer.from('Parle-G')));
+      eq(p + ' is not for a worker', (await fetch(base + '/api' + p, { headers: { Authorization: 'Bearer ' + T.worker } })).status, 403);
+    }
+
     // ---- reset brings it all back
     eq('the demo resets', (await call('/demo/reset', null, {})).status, 200);
     const again = await as('admin');

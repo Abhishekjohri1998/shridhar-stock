@@ -51,11 +51,17 @@ export function FilesPage({ readOnly = false }: { readOnly?: boolean }) {
           <button className="btn" onClick={() => guard(() => download('/export/items.csv', 'items.csv'))}>
             {t('files.download')}
           </button>
+          <button className="btn" onClick={() => guard(() => download('/export/items.xlsx', 'items.xlsx'))}>
+            ⬇ .xlsx
+          </button>
         </div>
         <div className="bar">
           <span className="grow name">{t('files.stock')}</span>
           <button className="btn" onClick={() => guard(() => download('/export/stock.csv', 'stock.csv'))}>
             {t('files.download')}
+          </button>
+          <button className="btn" onClick={() => guard(() => download('/export/stock.xlsx', 'stock.xlsx'))}>
+            ⬇ .xlsx
           </button>
         </div>
         <div className="bar">

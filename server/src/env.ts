@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { POLL_BUSY_MS, POLL_IDLE_MS } from './billing/sync';
 
 function str(name: string, fallback: string): string {
   const v = process.env[name];
@@ -31,7 +32,9 @@ export const env = {
    */
   billingUrl: str('BILLING_URL', ''),
   billingPin: str('BILLING_PIN', ''),
-  billingEveryMs: Number(str('BILLING_EVERY_MS', '15000')),
+  /** How often to read when the shop is quiet, and when a bill is open. See billing/sync.ts. */
+  billingEveryMs: Number(str('BILLING_EVERY_MS', String(POLL_IDLE_MS))),
+  billingBusyMs: Number(str('BILLING_BUSY_MS', String(POLL_BUSY_MS))),
   /**
    * The handwriting reader. The key is the owner's own, set in server/.env only. Without it every
    * handwritten line waits for a person. READER_FAKE is for the tests: a file of fixed readings.

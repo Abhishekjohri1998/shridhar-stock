@@ -304,3 +304,25 @@ export interface OrderRequest {
   billNo?: number;
   at: string;
 }
+
+// ------------------------------------------------------------------ vehicles and settings
+
+/** A vehicle the shop uses for transfers and deliveries. Forms offer these but take any text. */
+export interface Vehicle {
+  id: string;
+  /** The registration, "KA-17 AB 1234", or a plain name for a cycle. */
+  number: string;
+  /** Tempo, auto, scooter: the shop's own word. */
+  type: string;
+  driverName: string;
+  driverPhone: string;
+  active: boolean;
+}
+
+/** The shop's own settings, kept by the admin. */
+export interface ShopSettings {
+  /** Bills are rounded to the nearest this many rupees; 0 for no rounding. */
+  roundTo: 0 | 1 | 5 | 10;
+}
+
+export const DEFAULT_SETTINGS: ShopSettings = { roundTo: 0 };

@@ -1,4 +1,4 @@
-import type { Location } from '@stock/core';
+import { DEFAULT_SETTINGS, type Location, type ShopSettings } from '@stock/core';
 import { env } from './env';
 import { hashPin } from './pin';
 import { newId, type InvRepo } from './store/types';
@@ -45,4 +45,15 @@ export async function seedAdmin(repo: InvRepo): Promise<void> {
     createdAt: new Date().toISOString(),
   });
   console.log('[setup] first admin made for ' + phone + '. Remove SEED_ADMIN_* from the environment now.');
+}
+
+/** The shop's settings, with the defaults for anything never set. Kept in meta, id "settings". */
+export async function settingsOf(repo: InvRepo): Promise<ShopSettings> {
+  const doc = await repo.getDoc<{ id: string } & Partial<ShopSettings>>('meta', 'settings');
+  return { ...DEFAULT_SETTINGS, ...(doc?.roundTo != null ? { roundTo: doc.roundTo } : {}) };
+}
+
+/** Places in the order every screen lists them: the shop first, then godowns by name. */
+export function placeOrder(locs: Location[]): Location[] {
+  return [...locs].sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'shop' ? -1 : 1));
 }

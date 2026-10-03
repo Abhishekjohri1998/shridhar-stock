@@ -97,6 +97,8 @@ export interface ImportReport {
 export const http = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body: unknown) => request<T>(path, send('POST', body)),
+  put: <T>(path: string, body: unknown) => request<T>(path, send('PUT', body)),
+  del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 };
 
 export const api = {

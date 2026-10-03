@@ -9,12 +9,17 @@ import {
   itemsFromCsv,
   itemsToCsv,
   normalisePhone,
+  parseCsv,
   ROLES,
+  ROUND_STEPS,
   toCsv,
+  toXlsx,
+  type Cell,
   type Item,
   type ItemInput,
   type Location,
   type Role,
+  type Vehicle,
 } from '@stock/core';
 import { anyone, publicPerson, requireRole } from '../auth';
 import { handler, HttpError } from '../http';
@@ -22,7 +27,7 @@ import { hashPin } from '../pin';
 import { post, reconcile } from '../posting';
 import { getRepo } from '../store';
 import { newId } from '../store/types';
-import { shopOf } from '../setup';
+import { placeOrder, settingsOf, shopOf } from '../setup';
 import { dropPerson, emit } from '../events';
 
 export const adminRoutes = Router();
@@ -148,10 +153,8 @@ adminRoutes.get(
   '/locations',
   anyone,
   handler(async (_req, res) => {
-    const locs = await getRepo().listLocations();
     // The shop first, then godowns by name.
-    locs.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'shop' ? -1 : 1));
-    res.json(locs);
+    res.json(placeOrder(await getRepo().listLocations()));
   }),
 );
 
@@ -378,6 +381,102 @@ adminRoutes.post(
   }),
 );
 
+// ---------------------------------------------------------------- settings
+
+adminRoutes.get(
+  '/admin/settings',
+  adminOrOwner,
+  handler(async (_req, res) => {
+    res.json(await settingsOf(getRepo()));
+  }),
+);
+
+adminRoutes.put(
+  '/admin/settings',
+  admin,
+  handler(async (req, res) => {
+    const body = z
+      .object({ roundTo: z.number().refine((n) => (ROUND_STEPS as readonly number[]).includes(n), 'Round to none, 1, 5 or 10 rupees') })
+      .parse(req.body);
+    const repo = getRepo();
+    const next = { ...(await settingsOf(repo)), roundTo: body.roundTo as (typeof ROUND_STEPS)[number] };
+    await repo.putDoc('meta', { id: 'settings', ...next });
+    // Every screen showing a bill total shows it rounded the new way.
+    emit('bills');
+    res.json(next);
+  }),
+);
+
+// ---------------------------------------------------------------- vehicles
+
+const vehicleBody = z.object({
+  number: z.string().trim().min(1, 'Give the vehicle number').max(40),
+  type: z.string().trim().max(30).default(''),
+  driverName: z.string().trim().max(60).default(''),
+  driverPhone: z.string().trim().max(20).default(''),
+  active: z.boolean().optional(),
+});
+
+/** "KA-17 AB 1234" and "ka17ab1234" are the same vehicle. */
+export const vehicleKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9\u0c80-\u0cff]/g, '');
+
+/** The same number twice would make "trips by vehicle" count one vehicle as two. */
+async function checkVehicle(b: z.infer<typeof vehicleBody>, id?: string): Promise<string> {
+  const phone = b.driverPhone ? normalisePhone(b.driverPhone) : '';
+  if (b.driverPhone && phone.length !== 10) throw new HttpError(400, 'The driver\'s phone should be 10 digits');
+  const all = await getRepo().listDocs<Vehicle>('vehicles');
+  if (all.some((v) => v.id !== id && vehicleKey(v.number) === vehicleKey(b.number))) throw new HttpError(409, 'This vehicle is already in the list');
+  return phone;
+}
+
+adminRoutes.get(
+  '/admin/vehicles',
+  admin,
+  handler(async (_req, res) => {
+    const all = await getRepo().listDocs<Vehicle>('vehicles');
+    res.json(all.sort((a, b) => Number(b.active) - Number(a.active) || a.number.localeCompare(b.number)));
+  }),
+);
+
+adminRoutes.post(
+  '/admin/vehicles',
+  admin,
+  handler(async (req, res) => {
+    const b = vehicleBody.parse(req.body);
+    const phone = await checkVehicle(b);
+    const v: Vehicle = { id: newId('veh'), number: b.number, type: b.type, driverName: b.driverName, driverPhone: phone, active: true };
+    await getRepo().putDoc('vehicles', v);
+    res.status(201).json(v);
+  }),
+);
+
+adminRoutes.put(
+  '/admin/vehicles/:id',
+  admin,
+  handler(async (req, res) => {
+    const b = vehicleBody.parse(req.body);
+    const repo = getRepo();
+    const old = await repo.getDoc<Vehicle>('vehicles', String(req.params.id));
+    if (!old) throw new HttpError(404, 'No such vehicle');
+    const phone = await checkVehicle(b, old.id);
+    const v: Vehicle = { ...old, number: b.number, type: b.type, driverName: b.driverName, driverPhone: phone, active: b.active ?? old.active };
+    await repo.putDoc('vehicles', v);
+    res.json(v);
+  }),
+);
+
+/** Past trips keep the number written on them, so removing a vehicle loses no history. */
+adminRoutes.delete(
+  '/admin/vehicles/:id',
+  admin,
+  handler(async (req, res) => {
+    const repo = getRepo();
+    if (!(await repo.getDoc<Vehicle>('vehicles', String(req.params.id)))) throw new HttpError(404, 'No such vehicle');
+    await repo.deleteDoc('vehicles', String(req.params.id));
+    res.json({ ok: true });
+  }),
+);
+
 // ---------------------------------------------------------------- files
 
 /** A shop day starts at midnight in India, wherever the server is. */
@@ -400,6 +499,50 @@ adminRoutes.get(
     const [items, shop] = await Promise.all([repo.listItems(), shopOf(repo)]);
     items.sort((a, b) => (a.nameEn || a.nameKn).localeCompare(b.nameEn || b.nameKn));
     sendCsv(res, 'items.csv', itemsToCsv(items, shop.id));
+  }),
+);
+
+function sendXlsx(res: import('express').Response, name: string, body: Uint8Array): void {
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="' + name + '"');
+  res.send(Buffer.from(body));
+}
+
+/** The items file as an Excel workbook: the same columns as items.csv. */
+adminRoutes.get(
+  '/export/items.xlsx',
+  adminOrOwner,
+  handler(async (_req, res) => {
+    const repo = getRepo();
+    const [items, shop] = await Promise.all([repo.listItems(), shopOf(repo)]);
+    items.sort((a, b) => (a.nameEn || a.nameKn).localeCompare(b.nameEn || b.nameKn));
+    const [header = [], ...rows] = parseCsv(itemsToCsv(items, shop.id)).filter((r) => r.some((c) => c !== ''));
+    // Numbers go in as numbers, so a price can be summed; everything else stays text.
+    const typed: Cell[][] = rows.map((r) => r.map((c) => (/^-?\d+(\.\d+)?$/.test(c) && !/^0\d/.test(c) ? Number(c) : c)));
+    sendXlsx(res, 'items.xlsx', toXlsx([{ name: 'Items', header, rows: typed }]));
+  }),
+);
+
+/** Stock as a workbook: one sheet per place, the shop first, the same columns as stock.csv. */
+adminRoutes.get(
+  '/export/stock.xlsx',
+  adminOrOwner,
+  handler(async (_req, res) => {
+    const repo = getRepo();
+    const [items, locs, stock] = await Promise.all([repo.listItems(), repo.listLocations(), repo.listStock()]);
+    const qty = new Map(stock.map((s) => [s.itemId + '|' + s.locationId, s.qty]));
+    const sheets = placeOrder(locs).map((loc) => ({
+      name: loc.name,
+      header: ['item_id', 'name_en', 'name_kn', 'qty_base', 'base_unit', 'as_units', 'rack', 'running_out_below', 'status'],
+      rows: items
+        .filter((i) => i.active)
+        .map((it) => {
+          const q = qty.get(it.id + '|' + loc.id) ?? 0;
+          const level = it.reorderAt[loc.id];
+          return [it.id, it.nameEn, it.nameKn, q, it.units[0]!.code, describeQty(it, q), it.racks[loc.id] ?? '', level ?? '', q < 0 ? 'below zero' : level != null && q < level ? 'running low' : ''];
+        }),
+    }));
+    sendXlsx(res, 'stock.xlsx', toXlsx(sheets));
   }),
 );
 

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { describeQty, formatRupees, itemMatches, pickName, type Delivery, type Ink, type ItemUnit, type OrderRequest, type Transfer } from '@stock/core';
+import { describeQty, formatRupees, groupPick, itemMatches, pickName, type Delivery, type Ink, type ItemUnit, type OrderRequest, type Transfer } from '@stock/core';
 import { http } from '../lib/api';
 import { useLive } from '../lib/live';
 import { useLoad, useSession } from '../lib/session';
 import { statusWord } from '../lib/words';
-import { Empty, InkView, Loading, Money, Status, Tabs, useBi, when } from '../components/ui';
+import { Empty, InkView, Loading, Money, Status, Tabs, useBi, VehicleOptions, when } from '../components/ui';
 import { WriteToFind, type WrittenResult } from '../components/WriteToFind';
 import type { Summary } from './admin/Home';
 
@@ -65,6 +65,9 @@ interface WorkerLine {
   itemId?: string;
   itemName: string;
   unit?: string;
+  /** Where it is kept: the shop's rack, else the first godown's that has one. */
+  place?: string;
+  placeOrder?: number;
   rack: string;
   fetched: boolean;
 }
@@ -72,6 +75,9 @@ interface WorkerBill {
   no: number;
   at: string;
   customer: string;
+  total: number;
+  rounded: number;
+  roundOff: number;
   lines: WorkerLine[];
 }
 
@@ -92,14 +98,15 @@ export function WorkerHome({ screen = false }: { screen?: boolean }) {
   if (!value) return <Loading />;
   if (value.length === 0) return <Empty>{bi('No bills yet today. New bills appear here by themselves.', 'ಇಂದು ಇನ್ನೂ ಬಿಲ್ ಇಲ್ಲ. ಹೊಸ ಬಿಲ್‌ಗಳು ತಾವಾಗಿ ಇಲ್ಲಿ ಬರುತ್ತವೆ.')}</Empty>;
   const bill = value.find((b) => b.no === open) ?? value[0]!;
-  const groups = new Map<string, WorkerLine[]>();
-  for (const l of bill.lines) {
-    const k = l.rack || bi('Not on a rack', 'ರ‍್ಯಾಕ್ ಇಲ್ಲ');
-    groups.set(k, [...(groups.get(k) ?? []), l]);
-  }
+  // The shop's racks first, then each godown's, then anything with no rack.
+  const groups = groupPick(bill.lines);
   const done = bill.lines.filter((l) => l.fetched).length;
   const tickLine = async (l: WorkerLine) => {
     await http.post('/worker/bills/' + bill.no + '/lines/' + l.i + '/fetched', { fetched: !l.fetched });
+    setVersion((v) => v + 1);
+  };
+  const tickAll = async (fetched: boolean) => {
+    await http.post('/worker/bills/' + bill.no + '/fetched', { fetched });
     setVersion((v) => v + 1);
   };
   return (
@@ -121,13 +128,26 @@ export function WorkerHome({ screen = false }: { screen?: boolean }) {
           {done} {bi('of', '/')} {bill.lines.length} {bi('fetched', 'ತಂದಿದೆ')}
         </span>
       </div>
-      <p className="muted">{when(bill.at, lang)}</p>
+      <p className="muted">
+        {when(bill.at, lang)} · {bi('Total', 'ಒಟ್ಟು')} <b>{formatRupees(bill.rounded)}</b>
+        {bill.roundOff !== 0 && ' (' + formatRupees(bill.total) + ' ' + bi('round off', 'ರೌಂಡ್ ಆಫ್') + ' ' + (bill.roundOff > 0 ? '+' : '−') + formatRupees(Math.abs(bill.roundOff)) + ')'}
+      </p>
+      {!screen && bill.lines.length > 1 && (
+        <div className="bar">
+          <button className="btn small" disabled={done === bill.lines.length} onClick={() => tickAll(true)}>
+            ✓ {bi('Select all', 'ಎಲ್ಲ ಆಯ್ಕೆ')}
+          </button>
+          <button className="btn small" disabled={done === 0} onClick={() => tickAll(false)}>
+            {bi('Select none', 'ಯಾವುದೂ ಬೇಡ')}
+          </button>
+        </div>
+      )}
       {done === bill.lines.length && (
         <div className="banner ok">✓ {bi('Everything on this bill is fetched.', 'ಈ ಬಿಲ್‌ನ ಎಲ್ಲವನ್ನೂ ತರಲಾಗಿದೆ.')}</div>
       )}
-      {[...groups.entries()].map(([rack, lines]) => (
-        <div key={rack} className="card">
-          <div className="rack">📍 {rack}</div>
+      {groups.map(({ key, place, rack, other, lines }) => (
+        <div key={key} className="card">
+          <div className="rack">📍 {other ? bi('Other place', 'ಬೇರೆ ಸ್ಥಳ') : (place ? place + ' · ' : '') + rack}</div>
           {lines.map((l) => (
             <div key={l.i} className={'pick ' + (l.fetched ? 'got' : '')}>
               <div className="grow">
@@ -297,7 +317,8 @@ function SendCard({ t, nm, dq, rack, have, onDone }: { t: Transfer; nm: (id: str
       <div className="grid2" style={{ marginTop: 10 }}>
         <label className="field">
           <span>{bi('Vehicle', 'ವಾಹನ')}</span>
-          <input value={vehicle} onChange={(e) => setVehicle(e.target.value)} placeholder="KA-17 AB 1234" />
+          <input list="vehicles" value={vehicle} onChange={(e) => setVehicle(e.target.value)} placeholder="KA-17 AB 1234" />
+          <VehicleOptions />
         </label>
         <label className="field">
           <span>{bi('Driver', 'ಚಾಲಕ')}</span>
@@ -389,7 +410,8 @@ function VendorCard({ p, onDone, lang, bi }: { p: VendorPo; onDone: () => void; 
           </label>
           <label className="field">
             <span>{bi('Vehicle', 'ವಾಹನ')}</span>
-            <input value={vehicle} onChange={(e) => setVehicle(e.target.value)} />
+            <input list="vehicles" value={vehicle} onChange={(e) => setVehicle(e.target.value)} />
+            <VehicleOptions />
           </label>
           <label className="field">
             <span>{bi('Arrives', 'ತಲುಪುವ ಸಮಯ')}</span>

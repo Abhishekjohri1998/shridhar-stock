@@ -19,6 +19,7 @@ import { StockPage } from './pages/admin/Stock';
 import { PlacesPage } from './pages/admin/Places';
 import { PeoplePage } from './pages/admin/People';
 import { FilesPage } from './pages/admin/Files';
+import { VehiclesPage } from './pages/admin/Vehicles';
 
 /** Each role's menu. [path, English, Kannada] */
 const NAV: Record<Role, [string, string, string][]> = {
@@ -36,6 +37,7 @@ const NAV: Record<Role, [string, string, string][]> = {
     ['/admin/items', 'Items', 'ಸಾಮಾನು'],
     ['/admin/places', 'Places', 'ಸ್ಥಳಗಳು'],
     ['/admin/people', 'People', 'ಜನರು'],
+    ['/admin/vehicles', 'Vehicles', 'ವಾಹನಗಳು'],
     ['/admin/files', 'Excel', 'ಎಕ್ಸೆಲ್'],
     ['/admin/settings', 'Settings', 'ಸೆಟ್ಟಿಂಗ್ಸ್'],
   ],
@@ -160,6 +162,7 @@ export function App() {
               <Route path="/admin/stock" element={<StockPage />} />
               <Route path="/admin/places" element={<PlacesPage />} />
               <Route path="/admin/people" element={<PeoplePage />} />
+              <Route path="/admin/vehicles" element={<VehiclesPage />} />
               <Route path="/admin/files" element={<FilesPage />} />
             </>
           )}

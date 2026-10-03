@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import {
   proposeRefill,
+  roundOff,
   type BillMirror,
   type CustomerProfile,
   type Delivery,
@@ -10,11 +11,13 @@ import {
   type PurchaseOrder,
   type Supplier,
   type Transfer,
+  type Vehicle,
 } from '@stock/core';
 import { requireRole } from '../auth';
 import { handler, HttpError } from '../http';
 import { emit } from '../events';
 import { getRepo } from '../store';
+import { placeOrder, settingsOf } from '../setup';
 
 /**
  * What each role reads, and the small things each may do.
@@ -37,6 +40,11 @@ export function istToday(now = Date.now()): string {
 }
 
 const byNoDesc = <T extends { no: number }>(a: T, b: T) => b.no - a.no;
+
+function rounding(total: number, step: number): { rounded: number; roundOff: number } {
+  const r = roundOff(total, step);
+  return { rounded: r.rounded, roundOff: r.diff };
+}
 
 // ---------------------------------------------------------------- admin
 
@@ -93,8 +101,11 @@ roleRoutes.get(
   adminOrOwner,
   handler(async (req, res) => {
     const limit = Math.min(500, Number(req.query.limit) || 100);
-    const bills = (await getRepo().listDocs<BillMirror>('bills')).sort(byNoDesc).slice(0, limit);
-    res.json(bills);
+    const repo = getRepo();
+    const [all, settings] = await Promise.all([repo.listDocs<BillMirror>('bills'), settingsOf(repo)]);
+    const bills = all.sort(byNoDesc).slice(0, limit);
+    // The total as the counter collects it, with the round-off line that gets there.
+    res.json(bills.map((b) => ({ ...b, ...rounding(b.total, settings.roundTo) })));
   }),
 );
 
@@ -151,10 +162,15 @@ roleRoutes.get(
   requireRole('worker', 'admin', 'owner'),
   handler(async (_req, res) => {
     const repo = getRepo();
-    const [bills, items, locs] = await Promise.all([repo.listDocs<BillMirror>('bills'), repo.listItems(), repo.listLocations()]);
-    const shop = locs.find((l) => l.kind === 'shop');
+    const [bills, items, locs, settings] = await Promise.all([repo.listDocs<BillMirror>('bills'), repo.listItems(), repo.listLocations(), settingsOf(repo)]);
+    const places = placeOrder(locs.filter((l) => l.active));
     const byId = new Map(items.map((i) => [i.id, i]));
     const today = istToday();
+    /** Where to fetch it from: the shop's rack if it has one, else the first godown that does. */
+    const keptAt = (item: Item | undefined) => {
+      const i = item ? places.findIndex((p) => (item.racks[p.id] ?? '').trim()) : -1;
+      return i < 0 ? { rack: '' } : { place: places[i]!.name, placeOrder: i, rack: item!.racks[places[i]!.id]!.trim() };
+    };
     res.json(
       bills
         .filter((b) => b.at >= today && !b.cancelled)
@@ -164,6 +180,8 @@ roleRoutes.get(
           no: b.no,
           at: b.at,
           customer: b.customer?.name ?? '',
+          total: b.total,
+          ...rounding(b.total, settings.roundTo),
           lines: b.lines.map((l) => {
             // Until a person confirms it, the reader's best guess says which rack to walk to.
             const guess = l.itemId ?? l.reading?.itemId;
@@ -178,7 +196,7 @@ roleRoutes.get(
               itemName: item ? [item.nameKn, item.nameEn].filter(Boolean).join(' · ') : '',
               unit: l.unit,
               baseQty: l.baseQty,
-              rack: item && shop ? item.racks[shop.id] ?? '' : '',
+              ...keptAt(item),
               fetched: !!l.fetched,
             };
           }),
@@ -201,6 +219,37 @@ roleRoutes.post(
     await repo.putDoc('bills', bill);
     emit('bills', {}, String(bill.no));
     res.json({ ok: true });
+  }),
+);
+
+/** Select all, or select none: every line of one bill ticked or unticked at once. */
+roleRoutes.post(
+  '/worker/bills/:no/fetched',
+  requireRole('worker', 'admin'),
+  handler(async (req, res) => {
+    const { fetched } = z.object({ fetched: z.boolean() }).parse(req.body);
+    const repo = getRepo();
+    const bill = await repo.getDoc<BillMirror>('bills', String(req.params.no));
+    if (!bill) throw new HttpError(404, 'No such bill');
+    for (const l of bill.lines) l.fetched = fetched;
+    await repo.putDoc('bills', bill);
+    emit('bills', {}, String(bill.no));
+    res.json({ ok: true, lines: bill.lines.length });
+  }),
+);
+
+// ---------------------------------------------------------------- vehicles
+
+/**
+ * The shop's vehicles, for the pick list on the transfer, dispatch and delivery forms. Number,
+ * type and driver's name only: the driver's phone stays with the admin.
+ */
+roleRoutes.get(
+  '/vehicles',
+  requireRole('admin', 'godown', 'vendor', 'delivery'),
+  handler(async (_req, res) => {
+    const all = await getRepo().listDocs<Vehicle>('vehicles');
+    res.json(all.filter((v) => v.active).sort((a, b) => a.number.localeCompare(b.number)).map((v) => ({ number: v.number, type: v.type, driverName: v.driverName })));
   }),
 );
 
