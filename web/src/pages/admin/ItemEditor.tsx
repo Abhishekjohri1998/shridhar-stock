@@ -82,7 +82,7 @@ export function ItemEditor() {
       </div>
 
       <div className="card">
-        <h2 className="subtitle" style={{ marginTop: 0 }}>{t('items.units')}</h2>
+        <h2 className="subtitle mt-0">{t('items.units')}</h2>
         <p className="muted">{t('items.unitHint')}</p>
         {form.units.map((u, i) => (
           <div className="unit" key={i}>
@@ -130,7 +130,7 @@ export function ItemEditor() {
                 <input inputMode="decimal" value={u.cost} onChange={(e) => setUnit(i, { cost: e.target.value })} />
               </label>
             </div>
-            {u.slabs.length > 0 && <div className="muted" style={{ marginBottom: 4 }}>{t('items.slabs')}</div>}
+            {u.slabs.length > 0 && <div className="muted mb-4">{t('items.slabs')}</div>}
             {u.slabs.map((sl, k) => (
               <div className="slab" key={k}>
                 <label className="field">

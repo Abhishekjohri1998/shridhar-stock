@@ -32,7 +32,7 @@ export function VehiclesPage() {
       )}
       {value.length === 0 && <Empty>{bi('No vehicles yet.', 'ಇನ್ನೂ ವಾಹನಗಳಿಲ್ಲ.')}</Empty>}
       {value.map((v) => (
-        <div className="card" key={v.id} onClick={() => setEditing(v)} style={{ cursor: 'pointer' }}>
+        <div className="card clickable" key={v.id} onClick={() => setEditing(v)}>
           <span className="name">{v.number}</span> {v.type && <span className="pill">{v.type}</span>}
           {!v.active && <span className="pill bad"> {t('people.off')}</span>}
           {(v.driverName || v.driverPhone) && <div className="muted">{[v.driverName, v.driverPhone].filter(Boolean).join(' · ')}</div>}

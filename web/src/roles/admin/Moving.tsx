@@ -6,7 +6,7 @@ import { itemName, placeName, qtyText, useCatalog } from '../../lib/catalog';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
 import { statusWord } from '../../lib/words';
-import { Empty, InkView, Loading, Status, useBi, when } from '../../components/ui';
+import { Empty, InkView, Loading, Status, useBi, when, Table } from '../../components/ui';
 
 /**
  * A quantity typed in any of the item's units, held in base units: "2 pack" of Parle-G is 48.
@@ -35,11 +35,10 @@ function QtyInput({ item, base, onChange }: { item: Item | undefined; base: numb
           setText(e.target.value);
           const n = Number(e.target.value);
           if (item && Number.isFinite(n) && n >= 0) onChange(toBase(item, unit, n));
-        }}
-        style={{ width: 70 }}
+        }} className="in-qty"
       />
       {item && item.units.length > 1 ? (
-        <select value={unit} onChange={(e) => setUnit(e.target.value)} style={{ width: 'auto' }}>
+        <select value={unit} onChange={(e) => setUnit(e.target.value)} className="w-auto">
           {item.units.map((u) => (
             <option key={u.code} value={u.code}>
               {(lang === 'kn' && u.labelKn) || u.code}
@@ -116,7 +115,7 @@ export function RefillPage() {
         const lines = trip.lines.filter((l) => !off[key(trip.from, l.itemId)]).map((l) => ({ itemId: l.itemId, qty: edits[key(trip.from, l.itemId)] ?? l.qty }));
         return (
           <div className="card" key={trip.from}>
-            <div className="bar" style={{ justifyContent: 'space-between' }}>
+            <div className="bar between">
               <span className="name">
                 🚚 {bi('From', 'ಇಂದ')} {placeName(locs, trip.from, lang)} · {lines.length} {bi('items', 'ಸಾಮಾನು')}
               </span>
@@ -125,7 +124,7 @@ export function RefillPage() {
               </button>
             </div>
             <div className="scroll">
-              <table className="list plain">
+              <Table className="list plain">
                 <thead>
                   <tr>
                     <th>{bi('Item', 'ಸಾಮಾನು')}</th>
@@ -158,14 +157,14 @@ export function RefillPage() {
                     );
                   })}
                 </tbody>
-              </table>
+              </Table>
             </div>
           </div>
         );
       })}
       {value.refill.buy.filter((b) => !pending.has(b.itemId)).length > 0 && (
         <div className="card">
-          <div className="bar" style={{ justifyContent: 'space-between' }}>
+          <div className="bar between">
             <span className="name">🛒 {bi('No godown has enough: buy from a supplier', 'ಯಾವ ಗೋದಾಮಿನಲ್ಲೂ ಸಾಕಷ್ಟಿಲ್ಲ: ಸರಬರಾಜುದಾರರಿಂದ ಖರೀದಿಸಿ')}</span>
             <button className="btn primary" onClick={() => nav('/admin/purchases?new=buy')}>
               {bi('Make a purchase order', 'ಖರೀದಿ ಆರ್ಡರ್ ಮಾಡಿ')}
@@ -262,7 +261,7 @@ function TransferCard({
   const toShop = locs.find((l) => l.id === t.to)?.kind === 'shop';
   return (
     <div className="card">
-      <div className="bar" style={{ justifyContent: 'space-between' }}>
+      <div className="bar between">
         <span className="name">
           #{t.no} · {placeName(locs, t.from, lang)} → {placeName(locs, t.to, lang)}
         </span>
@@ -277,7 +276,7 @@ function TransferCard({
       </div>
       {t.note && <div className="muted">“{t.note}”</div>}
       {t.noteInk && <InkView ink={t.noteInk} height={28} />}
-      <table className="list plain">
+      <Table className="list plain">
         <thead>
           <tr>
             <th>{bi('Item', 'ಸಾಮಾನು')}</th>
@@ -308,8 +307,8 @@ function TransferCard({
             );
           })}
         </tbody>
-      </table>
-      <div className="bar" style={{ marginTop: 8 }}>
+      </Table>
+      <div className="bar mt-8">
         {t.status === 'sent' && toShop && (
           <button className="btn primary" onClick={() => act('/transfers/' + t.id + '/receive', { received: Object.fromEntries(t.lines.map((l) => [l.itemId, got[l.itemId] ?? l.sent ?? l.qty])) })}>
             {bi('Received at the shop', 'ಅಂಗಡಿಗೆ ಬಂದಿದೆ')}
@@ -371,7 +370,7 @@ function NewTransfer({ items, locs, onDone }: { items: Map<string, Item>; locs: 
       </div>
       <input placeholder={bi('Add an item…', 'ಸಾಮಾನು ಸೇರಿಸಿ…')} value={q} onChange={(e) => setQ(e.target.value)} />
       {found.length > 0 && (
-        <div className="chips" style={{ marginTop: 6 }}>
+        <div className="chips mt-6">
           {found.map((i) => (
             <button
               key={i.id}
@@ -387,7 +386,7 @@ function NewTransfer({ items, locs, onDone }: { items: Map<string, Item>; locs: 
         </div>
       )}
       {lines.map((l, idx) => (
-        <div className="bar" key={l.itemId} style={{ marginTop: 6 }}>
+        <div className="bar mt-6" key={l.itemId}>
           <span className="grow name">{itemName(items, l.itemId, lang)}</span>
           <QtyInput item={items.get(l.itemId)} base={l.qty} onChange={(b) => setLines(lines.map((x, j) => (j === idx ? { ...x, qty: b } : x)))} />
           <button className="btn ghost small" onClick={() => setLines(lines.filter((_, j) => j !== idx))}>
@@ -395,7 +394,7 @@ function NewTransfer({ items, locs, onDone }: { items: Map<string, Item>; locs: 
           </button>
         </div>
       ))}
-      <div className="bar" style={{ marginTop: 10 }}>
+      <div className="bar mt-10">
         <button className="btn primary" disabled={!lines.length || from === to || lines.some((l) => !(l.qty > 0))} onClick={save}>
           {bi('Ask for it', 'ಕೇಳಿ')}
         </button>

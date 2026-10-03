@@ -83,7 +83,7 @@ export function FilesPage({ readOnly = false }: { readOnly?: boolean }) {
 
       {!readOnly && (
       <div className="card">
-        <h2 className="subtitle" style={{ marginTop: 0 }}>{t('files.import')}</h2>
+        <h2 className="subtitle mt-0">{t('files.import')}</h2>
         {done && <div className="msg ok">{done}</div>}
         <label className="field">
           <span>{t('files.pick')}</span>

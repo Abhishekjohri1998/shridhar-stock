@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { formatRupees, itemMatches, pickName } from '@stock/core';
 import { api } from '../../lib/api';
 import { useLoad, useSession } from '../../lib/session';
+import { Table } from '../../components/ui';
 
 export function ItemsPage() {
   const { t, lang } = useSession();
@@ -23,7 +24,7 @@ export function ItemsPage() {
           + {t('items.new')}
         </Link>
       </div>
-      <label className="check" style={{ marginBottom: 10 }}>
+      <label className="check mb-10">
         <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
         {t('items.showInactive')}
       </label>
@@ -31,7 +32,7 @@ export function ItemsPage() {
       {items && items.length === 0 && <div className="card">{t('items.empty')}</div>}
       {shown.length > 0 && (
         <div className="scroll">
-          <table className="list">
+          <Table className="list">
             <tbody>
               {shown.map((i) => (
                 <tr key={i.id} className="link" onClick={() => nav('/admin/items/' + i.id)}>
@@ -51,7 +52,7 @@ export function ItemsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </div>
       )}
     </>

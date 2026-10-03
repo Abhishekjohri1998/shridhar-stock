@@ -6,7 +6,7 @@ import { itemName, placeName, useCatalog } from '../../lib/catalog';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
 import { statusWord } from '../../lib/words';
-import { Empty, Loading, Money, Status, useBi, when } from '../../components/ui';
+import { Empty, Loading, Money, Status, useBi, when, Table } from '../../components/ui';
 
 interface Line {
   itemId: string;
@@ -99,7 +99,7 @@ function OrderCard({ p, supplier, items, to, act }: { p: PurchaseOrder & { recei
   const rec = new Map((p.received ?? []).map((r) => [r.itemId, r]));
   return (
     <div className="card">
-      <div className="bar" style={{ justifyContent: 'space-between' }}>
+      <div className="bar between">
         <span className="name">
           #{p.no} · {supplier?.name ?? p.supplierId} → {to}
         </span>
@@ -113,7 +113,7 @@ function OrderCard({ p, supplier, items, to, act }: { p: PurchaseOrder & { recei
         {p.vehicle && ' · 🚚 ' + p.vehicle}
         {p.eta && ' · ' + bi('arrives', 'ತಲುಪುವುದು') + ' ' + p.eta}
       </div>
-      <table className="list plain">
+      <Table className="list plain">
         <thead>
           <tr>
             <th>{bi('Item', 'ಸಾಮಾನು')}</th>
@@ -134,8 +134,8 @@ function OrderCard({ p, supplier, items, to, act }: { p: PurchaseOrder & { recei
                 <td className="num">{formatRupees(l.cost)}</td>
                 {receiving && (
                   <td>
-                    <input inputMode="decimal" value={got[l.itemId]!.qty} onChange={(e) => setGot({ ...got, [l.itemId]: { ...got[l.itemId]!, qty: e.target.value } })} style={{ width: 64 }} aria-label="qty" />{' '}
-                    ₹<input inputMode="decimal" value={got[l.itemId]!.cost} onChange={(e) => setGot({ ...got, [l.itemId]: { ...got[l.itemId]!, cost: e.target.value } })} style={{ width: 80 }} aria-label="cost" />
+                    <input inputMode="decimal" value={got[l.itemId]!.qty} onChange={(e) => setGot({ ...got, [l.itemId]: { ...got[l.itemId]!, qty: e.target.value } })} className="in-qty" aria-label="qty" />{' '}
+                    ₹<input inputMode="decimal" value={got[l.itemId]!.cost} onChange={(e) => setGot({ ...got, [l.itemId]: { ...got[l.itemId]!, cost: e.target.value } })} className="in-price" aria-label="cost" />
                   </td>
                 )}
                 {!receiving && p.status === 'received' && (
@@ -147,8 +147,8 @@ function OrderCard({ p, supplier, items, to, act }: { p: PurchaseOrder & { recei
             );
           })}
         </tbody>
-      </table>
-      <div className="bar" style={{ marginTop: 8 }}>
+      </Table>
+      <div className="bar mt-8">
         <b className="grow">
           <Money v={total} />
         </b>
@@ -264,7 +264,7 @@ function NewOrder({ items, locs, sups, fromBuyList, onDone }: { items: Map<strin
       </div>
       <input placeholder={bi('Add an item…', 'ಸಾಮಾನು ಸೇರಿಸಿ…')} value={q} onChange={(e) => setQ(e.target.value)} />
       {found.length > 0 && (
-        <div className="chips" style={{ marginTop: 6 }}>
+        <div className="chips mt-6">
           {found.map((i) => (
             <button key={i.id} className="chip" onClick={() => add(i)}>
               {pickName(i.nameEn, i.nameKn, lang)}
@@ -275,16 +275,15 @@ function NewOrder({ items, locs, sups, fromBuyList, onDone }: { items: Map<strin
       {lines.map((l, i) => {
         const it = items.get(l.itemId);
         return (
-          <div className="bar" key={l.itemId} style={{ marginTop: 6 }}>
+          <div className="bar mt-6" key={l.itemId}>
             <span className="grow name">{itemName(items, l.itemId, lang)}</span>
-            <input inputMode="decimal" value={l.qty} onChange={(e) => set(i, { qty: Number(e.target.value) || 0 })} style={{ width: 64 }} aria-label="qty" />
+            <input inputMode="decimal" value={l.qty} onChange={(e) => set(i, { qty: Number(e.target.value) || 0 })} className="in-qty" aria-label="qty" />
             <select
               value={l.unit}
               onChange={(e) => {
                 const u = it?.units.find((x) => x.code === e.target.value);
                 set(i, { unit: e.target.value, cost: u?.cost ?? l.cost });
-              }}
-              style={{ width: 'auto' }}
+              }} className="w-auto"
             >
               {it?.units.map((u) => (
                 <option key={u.code} value={u.code}>
@@ -292,14 +291,14 @@ function NewOrder({ items, locs, sups, fromBuyList, onDone }: { items: Map<strin
                 </option>
               ))}
             </select>
-            ₹<input inputMode="decimal" value={l.cost} onChange={(e) => set(i, { cost: Number(e.target.value) || 0 })} style={{ width: 80 }} aria-label="cost" />
+            ₹<input inputMode="decimal" value={l.cost} onChange={(e) => set(i, { cost: Number(e.target.value) || 0 })} className="in-price" aria-label="cost" />
             <button className="btn ghost small" onClick={() => setLines(lines.filter((_, j) => j !== i))}>
               ✕
             </button>
           </div>
         );
       })}
-      <div className="bar" style={{ marginTop: 10 }}>
+      <div className="bar mt-10">
         <b className="grow">
           <Money v={lines.reduce((s, l) => s + l.qty * l.cost, 0)} />
         </b>
@@ -319,7 +318,7 @@ function Suppliers({ sups, onDone }: { sups: Supplier[]; onDone: () => void }) {
   const [editing, setEditing] = useState<Supplier | 'new' | null>(null);
   return (
     <>
-      <button className="btn" onClick={() => setEditing('new')} style={{ marginBottom: 10 }}>
+      <button className="btn mb-10" onClick={() => setEditing('new')}>
         + {bi('New supplier', 'ಹೊಸ ಸರಬರಾಜುದಾರ')}
       </button>
       {editing && (
@@ -332,7 +331,7 @@ function Suppliers({ sups, onDone }: { sups: Supplier[]; onDone: () => void }) {
         />
       )}
       {sups.map((s) => (
-        <div className="card" key={s.id} onClick={() => setEditing(s)} style={{ cursor: 'pointer' }}>
+        <div className="card clickable" key={s.id} onClick={() => setEditing(s)}>
           <span className="name">{s.name}</span> <span className="muted">· {s.phone}</span>
           {!s.active && <span className="pill bad"> {bi('Switched off', 'ನಿಲ್ಲಿಸಲಾಗಿದೆ')}</span>}
           {s.address && <div className="muted">{s.address}</div>}

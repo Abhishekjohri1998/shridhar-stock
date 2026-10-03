@@ -31,7 +31,7 @@ export function WriteToFind({ onResult, label }: { onResult: (r: WrittenResult) 
     );
   }
   return (
-    <div className="card" style={{ background: 'var(--receipt)' }}>
+    <div className="card receipt">
       {error && <div className="msg err">{error}</div>}
       {busy ? (
         <p className="muted">{bi('Reading…', 'ಓದುತ್ತಿದೆ…')}</p>

@@ -13,6 +13,7 @@ import {
 } from '@stock/core';
 import { api } from '../../lib/api';
 import { useLoad, useSession } from '../../lib/session';
+import { Table } from '../../components/ui';
 
 export function StockPage({ readOnly = false }: { readOnly?: boolean }) {
   const { t, lang } = useSession();
@@ -61,7 +62,7 @@ export function StockPage({ readOnly = false }: { readOnly?: boolean }) {
         <div className="card">{t('common.none')}</div>
       ) : (
         <div className="scroll">
-          <table className="list">
+          <Table className="list">
             <thead>
               <tr>
                 <th>{t('stock.item')}</th>
@@ -97,7 +98,7 @@ export function StockPage({ readOnly = false }: { readOnly?: boolean }) {
                 </Fragment>
               ))}
             </tbody>
-          </table>
+          </Table>
         </div>
       )}
     </>
@@ -207,7 +208,7 @@ function ItemStock({ item, locs, onChanged }: { item: Item; locs: Location[]; on
       <h3 className="subtitle">{t('stock.moves')}</h3>
       {(moves.value ?? []).length === 0 && <p className="muted">{t('common.none')}</p>}
       {(moves.value ?? []).map((m) => (
-        <div key={m.id} className="muted" style={{ padding: '4px 0', borderBottom: '1px solid var(--line)' }}>
+        <div key={m.id} className="muted move-row">
           {new Date(m.at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })} ·{' '}
           <b>{t(('stock.kind.' + m.kind) as MsgKey)}</b> · {m.from ? placeName(m.from) + ' −' : placeName(m.to) + ' +'}
           {describeQty(item, m.qty, lang)}

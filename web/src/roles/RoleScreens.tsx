@@ -4,7 +4,8 @@ import { http } from '../lib/api';
 import { useLive } from '../lib/live';
 import { useLoad, useSession } from '../lib/session';
 import { statusWord } from '../lib/words';
-import { Empty, InkView, Loading, Money, Status, Tabs, useBi, VehicleOptions, when } from '../components/ui';
+import { Empty, Greeting, InkView, Loading, Money, Status, Tabs, Tile, useBi, useWeekSales, VehicleOptions, WeekChart, when, Table } from '../components/ui';
+import type { IconName } from '../components/Icon';
 import { WriteToFind, type WrittenResult } from '../components/WriteToFind';
 import type { Summary } from './admin/Home';
 
@@ -23,31 +24,30 @@ function useTick(ms: number) {
 export function OwnerHome() {
   const bi = useBi();
   const live = useLive('bills', 'stock', 'transfers', 'pos', 'deliveries', 'orders');
+  const { me } = useSession();
   const { value: s, error } = useLoad(() => http.get<Summary>('/admin/summary'), [live]);
+  const week = useWeekSales([live]);
   if (error) return <div className="msg err">{error}</div>;
   if (!s) return <Loading />;
   const rate = s.handwrittenLines ? Math.round((s.autoRead / s.handwrittenLines) * 100) : 0;
-  const tile = (label: string, v: React.ReactNode, tone = '') => (
-    <div className={'tile ' + tone}>
-      <b>{v}</b>
-      {label}
-    </div>
-  );
+  const tile = (label: string, v: React.ReactNode, tone = '', icon?: IconName) => <Tile n={v} label={label} tone={tone} icon={icon} />;
   return (
     <>
-      <h1 className="title">{bi('How the shop is doing', 'ಅಂಗಡಿ ಹೇಗೆ ನಡೆಯುತ್ತಿದೆ')}</h1>
+      {me && <Greeting name={me.name} />}
+      <h2 className="subtitle">{bi('How the shop is doing', 'ಅಂಗಡಿ ಹೇಗೆ ನಡೆಯುತ್ತಿದೆ')}</h2>
+      {week && <WeekChart days={week} />}
       <div className="tiles">
-        {tile(bi('Sales today', 'ಇಂದಿನ ಮಾರಾಟ'), <Money v={s.salesToday} />)}
-        {tile(bi('Bills today', 'ಇಂದಿನ ಬಿಲ್‌ಗಳು'), s.billsToday)}
-        {tile(bi('Money still due', 'ಬರಬೇಕಾದ ಹಣ'), <Money v={s.due} />, s.due ? 'warn' : '')}
-        {tile(bi('Stock value at cost', 'ಖರೀದಿ ಬೆಲೆಯಲ್ಲಿ ಸ್ಟಾಕ್'), <Money v={s.stockValue} />)}
-        {tile(bi('Running low', 'ಮುಗಿಯುತ್ತಿದೆ'), s.low, s.low ? 'warn' : '')}
-        {tile(bi('Below zero', 'ಸೊನ್ನೆಗಿಂತ ಕಡಿಮೆ'), s.negative, s.negative ? 'bad' : '')}
-        {tile(bi('On the way to the shop', 'ಅಂಗಡಿಗೆ ದಾರಿಯಲ್ಲಿ'), s.inTransit)}
-        {tile(bi('Open purchase orders', 'ತೆರೆದ ಖರೀದಿ ಆರ್ಡರ್'), s.openPos)}
-        {tile(bi('Handwriting read by itself', 'ತಾನಾಗಿ ಓದಿದ ಕೈಬರಹ'), rate + '%')}
+        {tile(bi('Sales today', 'ಇಂದಿನ ಮಾರಾಟ'), <Money v={s.salesToday} />, '', 'rupee')}
+        {tile(bi('Bills today', 'ಇಂದಿನ ಬಿಲ್‌ಗಳು'), s.billsToday, '', 'receipt')}
+        {tile(bi('Money still due', 'ಬರಬೇಕಾದ ಹಣ'), <Money v={s.due} />, s.due ? 'warn' : '', 'inbox')}
+        {tile(bi('Stock value at cost', 'ಖರೀದಿ ಬೆಲೆಯಲ್ಲಿ ಸ್ಟಾಕ್'), <Money v={s.stockValue} />, '', 'box')}
+        {tile(bi('Running low', 'ಮುಗಿಯುತ್ತಿದೆ'), s.low, s.low ? 'warn' : '', 'refill')}
+        {tile(bi('Below zero', 'ಸೊನ್ನೆಗಿಂತ ಕಡಿಮೆ'), s.negative, s.negative ? 'bad' : '', 'alert')}
+        {tile(bi('On the way to the shop', 'ಅಂಗಡಿಗೆ ದಾರಿಯಲ್ಲಿ'), s.inTransit, '', 'truck')}
+        {tile(bi('Open purchase orders', 'ತೆರೆದ ಖರೀದಿ ಆರ್ಡರ್'), s.openPos, '', 'cart')}
+        {tile(bi('Handwriting read by itself', 'ತಾನಾಗಿ ಓದಿದ ಕೈಬರಹ'), rate + '%', '', 'pen')}
       </div>
-      <p className="muted" style={{ marginTop: 14 }}>
+      <p className="muted mt-14">
         {bi('Read only. Reports and Excel files are under “Excel files”.', 'ನೋಡಲು ಮಾತ್ರ. ವರದಿ ಮತ್ತು ಎಕ್ಸೆಲ್ ಫೈಲ್‌ಗಳು “ಎಕ್ಸೆಲ್ ಫೈಲ್” ನಲ್ಲಿ.')}
       </p>
     </>
@@ -112,7 +112,7 @@ export function WorkerHome({ screen = false }: { screen?: boolean }) {
   return (
     <div className={screen ? 'worker screen' : 'worker'}>
       {!screen && value.length > 1 && (
-        <div className="chips" style={{ marginBottom: 10 }}>
+        <div className="chips mb-10">
           {value.map((b) => (
             <button key={b.no} className={'chip ' + (b.no === bill.no ? 'on' : '')} onClick={() => setOpen(b.no)}>
               #{b.no} · {b.customer || bi('walk-in', 'ಗ್ರಾಹಕ')} · {b.lines.filter((l) => l.fetched).length}/{b.lines.length}
@@ -120,8 +120,8 @@ export function WorkerHome({ screen = false }: { screen?: boolean }) {
           ))}
         </div>
       )}
-      <div className="bar" style={{ justifyContent: 'space-between' }}>
-        <h1 className="title" style={{ margin: 0 }}>
+      <div className="bar between">
+        <h1 className="title m-0">
           {bi('Bill', 'ಬಿಲ್')} #{bill.no} · {bill.customer || bi('walk-in', 'ಗ್ರಾಹಕ')}
         </h1>
         <span className={'pill ' + (done === bill.lines.length ? 'ok' : 'warn')}>
@@ -246,8 +246,8 @@ export function GodownHome() {
       )}
       {tab === 'stock' && (
         <>
-          <input placeholder={bi('Search', 'ಹುಡುಕಿ')} value={q} onChange={(e) => setQ(e.target.value)} style={{ marginBottom: 10 }} />
-          <table className="list">
+          <input placeholder={bi('Search', 'ಹುಡುಕಿ')} value={q} onChange={(e) => setQ(e.target.value)} className="mb-10" />
+          <Table className="list">
             <tbody>
               {value.stock
                 .filter((s) => s.qty !== 0 || q)
@@ -260,7 +260,7 @@ export function GodownHome() {
                   </tr>
                 ))}
             </tbody>
-          </table>
+          </Table>
         </>
       )}
     </>
@@ -285,14 +285,14 @@ function SendCard({ t, nm, dq, rack, have, onDone }: { t: Transfer; nm: (id: str
   };
   return (
     <div className="card">
-      <div className="bar" style={{ justifyContent: 'space-between' }}>
+      <div className="bar between">
         <span className="name">
           #{t.no} · {bi('for the shop', 'ಅಂಗಡಿಗೆ')}
         </span>
         <span className="muted">{when(t.at, lang)}</span>
       </div>
       {error && <div className="msg err">{error}</div>}
-      <table className="list plain">
+      <Table className="list plain">
         <thead>
           <tr>
             <th>{bi('Item', 'ಸಾಮಾನು')}</th>
@@ -308,13 +308,13 @@ function SendCard({ t, nm, dq, rack, have, onDone }: { t: Transfer; nm: (id: str
               <td className="muted">{rack(l.itemId)}</td>
               <td className="num">{dq(l.itemId, l.qty)}</td>
               <td className="num">
-                <input inputMode="decimal" value={sent[l.itemId] ?? ''} onChange={(e) => setSent({ ...sent, [l.itemId]: e.target.value })} style={{ width: 80 }} />
+                <input inputMode="decimal" value={sent[l.itemId] ?? ''} onChange={(e) => setSent({ ...sent, [l.itemId]: e.target.value })} className="in-price" />
               </td>
             </tr>
           ))}
         </tbody>
-      </table>
-      <div className="grid2" style={{ marginTop: 10 }}>
+      </Table>
+      <div className="grid2 mt-10">
         <label className="field">
           <span>{bi('Vehicle', 'ವಾಹನ')}</span>
           <input list="vehicles" value={vehicle} onChange={(e) => setVehicle(e.target.value)} placeholder="KA-17 AB 1234" />
@@ -378,7 +378,7 @@ function VendorCard({ p, onDone, lang, bi }: { p: VendorPo; onDone: () => void; 
   };
   return (
     <div className="card">
-      <div className="bar" style={{ justifyContent: 'space-between' }}>
+      <div className="bar between">
         <span className="name">
           #{p.no} · {bi('deliver to', 'ತಲುಪಿಸುವುದು:')} {p.to}
         </span>
@@ -396,14 +396,14 @@ function VendorCard({ p, onDone, lang, bi }: { p: VendorPo; onDone: () => void; 
         <Money v={p.total} />
       </b>
       {p.status === 'ordered' && (
-        <div className="bar" style={{ marginTop: 10 }}>
+        <div className="bar mt-10">
           <button className="btn primary" onClick={() => act('/confirm')}>
             {bi('Confirm order', 'ಆರ್ಡರ್ ಒಪ್ಪಿಕೊಳ್ಳಿ')}
           </button>
         </div>
       )}
       {(p.status === 'confirmed' || p.status === 'ordered') && (
-        <div className="grid2" style={{ marginTop: 10 }}>
+        <div className="grid2 mt-10">
           <label className="field">
             <span>{bi('Invoice no.', 'ಇನ್‌ವಾಯ್ಸ್ ಸಂಖ್ಯೆ')}</span>
             <input value={invoiceNo} onChange={(e) => setInvoice(e.target.value)} />
@@ -459,13 +459,13 @@ export function DeliveryHome() {
       {todo.length === 0 && <Empty>{bi('All delivered.', 'ಎಲ್ಲ ತಲುಪಿಸಲಾಗಿದೆ.')}</Empty>}
       {todo.map((d) => (
         <div className="card" key={d.id}>
-          <div className="bar" style={{ justifyContent: 'space-between' }}>
+          <div className="bar between">
             <span className="name">{d.name}</span>
             <Status s={d.status} label={statusWord(d.status, lang)} />
           </div>
           <div>{d.address}</div>
           {d.landmark && <div className="muted">📍 {d.landmark}</div>}
-          <div className="bar" style={{ margin: '8px 0' }}>
+          <div className="bar my-8">
             <a className="btn" href={'tel:' + d.phone}>
               📞 {bi('Call', 'ಕರೆ')}
             </a>
@@ -485,7 +485,7 @@ export function DeliveryHome() {
               {bi('Collect', 'ವಸೂಲಿ ಮಾಡಿ')} <Money v={d.amountDue} />
             </div>
           )}
-          <div className="bar" style={{ marginTop: 10 }}>
+          <div className="bar mt-10">
             {(d.status === 'pending' || d.status === 'failed') && (
               <button className="btn primary" onClick={() => setStatus(d, 'out')}>
                 {bi('Leaving now', 'ಹೊರಡುತ್ತಿದ್ದೇನೆ')}
@@ -586,7 +586,7 @@ export function CustomerHome() {
         (bills.value ? (
           bills.value.bills.map((b) => (
             <div className="card slip" key={b.no}>
-              <div className="bar" style={{ justifyContent: 'space-between' }}>
+              <div className="bar between">
                 <b>
                   {bi('Bill', 'ಬಿಲ್')} #{b.no}
                 </b>
@@ -605,8 +605,7 @@ export function CustomerHome() {
               </div>
               {b.lines.some((l) => l.itemId && byId.get(l.itemId)?.available) && (
                 <button
-                  className="btn small"
-                  style={{ marginTop: 8 }}
+                  className="btn small mt-8"
                   onClick={() => {
                     const next = { ...cart };
                     for (const l of b.lines) {
@@ -631,9 +630,9 @@ export function CustomerHome() {
         ))}
       {tab === 'items' && (
         <>
-          <input placeholder={bi('Search in Kannada or English', 'ಕನ್ನಡ ಅಥವಾ ಇಂಗ್ಲಿಷ್‌ನಲ್ಲಿ ಹುಡುಕಿ')} value={q} onChange={(e) => setQ(e.target.value)} style={{ marginBottom: 10 }} />
+          <input placeholder={bi('Search in Kannada or English', 'ಕನ್ನಡ ಅಥವಾ ಇಂಗ್ಲಿಷ್‌ನಲ್ಲಿ ಹುಡುಕಿ')} value={q} onChange={(e) => setQ(e.target.value)} className="mb-10" />
           {!q.trim() && (
-            <div className="chips" style={{ marginBottom: 10 }}>
+            <div className="chips mb-10">
               {[...new Set(items.map((i) => i.category).filter(Boolean))].sort().map((c) => (
                 <button key={c} className={'chip ' + (cat2 === c ? 'on' : '')} onClick={() => setCat2(cat2 === c ? '' : c)}>
                   {c}
@@ -665,7 +664,7 @@ export function CustomerHome() {
       {tab === 'order' && (
         <>
           {sent && <div className="msg ok">{sent}</div>}
-          <div className="bar" style={{ marginBottom: 10 }}>
+          <div className="bar mb-10">
             <WriteToFind label={bi('Write a line by hand', 'ಕೈಯಿಂದ ಬರೆಯಿರಿ')} onResult={(r) => setWritten((w) => [...w, r])} />
           </div>
           {written.map((w, i) => (
@@ -684,20 +683,20 @@ export function CustomerHome() {
               {Object.entries(cart).map(([id, v]) => {
                 const it = byId.get(id);
                 return (
-                  <div className="bar" key={id} style={{ marginBottom: 6 }}>
+                  <div className="bar mb-6" key={id}>
                     <span className="grow name">{it ? pickName(it.nameEn, it.nameKn, lang) : id}</span>
-                    <select value={v.unit} onChange={(e) => setCart({ ...cart, [id]: { ...v, unit: e.target.value } })} style={{ width: 'auto' }}>
+                    <select value={v.unit} onChange={(e) => setCart({ ...cart, [id]: { ...v, unit: e.target.value } })} className="w-auto">
                       {it?.units.map((u) => (
                         <option key={u.code} value={u.code}>
                           {(lang === 'kn' && u.labelKn) || u.label}
                         </option>
                       ))}
                     </select>
-                    <input inputMode="decimal" value={v.qty} onChange={(e) => setCart({ ...cart, [id]: { ...v, qty: Number(e.target.value) || 0 } })} style={{ width: 70 }} />
+                    <input inputMode="decimal" value={v.qty} onChange={(e) => setCart({ ...cart, [id]: { ...v, qty: Number(e.target.value) || 0 } })} className="in-qty" />
                   </div>
                 );
               })}
-              <label className="field" style={{ marginTop: 10 }}>
+              <label className="field mt-10">
                 <span>{bi('Note for the shop', 'ಅಂಗಡಿಗೆ ಟಿಪ್ಪಣಿ')}</span>
                 <input value={note} onChange={(e) => setNote(e.target.value)} />
               </label>
@@ -709,7 +708,7 @@ export function CustomerHome() {
           <h2 className="subtitle">{bi('My requests', 'ನನ್ನ ಬೇಡಿಕೆಗಳು')}</h2>
           {(orders.value ?? []).map((o) => (
             <div className="card" key={o.id}>
-              <div className="bar" style={{ justifyContent: 'space-between' }}>
+              <div className="bar between">
                 <span className="muted">{when(o.at, lang)}</span>
                 <Status s={o.status} label={statusWord(o.status, lang)} />
               </div>
@@ -749,14 +748,14 @@ function ReceiveCard({ t, nm, dq, onDone }: { t: Transfer; nm: (id: string) => s
   };
   return (
     <div className="card">
-      <div className="bar" style={{ justifyContent: 'space-between' }}>
+      <div className="bar between">
         <span className="name">#{t.no}</span>
         <span className="muted">
           {t.times.sent ? when(t.times.sent, lang) : ''} {t.vehicle ? '· 🚚 ' + t.vehicle : ''} {t.driver ? '· ' + t.driver : ''}
         </span>
       </div>
       {error && <div className="msg err">{error}</div>}
-      <table className="list plain">
+      <Table className="list plain">
         <thead>
           <tr>
             <th>{bi('Item', 'ಸಾಮಾನು')}</th>
@@ -773,13 +772,13 @@ function ReceiveCard({ t, nm, dq, onDone }: { t: Transfer; nm: (id: string) => s
                 <td className="name">{nm(l.itemId)}</td>
                 <td className="num">{dq(l.itemId, sent)}</td>
                 <td className={'num ' + (short ? 'qty-neg' : '')}>
-                  <input inputMode="decimal" value={got[l.itemId] ?? ''} onChange={(e) => setGot({ ...got, [l.itemId]: e.target.value })} style={{ width: 80 }} />
+                  <input inputMode="decimal" value={got[l.itemId] ?? ''} onChange={(e) => setGot({ ...got, [l.itemId]: e.target.value })} className="in-price" />
                 </td>
               </tr>
             );
           })}
         </tbody>
-      </table>
+      </Table>
       <button className="btn primary" onClick={receive}>
         {bi('Received', 'ಬಂದಿದೆ')}
       </button>

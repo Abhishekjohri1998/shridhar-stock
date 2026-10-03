@@ -3,7 +3,7 @@ import { formatRupees, pickName } from '@stock/core';
 import { download, http } from '../lib/api';
 import { useLive } from '../lib/live';
 import { useLoad, useSession } from '../lib/session';
-import { Empty, Loading, Money, Tabs, useBi, when } from '../components/ui';
+import { Empty, Loading, Money, Tabs, useBi, when, Table } from '../components/ui';
 
 interface Report {
   period: { from: string; to: string; days: number };
@@ -104,7 +104,7 @@ export function ReportsPage() {
               {bi('The table below counts only linked lines. Confirming handwritten lines makes it complete.', 'ಕೆಳಗಿನ ಪಟ್ಟಿ ಜೋಡಿಸಿದ ಸಾಲುಗಳನ್ನು ಮಾತ್ರ ಎಣಿಸುತ್ತದೆ.')}
             </p>
           )}
-          <div className="bar" style={{ margin: '10px 0' }}>
+          <div className="bar my-10">
             <button className="btn small" onClick={() => csv('sales')}>⬇ {bi('Excel', 'ಎಕ್ಸೆಲ್')}</button>
             <button className="btn small" onClick={() => csv('bills')}>⬇ {bi('Every bill line', 'ಎಲ್ಲ ಬಿಲ್ ಸಾಲು')}</button>
           </div>
@@ -112,7 +112,7 @@ export function ReportsPage() {
             <Empty>{bi('No linked sales in this period.', 'ಈ ಅವಧಿಯಲ್ಲಿ ಮಾರಾಟ ಇಲ್ಲ.')}</Empty>
           ) : (
             <div className="scroll">
-              <table className="list">
+              <Table className="list">
                 <thead>
                   <tr>
                     <th>{bi('Item', 'ಸಾಮಾನು')}</th>
@@ -133,7 +133,7 @@ export function ReportsPage() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </Table>
             </div>
           )}
         </>
@@ -163,7 +163,7 @@ export function ReportsPage() {
       )}
       {r && tab === 'movers' && (
         <>
-          <button className="btn small" onClick={() => csv('movers')} style={{ marginBottom: 10 }}>⬇ {bi('Excel', 'ಎಕ್ಸೆಲ್')}</button>
+          <button className="btn small mb-10" onClick={() => csv('movers')}>⬇ {bi('Excel', 'ಎಕ್ಸೆಲ್')}</button>
           <div className="grid2">
             <div>
               <h2 className="subtitle">⚡ {bi('Selling fastest', 'ಬೇಗ ಮಾರಾಟ')}</h2>
@@ -197,12 +197,12 @@ export function ReportsPage() {
           <p className="muted">
             {bi('Transfers that left a place and deliveries that went out, by the vehicle written on them.', 'ಹೊರಟ ಸಾಗಣೆ ಮತ್ತು ಡೆಲಿವರಿಗಳು, ಅವುಗಳ ಮೇಲೆ ಬರೆದ ವಾಹನದ ಪ್ರಕಾರ.')}
           </p>
-          <button className="btn small" onClick={() => csv('trips')} style={{ marginBottom: 10 }}>⬇ {bi('Excel', 'ಎಕ್ಸೆಲ್')}</button>
+          <button className="btn small mb-10" onClick={() => csv('trips')}>⬇ {bi('Excel', 'ಎಕ್ಸೆಲ್')}</button>
           {r.trips.length === 0 ? (
             <Empty>{bi('No trips in this period.', 'ಈ ಅವಧಿಯಲ್ಲಿ ಓಡಾಟ ಇಲ್ಲ.')}</Empty>
           ) : (
             <div className="scroll">
-              <table className="list">
+              <Table className="list">
                 <thead>
                   <tr>
                     <th>{bi('Vehicle', 'ವಾಹನ')}</th>
@@ -224,7 +224,7 @@ export function ReportsPage() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </Table>
             </div>
           )}
         </>
@@ -234,11 +234,11 @@ export function ReportsPage() {
           <p className="muted">
             {bi('Lines billed below the lowest rate, above the highest, or more than 15% away from the item’s price.', 'ಕನಿಷ್ಠಕ್ಕಿಂತ ಕಡಿಮೆ, ಗರಿಷ್ಠಕ್ಕಿಂತ ಹೆಚ್ಚು, ಅಥವಾ ಬೆಲೆಯಿಂದ 15% ದೂರ ಬಿಲ್ ಮಾಡಿದ ಸಾಲುಗಳು.')}
           </p>
-          <button className="btn small" onClick={() => csv('prices')} style={{ marginBottom: 10 }}>⬇ {bi('Excel', 'ಎಕ್ಸೆಲ್')}</button>
+          <button className="btn small mb-10" onClick={() => csv('prices')}>⬇ {bi('Excel', 'ಎಕ್ಸೆಲ್')}</button>
           {r.outOfRange.length === 0 ? (
             <Empty>{bi('Every line was billed within range.', 'ಎಲ್ಲ ಸಾಲುಗಳು ಮಿತಿಯೊಳಗಿವೆ.')}</Empty>
           ) : (
-            <table className="list">
+            <Table className="list">
               <tbody>
                 {r.outOfRange.map((x, i) => (
                   <tr key={i}>
@@ -262,7 +262,7 @@ export function ReportsPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           )}
         </>
       )}

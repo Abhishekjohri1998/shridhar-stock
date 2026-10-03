@@ -1,8 +1,9 @@
-import { Link } from 'react-router-dom';
 import { http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
-import { Loading, Money, useBi, when } from '../../components/ui';
+import { Link } from 'react-router-dom';
+import { Greeting, Loading, Money, Tile, useBi, useWeekSales, WeekChart, when } from '../../components/ui';
+import { Icon } from '../../components/Icon';
 
 export interface Summary {
   toConfirm: number;
@@ -24,75 +25,66 @@ export interface Summary {
   reader: { enabled: boolean; demo?: boolean; monthLines: number; monthCostRupees: number; capRupees: number; message?: string } | null;
 }
 
-function Tile({ n, label, to, tone }: { n: number | string; label: string; to: string; tone?: 'warn' | 'bad' | '' }) {
-  return (
-    <Link className={'tile ' + (tone && n ? tone : '')} to={to}>
-      <b>{n}</b>
-      {label}
-    </Link>
-  );
-}
-
 export function AdminHome() {
   const bi = useBi();
-  const { lang } = useSession();
+  const { lang, me } = useSession();
   const live = useLive('bills', 'stock', 'transfers', 'pos', 'deliveries', 'orders', 'link');
   const { value: s, error } = useLoad(() => http.get<Summary>('/admin/summary'), [live]);
+  const week = useWeekSales([live]);
   if (error) return <div className="msg err">{error}</div>;
   if (!s) return <Loading />;
   const rate = s.handwrittenLines ? Math.round((s.autoRead / s.handwrittenLines) * 100) : 0;
+  const needs = [
+    { n: s.toConfirm, label: bi('Bill lines to confirm', 'ಖಚಿತಪಡಿಸಬೇಕಾದ ಸಾಲುಗಳು'), to: '/admin/confirm', tone: 'warn', icon: 'checkCircle' as const },
+    { n: s.low, label: bi('Running low in the shop', 'ಅಂಗಡಿಯಲ್ಲಿ ಮುಗಿಯುತ್ತಿದೆ'), to: '/admin/refill', tone: 'warn', icon: 'refill' as const },
+    { n: s.negative, label: bi('Below zero: count these', 'ಸೊನ್ನೆಗಿಂತ ಕಡಿಮೆ: ಎಣಿಸಿ'), to: '/admin/stock', tone: 'bad', icon: 'alert' as const },
+    { n: s.newOrders, label: bi('Customer requests', 'ಗ್ರಾಹಕರ ಬೇಡಿಕೆ'), to: '/admin/requests', tone: 'warn', icon: 'inbox' as const },
+  ];
   return (
     <>
+      {me && <Greeting name={me.name} />}
       <div className={'banner ' + (s.link?.ok ? 'ok' : 'bad')}>
         {s.link?.ok ? '●' : '○'} {bi('Billing link', 'ಬಿಲ್ಲಿಂಗ್ ಸಂಪರ್ಕ')}:{' '}
         {s.link ? (s.link.ok ? bi('working', 'ಸರಿಯಾಗಿದೆ') + ' · ' + bi('last bill', 'ಕೊನೆಯ ಬಿಲ್') + ' #' + s.link.lastBillNo + (s.link.at ? ' · ' + when(s.link.at, lang) : '') : bi('not reachable', 'ಸಿಗುತ್ತಿಲ್ಲ')) : bi('not set up yet', 'ಇನ್ನೂ ಹೊಂದಿಸಿಲ್ಲ')}
         {s.link?.demo && <span className="muted"> · {bi('demo data', 'ಡೆಮೊ ಮಾಹಿತಿ')}</span>}
       </div>
 
-      <h2 className="subtitle">{bi('Needs you', 'ನಿಮ್ಮ ಗಮನ ಬೇಕು')}</h2>
-      <div className="tiles">
-        <Tile n={s.toConfirm} label={bi('Bill lines to confirm', 'ಖಚಿತಪಡಿಸಬೇಕಾದ ಸಾಲುಗಳು')} to="/admin/confirm" tone="warn" />
-        <Tile n={s.low} label={bi('Running low in the shop', 'ಅಂಗಡಿಯಲ್ಲಿ ಮುಗಿಯುತ್ತಿದೆ')} to="/admin/refill" tone="warn" />
-        <Tile n={s.negative} label={bi('Below zero: count these', 'ಸೊನ್ನೆಗಿಂತ ಕಡಿಮೆ: ಎಣಿಸಿ')} to="/admin/stock" tone="bad" />
-        <Tile n={s.newOrders} label={bi('Customer requests', 'ಗ್ರಾಹಕರ ಬೇಡಿಕೆ')} to="/admin/requests" tone="warn" />
+      <h2 className="subtitle">{bi('Needs you now', 'ಈಗ ನಿಮ್ಮ ಗಮನ ಬೇಕು')}</h2>
+      <div className="needs">
+        {needs.map((x) => (
+          <Link key={x.to + x.icon} className={'need ' + (x.n ? x.tone : 'calm')} to={x.to}>
+            <span className="need-icon">
+              <Icon name={x.icon} />
+            </span>
+            <span className="need-text">
+              <b>{x.n}</b>
+              <span>{x.label}</span>
+            </span>
+            <Icon name="chevron" className="need-go" />
+          </Link>
+        ))}
       </div>
+
+      {week && <WeekChart days={week} />}
 
       <h2 className="subtitle">{bi('Moving now', 'ಈಗ ನಡೆಯುತ್ತಿರುವುದು')}</h2>
       <div className="tiles">
-        <Tile n={s.requested} label={bi('Asked from godowns', 'ಗೋದಾಮಿನಿಂದ ಕೇಳಿದ್ದು')} to="/admin/transfers" />
-        <Tile n={s.inTransit} label={bi('On the way to the shop', 'ಅಂಗಡಿಗೆ ದಾರಿಯಲ್ಲಿ')} to="/admin/transfers" />
-        <Tile n={s.openPos} label={bi('Open purchase orders', 'ತೆರೆದ ಖರೀದಿ ಆರ್ಡರ್')} to="/admin/purchases" />
-        <Tile n={s.deliveriesPending} label={bi('Deliveries to do', 'ಬಾಕಿ ಡೆಲಿವರಿ')} to="/admin/deliveries" />
+        <Tile icon="transfer" n={s.requested} label={bi('Asked from godowns', 'ಗೋದಾಮಿನಿಂದ ಕೇಳಿದ್ದು')} to="/admin/transfers" />
+        <Tile icon="truck" n={s.inTransit} label={bi('On the way to the shop', 'ಅಂಗಡಿಗೆ ದಾರಿಯಲ್ಲಿ')} to="/admin/transfers" />
+        <Tile icon="cart" n={s.openPos} label={bi('Open purchase orders', 'ತೆರೆದ ಖರೀದಿ ಆರ್ಡರ್')} to="/admin/purchases" />
+        <Tile icon="pin" n={s.deliveriesPending} label={bi('Deliveries to do', 'ಬಾಕಿ ಡೆಲಿವರಿ')} to="/admin/deliveries" />
       </div>
 
       <h2 className="subtitle">{bi('Today', 'ಇಂದು')}</h2>
       <div className="tiles">
-        <div className="tile">
-          <b>
-            <Money v={s.salesToday} />
-          </b>
-          {bi('Sales from', 'ಮಾರಾಟ,')} {s.billsToday} {bi('bills', 'ಬಿಲ್‌ಗಳು')}
-        </div>
-        <div className="tile">
-          <b>
-            <Money v={s.due} />
-          </b>
-          {bi('Money still due', 'ಬರಬೇಕಾದ ಹಣ')}
-        </div>
-        <div className="tile">
-          <b>{rate}%</b>
-          {bi('Handwritten lines read by themselves', 'ತಾನಾಗಿ ಓದಿದ ಕೈಬರಹ ಸಾಲುಗಳು')} ({s.autoRead}/{s.handwrittenLines})
-        </div>
-        <div className="tile">
-          <b>
-            <Money v={s.stockValue} />
-          </b>
-          {bi('Stock value at cost', 'ಖರೀದಿ ಬೆಲೆಯಲ್ಲಿ ಸ್ಟಾಕ್')}
-        </div>
+        <Tile icon="rupee" n={<Money v={s.salesToday} />} label={<>{bi('Sales from', 'ಮಾರಾಟ,')} {s.billsToday} {bi('bills', 'ಬಿಲ್‌ಗಳು')}</>} />
+        <Tile icon="receipt" n={<Money v={s.due} />} label={bi('Money still due', 'ಬರಬೇಕಾದ ಹಣ')} />
+        <Tile icon="pen" n={rate + '%'} label={<>{bi('Handwritten lines read by themselves', 'ತಾನಾಗಿ ಓದಿದ ಕೈಬರಹ ಸಾಲುಗಳು')} ({s.autoRead}/{s.handwrittenLines})</>} />
+        <Tile icon="box" n={<Money v={s.stockValue} />} label={bi('Stock value at cost', 'ಖರೀದಿ ಬೆಲೆಯಲ್ಲಿ ಸ್ಟಾಕ್')} />
       </div>
 
       {s.reader && (
-        <p className="muted" style={{ marginTop: 14 }}>
+        <p className="muted mt-14">
           ✎ {bi('Handwriting reader', 'ಕೈಬರಹ ಓದುವಿಕೆ')}: {s.reader.monthLines} {bi('lines this month', 'ಸಾಲು ಈ ತಿಂಗಳು')} · ≈ <Money v={s.reader.monthCostRupees} /> {bi('of', 'ರಲ್ಲಿ')} <Money v={s.reader.capRupees} />
           {s.reader.message && <> · {s.reader.message}</>}
         </p>

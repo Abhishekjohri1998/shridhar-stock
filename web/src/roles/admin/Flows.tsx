@@ -16,7 +16,7 @@ import { useLive } from '../../lib/live';
 import { itemName, placeName, qtyText, useCatalog } from '../../lib/catalog';
 import { useLoad, useSession } from '../../lib/session';
 import { statusWord } from '../../lib/words';
-import { Empty, InkView, Loading, Money, Status, useBi, when } from '../../components/ui';
+import { Empty, InkView, Loading, Money, Status, useBi, when, Table } from '../../components/ui';
 
 // ---------------------------------------------------------------- bills from billing
 
@@ -35,7 +35,7 @@ export function BillsPage() {
       {value.length === 0 && <Empty>{bi('No bills yet.', 'ಇನ್ನೂ ಬಿಲ್‌ಗಳಿಲ್ಲ.')}</Empty>}
       {value.map((b) => (
         <div className="card" key={b.no}>
-          <div className="bar" style={{ justifyContent: 'space-between' }}>
+          <div className="bar between">
             <span className="name">
               #{b.no} · {b.customer?.name ?? bi('walk-in', 'ಗ್ರಾಹಕ')}
             </span>
@@ -50,17 +50,17 @@ export function BillsPage() {
               )}
               {b.balance > 0 && <span className="pill warn"> {bi('due', 'ಬಾಕಿ')} {formatRupees(b.balance)}</span>}
               {me?.role === 'admin' && b.customer && !b.cancelled && (
-                <Link className="btn small" to={'/admin/deliveries?bill=' + b.no} style={{ marginLeft: 8 }}>
+                <Link className="btn small ml-8" to={'/admin/deliveries?bill=' + b.no}>
                   🛵 {bi('Deliver', 'ಡೆಲಿವರಿ')}
                 </Link>
               )}
             </span>
           </div>
-          <table className="list plain">
+          <Table className="list plain">
             <tbody>
               {b.lines.map((l) => (
                 <tr key={l.i}>
-                  <td style={{ width: 28 }} className="muted">
+                  <td className="col-tick muted">
                     {l.i + 1}
                   </td>
                   <td>
@@ -73,14 +73,14 @@ export function BillsPage() {
                     )}
                   </td>
                   <td className="num">{formatRupees(l.amount)}</td>
-                  <td style={{ width: 150 }}>
+                  <td className="col-mid">
                     <Status s={l.state} label={statusWord(l.state, lang, true)} />
                     {l.reading && l.state === 'read-auto' && <span className="muted"> {Math.round(l.reading.confidence * 100)}%</span>}
                   </td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </div>
       ))}
     </>
@@ -111,7 +111,7 @@ export function RequestsPage() {
       <p className="muted">{bi('Make the bill in the billing app, then mark it billed here.', 'ಬಿಲ್ಲಿಂಗ್ ಆ್ಯಪ್‌ನಲ್ಲಿ ಬಿಲ್ ಮಾಡಿ, ನಂತರ ಇಲ್ಲಿ ಗುರುತಿಸಿ.')}</p>
       {value.orders.map((o) => (
         <div className="card" key={o.id}>
-          <div className="bar" style={{ justifyContent: 'space-between' }}>
+          <div className="bar between">
             <span className="name">{value.customers.find((c) => c.key === o.customerKey)?.name ?? o.customerKey}</span>
             <Status s={o.status} label={statusWord(o.status, lang)} />
           </div>
@@ -183,7 +183,7 @@ export function SettingsPage() {
     <>
       <h1 className="title">{bi('Settings', 'ಸೆಟ್ಟಿಂಗ್ಸ್')}</h1>
       <div className="card">
-        <h2 className="subtitle" style={{ marginTop: 0 }}>{bi('Link to billing', 'ಬಿಲ್ಲಿಂಗ್ ಸಂಪರ್ಕ')}</h2>
+        <h2 className="subtitle mt-0">{bi('Link to billing', 'ಬಿಲ್ಲಿಂಗ್ ಸಂಪರ್ಕ')}</h2>
         <p>
           {bi('Bills are read from the billing server every 3 seconds while a bill is open, and every 15 seconds when the shop is quiet. Stock never writes to billing.', 'ಬಿಲ್ ತೆರೆದಿರುವಾಗ ಪ್ರತಿ 3 ಸೆಕೆಂಡಿಗೆ, ಅಂಗಡಿ ಶಾಂತವಾಗಿರುವಾಗ ಪ್ರತಿ 15 ಸೆಕೆಂಡಿಗೆ ಬಿಲ್ಲಿಂಗ್ ಸರ್ವರ್‌ನಿಂದ ಬಿಲ್‌ಗಳನ್ನು ಓದಲಾಗುತ್ತದೆ. ಸ್ಟಾಕ್ ಬಿಲ್ಲಿಂಗ್‌ಗೆ ಬರೆಯುವುದಿಲ್ಲ.')}
         </p>
@@ -202,7 +202,7 @@ export function SettingsPage() {
         </button>
       </div>
       <div className="card">
-        <h2 className="subtitle" style={{ marginTop: 0 }}>{bi('Rounding off', 'ರೌಂಡ್ ಆಫ್')}</h2>
+        <h2 className="subtitle mt-0">{bi('Rounding off', 'ರೌಂಡ್ ಆಫ್')}</h2>
         <p>
           {bi('Bill totals on the worker’s screen, the bills list and reports are shown rounded to this, with the round-off as its own line.', 'ಕೆಲಸಗಾರರ ಪರದೆ, ಬಿಲ್ ಪಟ್ಟಿ ಮತ್ತು ವರದಿಗಳಲ್ಲಿ ಬಿಲ್ ಮೊತ್ತವನ್ನು ಇದಕ್ಕೆ ರೌಂಡ್ ಮಾಡಿ, ರೌಂಡ್ ಆಫ್ ಬೇರೆ ಸಾಲಿನಲ್ಲಿ ತೋರಿಸಲಾಗುತ್ತದೆ.')}
         </p>
@@ -215,7 +215,7 @@ export function SettingsPage() {
         </div>
       </div>
       <div className="card">
-        <h2 className="subtitle" style={{ marginTop: 0 }}>{bi('Handwriting reader', 'ಕೈಬರಹ ಓದುವಿಕೆ')}</h2>
+        <h2 className="subtitle mt-0">{bi('Handwriting reader', 'ಕೈಬರಹ ಓದುವಿಕೆ')}</h2>
         <p>
           {bi(
             'Handwritten bill lines are read by Claude, choosing only from your items. Only the writing is sent, never the customer or amounts. Sure readings update stock; unsure ones come to “To confirm”.',

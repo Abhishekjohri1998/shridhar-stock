@@ -56,7 +56,7 @@ export function InkPad({ onDone, height = 110, label, doneLabel = '✓ Read it' 
 
   return (
     <div className="inkpad">
-      {label && <div className="muted" style={{ marginBottom: 4 }}>{label}</div>}
+      {label && <div className="muted mb-4">{label}</div>}
       <canvas
         ref={canvas}
         style={{ width, height, touchAction: 'none' }}
@@ -83,7 +83,7 @@ export function InkPad({ onDone, height = 110, label, doneLabel = '✓ Read it' 
           draw();
         }}
       />
-      <div className="bar" style={{ marginTop: 6 }}>
+      <div className="bar mt-6">
         <button type="button" className="btn primary small" disabled={empty} onClick={() => onDone({ w: width, h: height, strokes: strokes.current.slice() })}>
           {doneLabel}
         </button>

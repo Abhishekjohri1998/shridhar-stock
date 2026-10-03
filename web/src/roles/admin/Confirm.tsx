@@ -113,7 +113,7 @@ function ConfirmCard({ p, items, onDone }: { p: Pending; items: Map<string, Item
 
   return (
     <div className="card confirm">
-      <div className="bar" style={{ justifyContent: 'space-between' }}>
+      <div className="bar between">
         <span className="muted">
           {bi('Bill', 'ಬಿಲ್')} #{p.billNo} · {bi('line', 'ಸಾಲು')} {p.line.i + 1} · {p.customer || bi('walk-in', 'ಗ್ರಾಹಕ')} · {when(p.at, lang)}
         </span>
@@ -145,7 +145,7 @@ function ConfirmCard({ p, items, onDone }: { p: Pending; items: Map<string, Item
         <WriteToFind onResult={(r) => r.matches[0] && pick(r.matches[0].itemId)} />
       </div>
       {found.length > 0 && (
-        <div className="chips" style={{ marginTop: 6 }}>
+        <div className="chips mt-6">
           {found.map((i) => (
             <button key={i.id} className="chip" onClick={() => pick(i.id)}>
               {pickName(i.nameEn, i.nameKn, lang)}
@@ -154,19 +154,19 @@ function ConfirmCard({ p, items, onDone }: { p: Pending; items: Map<string, Item
         </div>
       )}
       {item && (
-        <div className="bar" style={{ marginTop: 10 }}>
+        <div className="bar mt-10">
           <b className="grow">{pickName(item.nameEn, item.nameKn, lang)}</b>
-          <select value={unit} onChange={(e) => setUnit(e.target.value)} style={{ width: 'auto' }}>
+          <select value={unit} onChange={(e) => setUnit(e.target.value)} className="w-auto">
             {item.units.map((u) => (
               <option key={u.code} value={u.code}>
                 {(lang === 'kn' && u.labelKn) || u.label}
               </option>
             ))}
           </select>
-          <input inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} style={{ width: 90 }} aria-label={bi('Quantity', 'ಪ್ರಮಾಣ')} />
+          <input inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} className="in-qty" aria-label={bi('Quantity', 'ಪ್ರಮಾಣ')} />
         </div>
       )}
-      <div className="bar" style={{ marginTop: 10 }}>
+      <div className="bar mt-10">
         <button className="btn primary" disabled={busy || !item || !(Number(qty) > 0)} onClick={() => send(false)}>
           ✓ {bi('This is right', 'ಇದು ಸರಿ')}
         </button>

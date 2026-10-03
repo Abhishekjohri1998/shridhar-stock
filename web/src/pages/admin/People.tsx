@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { ROLES, pickName, type MsgKey, type Person, type Role } from '@stock/core';
 import { api, http } from '../../lib/api';
 import { useLoad, useSession } from '../../lib/session';
+import { Table } from '../../components/ui';
 
 export function PeoplePage() {
   const { t, me } = useSession();
@@ -37,7 +38,7 @@ export function PeoplePage() {
         />
       )}
       <div className="scroll">
-        <table className="list">
+        <Table className="list">
           <tbody>
             {value.people.map((p) => (
               <tr key={p.id} className="link" onClick={() => setEditing(p)}>
@@ -55,7 +56,7 @@ export function PeoplePage() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       </div>
     </>
   );

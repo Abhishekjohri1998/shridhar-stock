@@ -61,7 +61,7 @@ export function DeliveriesPage() {
         }}
         onLandmark={(id, landmark) => act('/admin/customers/' + id, { landmark })}
       />
-      <div className="chips" style={{ margin: '12px 0' }}>
+      <div className="chips my-12">
         <button className={'chip ' + (filter === 'open' ? 'on' : '')} onClick={() => setFilter('open')}>
           {bi('To do', 'ಬಾಕಿ')}
         </button>
@@ -72,7 +72,7 @@ export function DeliveriesPage() {
       {shown.length === 0 && <Empty>{bi('Nothing out for delivery.', 'ಡೆಲಿವರಿಗೆ ಏನೂ ಇಲ್ಲ.')}</Empty>}
       {shown.map((d) => (
         <div className="card" key={d.id}>
-          <div className="bar" style={{ justifyContent: 'space-between' }}>
+          <div className="bar between">
             <span className="name">
               {bi('Bill', 'ಬಿಲ್')} #{d.billNo} · {d.name}
             </span>
@@ -89,7 +89,7 @@ export function DeliveriesPage() {
             {d.times.failed && d.status === 'failed' && ' · ' + bi('not delivered', 'ತಲುಪಿಲ್ಲ') + ' ' + when(d.times.failed, lang)}
           </div>
           {d.note && <div className={d.status === 'failed' ? 'qty-neg' : 'muted'}>“{d.note}”</div>}
-          <div className="bar" style={{ marginTop: 8 }}>
+          <div className="bar mt-8">
             {d.amountDue > 0 && (
               <span className="grow">
                 {bi('To collect', 'ವಸೂಲಿ')} <Money v={d.amountDue} />
@@ -102,8 +102,7 @@ export function DeliveriesPage() {
             {d.status !== 'delivered' && (
               <select
                 value=""
-                onChange={(e) => e.target.value && act('/admin/deliveries/' + d.id + '/assign', { personId: e.target.value })}
-                style={{ width: 'auto' }}
+                onChange={(e) => e.target.value && act('/admin/deliveries/' + d.id + '/assign', { personId: e.target.value })} className="w-auto"
                 aria-label={bi('Give to someone else', 'ಬೇರೆಯವರಿಗೆ ಕೊಡಿ')}
               >
                 <option value="">{bi('Give to…', 'ಇವರಿಗೆ ಕೊಡಿ…')}</option>
@@ -151,7 +150,7 @@ function NewDelivery({
   if (!billNo || !bill) {
     return (
       <div className="card">
-        <div className="name" style={{ marginBottom: 6 }}>
+        <div className="name mb-6">
           🛵 {bi('Send a bill for delivery', 'ಬಿಲ್ ಅನ್ನು ಡೆಲಿವರಿಗೆ ಕಳುಹಿಸಿ')}
         </div>
         {bills.length === 0 ? (
@@ -179,7 +178,7 @@ function NewDelivery({
   }
   return (
     <div className="card">
-      <div className="bar" style={{ justifyContent: 'space-between' }}>
+      <div className="bar between">
         <span className="name">
           🛵 {bi('Bill', 'ಬಿಲ್')} #{bill.no} · {bill.customer!.name}
         </span>
@@ -188,7 +187,7 @@ function NewDelivery({
           {bill.balance > 0 && ' · ' + bi('collect', 'ವಸೂಲಿ') + ' ' + formatRupees(bill.balance)}
         </span>
       </div>
-      <div className="grid2" style={{ marginTop: 8 }}>
+      <div className="grid2 mt-8">
         <label className="field">
           <span>{bi('Address (from billing)', 'ವಿಳಾಸ (ಬಿಲ್ಲಿಂಗ್‌ನಿಂದ)')}</span>
           <input value={address || customer?.address || ''} onChange={(e) => setAddress(e.target.value)} placeholder={bi('No address in billing: type one', 'ವಿಳಾಸ ಇಲ್ಲ: ಬರೆಯಿರಿ')} />

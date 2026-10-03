@@ -85,13 +85,13 @@ export function WalkthroughPage() {
       <ol className="story">
         {STORY.map((s, i) => (
           <li key={i} className="card">
-            <div className="bar" style={{ justifyContent: 'space-between' }}>
+            <div className="bar between">
               <span className="pill">{t(('role.' + s.role) as MsgKey)}</span>
               <button className="btn small primary" onClick={() => go(s.role, s.to)}>
                 {bi('Show me', 'ತೋರಿಸಿ')} →
               </button>
             </div>
-            <p style={{ margin: '8px 0 0' }}>{bi(s.en, s.kn)}</p>
+            <p className="mt-8 mb-0">{bi(s.en, s.kn)}</p>
           </li>
         ))}
       </ol>
