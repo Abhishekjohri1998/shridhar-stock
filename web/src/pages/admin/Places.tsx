@@ -28,9 +28,13 @@ export function PlacesPage() {
       )}
       {(locs ?? []).map((l) => (
         <div className="card clickable" key={l.id} onClick={() => setEditing(l)}>
-          <span className="name">{l.name}</span> {l.nameKn && <span className="muted">· {l.nameKn}</span>}{' '}
-          <span className="pill">{l.kind === 'shop' ? t('places.shop') : t('places.godown')}</span>
-          {!l.active && <span className="pill bad"> {t('people.off')}</span>}
+          {/* One wrapping row, so on a phone the pill drops below the name rather than into it. */}
+          <div className="bar mb-0">
+            <span className="name">{l.name}</span>
+            {l.nameKn && <span className="muted">· {l.nameKn}</span>}
+            <span className="pill">{l.kind === 'shop' ? t('places.shop') : t('places.godown')}</span>
+            {!l.active && <span className="pill bad">{t('people.off')}</span>}
+          </div>
           {l.address && <div className="muted">{l.address}</div>}
         </div>
       ))}

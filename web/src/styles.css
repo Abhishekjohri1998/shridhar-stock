@@ -531,10 +531,9 @@ img, svg.ink { max-width: 100%; }
 /* ---- desktop: sidebar with labels (≥1024) ------------------------------ */
 @media (min-width: 1024px) {
   .shell.has-nav { padding-left: var(--side-w); }
-  .shell.has-nav .side { width: var(--side-w); padding: 76px 14px 20px; box-shadow: none; }
+  .shell.has-nav .side { width: var(--side-w); padding: 20px 14px; box-shadow: none; }
   .shell.has-nav .side .nav-label, .shell.has-nav .side .side-head { opacity: 1; }
   .shell.has-nav .side:hover, .shell.has-nav .side:focus-within { box-shadow: none; }
-  .shell.has-nav .top .brand { position: fixed; left: 24px; top: 18px; z-index: 31; }
   .page { padding: 28px 32px 48px; }
 }
 
