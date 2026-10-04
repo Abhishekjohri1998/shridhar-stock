@@ -18,7 +18,8 @@ cd "$HERE"
 npm run build >/dev/null
 
 if [ -f "$BILLING/server/dist/index.js" ]; then
-  (cd "$BILLING/server" && MONGO_URI= PORT=4100 AUTH_PIN=246810 JWT_SECRET=scratch \n    STOCK_URL=http://localhost:4200 LINK_KEY=demo-link-key \
+  (cd "$BILLING/server" && MONGO_URI= PORT=4100 AUTH_PIN=246810 JWT_SECRET=scratch \
+    STOCK_URL=http://localhost:4200 LINK_KEY=demo-link-key \
     DATA_DIR="$HERE/server/.data-billing-demo" node dist/index.js) &
   BILLING_PID=$!
   trap 'kill $BILLING_PID 2>/dev/null' EXIT
