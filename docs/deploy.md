@@ -16,6 +16,19 @@ at the box. Caddy gets its certificate the first time the address is opened.
 The stock server reads bills from billing on the same box, at `http://127.0.0.1:4000`. It never
 goes out to the internet to reach billing.
 
+## The short way: straight from GitHub
+
+Sign in to the box and run this one line. It fetches the code from
+`github.com/Abhishekjohri1998/shridhar-stock` and runs `deploy/setup-stock.sh`, which asks for the
+secrets the first time. Run the same line again later to update; `.env` and the data are kept.
+
+```bash
+ssh -i C:/Users/hp/.ssh/shridhar-billing.pem ubuntu@3.111.82.220
+curl -fsSL https://raw.githubusercontent.com/Abhishekjohri1998/shridhar-stock/main/deploy/install-from-github.sh | bash
+```
+
+The steps below do the same by copying a package up by hand.
+
 ## 1. On the laptop: pack the code
 
 The package is `D:\Shridhar\shridhar-stock.tar.gz`, made with `git archive`. It holds only what
