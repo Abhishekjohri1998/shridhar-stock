@@ -210,6 +210,17 @@ async function main() {
     eq('billing\'s given turns fetched on', b4.lines[1].fetched, true);
     check('the draft is gone from the worker screen', !(await call('/worker/bills')).body.some((b) => b.draftId === 'd_1'));
 
+    // A saved bill whose lines come in another order: ticks follow billing's line id, not the position.
+    await link('/draft', { draftId: 'd_2', lines: [{ key: 'kA', nameEn: 'Sugar', qty: 1, rate: 46 }, { key: 'kB', nameEn: 'Parle-G', qty: 1, rate: 5 }] });
+    eq('a worker ticks the first draft line (sugar)', (await call('/worker/drafts/d_2/lines/0/fetched', { fetched: true })).status, 200);
+    billing.bills.push({ no: 5, draftId: 'd_2', at: new Date().toISOString(), total: 51, paid: 51, balance: 0, lines: [
+      { itemId: 'kB', nameEn: 'Parle-G', nameKn: '', qty: 1, rate: 5 },
+      { itemId: 'kA', nameEn: 'Sugar', nameKn: '', qty: 1, rate: 46 },
+    ] });
+    await call('/admin/link/sync', {});
+    const b5 = (await call('/admin/bills')).body.find((b) => b.no === 5);
+    check('the tick lands on sugar, now the second line', b5.lines[1].fetched === true && !b5.lines[0].fetched, JSON.stringify(b5.lines.map((l) => l.fetched)));
+
     // ---- stock's tick goes to billing; billing's change comes back
     const waitFor = async (fn) => {
       for (let i = 0; i < 40 && !fn(); i++) await new Promise((r) => setTimeout(r, 100));

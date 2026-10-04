@@ -30,6 +30,8 @@ export interface BillingBill {
     rate: number;
     /** Set when the line was picked from stock's items while billing: exact, no guessing. */
     stockItemId?: string;
+    /** Billing's own id for the line: the same as the draft line's key. */
+    itemId?: string;
     unit?: string;
     /** Billing's own given tick. */
     given?: boolean;
@@ -201,7 +203,10 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limit = 10
     if (!before) result.newBills++;
     // A bill saved from a live draft takes the draft's place, with the ticks made on it.
     const draft = b.draftId ? takeDraft(b.draftId) : undefined;
-    const lines = b.lines.map((l, i) => toMirrorLine(items, l, i, before?.lines[i], before ? undefined : draft?.lines[i]));
+    // Each line finds its draft line by billing's line id (the draft's key), else by position.
+    const drafted = (l: BillingBill['lines'][number], i: number) =>
+      before || !draft ? undefined : l.itemId ? draft.lines.find((d) => d.key === l.itemId) : draft.lines[i];
+    const lines = b.lines.map((l, i) => toMirrorLine(items, l, i, before?.lines[i], drafted(l, i)));
     const mirror: BillMirror = {
       id,
       no: b.no,

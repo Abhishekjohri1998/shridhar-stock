@@ -45,7 +45,14 @@ async function start(extra) {
     }
     await new Promise((r) => setTimeout(r, 100));
   }
-  return { base, log: () => log, stop: () => (proc.kill(), fs.rmSync(dir, { recursive: true, force: true })) };
+  return { base, log: () => log, stop: async () => {
+      // Waits for the server to go before removing its folder and exiting: Windows asserts otherwise.
+      const gone = new Promise((r) => proc.once('exit', r));
+      proc.kill();
+      await gone;
+      fs.rmSync(dir, { recursive: true, force: true });
+    },
+  };
 }
 
 async function main() {
@@ -141,11 +148,11 @@ async function main() {
     failed++;
     console.log('FAIL threw: ' + err.stack + '\n' + on.log());
   } finally {
-    on.stop();
-    off.stop();
+    await Promise.all([on.stop(), off.stop()]);
   }
   console.log('billinglinktest: ' + passed + ' passed, ' + failed + ' failed');
-  process.exit(failed ? 1 : 0);
+  // Let open sockets close by themselves: process.exit() here trips a libuv assert on Windows.
+  process.exitCode = failed ? 1 : 0;
 }
 
 main();
