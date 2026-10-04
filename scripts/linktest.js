@@ -183,6 +183,11 @@ async function main() {
     check('the link shows as working', summary.link && summary.link.ok === true && summary.link.lastBillNo === 3, JSON.stringify(summary.link));
     eq('nothing else was ever written to billing', billing.writes, 0);
 
+    const waitFor = async (fn) => {
+      for (let i = 0; i < 40 && !fn(); i++) await new Promise((r) => setTimeout(r, 100));
+      return fn();
+    };
+
     // ---- a live draft, ticked by the worker, handed over to the saved bill
     const link = async (p, body) => {
       const r = await fetch(base + '/api/billing-link' + p, { method: 'POST', headers: { 'X-Link-Key': 'link-test-key', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -221,11 +226,20 @@ async function main() {
     const b5 = (await call('/admin/bills')).body.find((b) => b.no === 5);
     check('the tick lands on sugar, now the second line', b5.lines[1].fetched === true && !b5.lines[0].fetched, JSON.stringify(b5.lines.map((l) => l.fetched)));
 
+    // A worker ticks a draft line just before Save, too late for billing's last draft exchange.
+    await link('/draft', { draftId: 'd_3', lines: [{ key: 'kC', nameEn: 'Sugar', qty: 1, rate: 46 }] });
+    await call('/worker/drafts/d_3/lines/0/fetched', { fetched: true });
+    billing.bills.push({ no: 6, draftId: 'd_3', at: new Date().toISOString(), total: 46, paid: 46, balance: 0, lines: [{ itemId: 'kC', nameEn: 'Sugar', nameKn: '', qty: 1, rate: 46 }] });
+    await call('/admin/link/sync', {});
+    check('the late tick is sent to billing as given', await waitFor(() => billing.given.some((g) => g.no === 6 && g.i === 0 && g.given === true)), JSON.stringify(billing.given));
+    const b6 = (await call('/admin/bills')).body.find((b) => b.no === 6).lines[0];
+    check('and kept here, with the given billing taken as sent', b6.fetched === true && b6.billingGiven === true, JSON.stringify(b6));
+    billing.bills[5].lines[0].given = true; // billing took it
+    await call('/admin/link/sync', {});
+    eq('the next sync leaves it ticked', (await call('/admin/bills')).body.find((b) => b.no === 6).lines[0].fetched, true);
+    eq('and sends nothing more', billing.given.filter((g) => g.no === 6).length, 1);
+
     // ---- stock's tick goes to billing; billing's change comes back
-    const waitFor = async (fn) => {
-      for (let i = 0; i < 40 && !fn(); i++) await new Promise((r) => setTimeout(r, 100));
-      return fn();
-    };
     await call('/worker/bills/4/lines/1/fetched', { fetched: false });
     check('unticking sends given=false to billing', await waitFor(() => billing.given.some((g) => g.no === 4 && g.i === 1 && g.given === false)), JSON.stringify(billing.given));
     await call('/admin/link/sync', {});

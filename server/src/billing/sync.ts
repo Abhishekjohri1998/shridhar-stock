@@ -106,10 +106,12 @@ function toMirrorLine(items: Item[], raw: BillingBill['lines'][number], i: numbe
   const given = !!raw.given;
   const lastGiven = before ? !!before.billingGiven : false;
   let fetched = !!line.fetched;
-  if (drafted && drafted.at) fetched = drafted.fetched;
+  // What billing's given is taken to be: a draft tick billing missed is sent there (SyncResult.sendGiven).
+  let seen = given;
+  if (drafted && drafted.at) seen = fetched = drafted.fetched;
   else if (given !== lastGiven) fetched = given;
   const { fetched: _f, billingGiven: _g, ...rest } = line;
-  return { ...rest, ...(fetched ? { fetched: true } : {}), ...(given ? { billingGiven: true } : {}) };
+  return { ...rest, ...(fetched ? { fetched: true } : {}), ...(seen ? { billingGiven: true } : {}) };
 }
 
 function matchLine(items: Item[], raw: BillingBill['lines'][number], i: number, before?: MirrorLine): MirrorLine {
@@ -159,6 +161,8 @@ export interface SyncResult {
   reversed: number;
   toConfirm: number;
   customers: number;
+  /** Draft ticks billing has not got yet; link.ts sends them through push.ts. */
+  sendGiven: { no: number; i: number; given: boolean }[];
 }
 
 /**
@@ -178,7 +182,7 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limit = 10
   ]);
   const shop = locs.find((l) => l.kind === 'shop');
   if (!shop) throw new Error('No shop place');
-  const result: SyncResult = { bills: bills.length, newBills: 0, posted: 0, reversed: 0, toConfirm: 0, customers: 0 };
+  const result: SyncResult = { bills: bills.length, newBills: 0, posted: 0, reversed: 0, toConfirm: 0, customers: 0, sendGiven: [] };
 
   for (const c of customers) {
     const key = c.phone || c.id;
@@ -207,6 +211,10 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limit = 10
     const drafted = (l: BillingBill['lines'][number], i: number) =>
       before || !draft ? undefined : l.itemId ? draft.lines.find((d) => d.key === l.itemId) : draft.lines[i];
     const lines = b.lines.map((l, i) => toMirrorLine(items, l, i, before?.lines[i], drafted(l, i)));
+    // A tick made on the draft in the moment before Save may not have reached billing: send it.
+    lines.forEach((l, i) => {
+      if (!!l.billingGiven !== !!b.lines[i]!.given) result.sendGiven.push({ no: b.no, i, given: !!l.billingGiven });
+    });
     const mirror: BillMirror = {
       id,
       no: b.no,

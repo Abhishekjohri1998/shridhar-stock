@@ -3,6 +3,7 @@ import { getRepo } from '../store';
 import { billingClient, type BillingClient } from './client';
 import { emit } from '../events';
 import { pickReader, readPending } from '../reader';
+import { pushGiven } from './push';
 import { pollDelay, recordLink, syncOnce, POLL_ACTIVE_WINDOW_MS, type SyncResult } from './sync';
 
 const reader = pickReader();
@@ -30,6 +31,7 @@ export function syncNow(): Promise<SyncResult | null> {
   running = syncOnce(repo, billing())
     .then(async (r) => {
       last = r;
+      for (const g of r.sendGiven) void pushGiven(g.no, g.i, g.given);
       // New handwritten lines are read straight after they arrive.
       const read = await readPending(repo, reader.fn).catch((err: Error) => {
         console.error('[reader] failed:', err.message);
