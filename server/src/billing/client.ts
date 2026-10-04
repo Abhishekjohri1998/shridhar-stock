@@ -1,12 +1,13 @@
 /**
- * The only way this system talks to the billing server, and it can only read.
+ * The only way this system talks to the billing server.
  *
- * There is deliberately no post, put or delete here: stock never writes to billing. It signs in
- * with the shop PIN (the one POST billing's login needs, which changes nothing there) and then
- * only GETs.
+ * It signs in with the shop PIN and mostly reads. The two writes are small and named, and go
+ * through billing/push.ts only: a line's given tick, and a customer's address.
  */
 export interface BillingClient {
   get<T>(path: string): Promise<T>;
+  /** One of the two writes push.ts makes. Nothing else writes to billing. */
+  send<T>(method: 'PATCH' | 'PUT', path: string, body: unknown): Promise<T>;
 }
 
 export function billingClient(baseUrl: string, pin: string, fetchImpl: typeof fetch = fetch): BillingClient {
@@ -23,17 +24,23 @@ export function billingClient(baseUrl: string, pin: string, fetchImpl: typeof fe
     token = ((await r.json()) as { token: string }).token;
   }
 
+  /** Signs in when needed, and once more if billing has forgotten the token. */
+  async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
+    if (!path.startsWith('/api/')) throw new Error('Billing paths start with /api/');
+    if (!token) await signIn();
+    const go = () => fetchImpl(base + path, { ...init, headers: { ...(init.headers as Record<string, string>), Authorization: 'Bearer ' + token } });
+    let r = await go();
+    if (r.status === 401) {
+      await signIn();
+      r = await go();
+    }
+    if (!r.ok) throw new Error('Billing answered ' + r.status + ' for ' + path);
+    return (await r.json()) as T;
+  }
+
   return {
-    async get<T>(path: string): Promise<T> {
-      if (!path.startsWith('/api/')) throw new Error('Billing paths start with /api/');
-      if (!token) await signIn();
-      let r = await fetchImpl(base + path, { headers: { Authorization: 'Bearer ' + token } });
-      if (r.status === 401) {
-        await signIn();
-        r = await fetchImpl(base + path, { headers: { Authorization: 'Bearer ' + token } });
-      }
-      if (!r.ok) throw new Error('Billing answered ' + r.status + ' for ' + path);
-      return (await r.json()) as T;
-    },
+    get: <T>(path: string) => call<T>(path),
+    send: <T>(method: 'PATCH' | 'PUT', path: string, body: unknown) =>
+      call<T>(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   };
 }

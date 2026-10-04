@@ -177,6 +177,8 @@ export interface MirrorLine {
   reading?: Reading;
   /** The worker's tick: brought from the rack. */
   fetched?: boolean;
+  /** Billing's given tick as the last sync saw it: a change there is adopted as the fetched tick. */
+  billingGiven?: boolean;
 }
 
 /** A bill as read from the billing server. Stock never writes to billing. */
@@ -202,6 +204,8 @@ export interface CustomerProfile {
   address?: string;
   landmark?: string;
   balance: number;
+  /** Billing's id for this customer, so an address set here can be sent back to billing. */
+  billingId?: string;
 }
 
 // ------------------------------------------------------------------ movement between places

@@ -18,6 +18,9 @@ import { handler, HttpError } from '../http';
 import { emit } from '../events';
 import { getRepo } from '../store';
 import { placeOrder, settingsOf } from '../setup';
+import { listDrafts, tickDraft } from '../billing/drafts';
+import { matchTyped } from '../billing/sync';
+import { pushGiven } from '../billing/push';
 
 /**
  * What each role reads, and the small things each may do.
@@ -156,7 +159,10 @@ for (const [path, col] of [
 
 // ---------------------------------------------------------------- shop worker
 
-/** Today's bills, newest first, each line with where it is kept in the shop. */
+/**
+ * Today's bills, newest first, each line with where it is kept in the shop. Bills still being
+ * written at the counter come first, marked draft, so the worker can start walking before Save.
+ */
 roleRoutes.get(
   '/worker/bills',
   requireRole('worker', 'admin', 'owner'),
@@ -171,8 +177,37 @@ roleRoutes.get(
       const i = item ? places.findIndex((p) => (item.racks[p.id] ?? '').trim()) : -1;
       return i < 0 ? { rack: '' } : { place: places[i]!.name, placeOrder: i, rack: item!.racks[places[i]!.id]!.trim() };
     };
-    res.json(
-      bills
+    const active = items.filter((i) => i.active);
+    const drafts = listDrafts().map((d) => {
+      const total = Math.round(d.lines.reduce((s, l) => s + l.qty * l.rate, 0) * 100) / 100;
+      return {
+        no: 0,
+        draftId: d.draftId,
+        at: new Date(d.updatedAt).toISOString(),
+        customer: d.customerName,
+        total,
+        ...rounding(total, settings.roundTo),
+        lines: d.lines.map((l, i) => {
+          const name = [l.nameKn, l.nameEn].map((n) => n.trim()).filter(Boolean).filter((n, k, all) => all.indexOf(n) === k).join(' / ');
+          // Picked from stock's list at the counter, else the same exact-name match a saved bill gets.
+          const item = (l.stockItemId ? byId.get(l.stockItemId) : undefined) ?? (name ? (matchTyped(active, l.nameEn || l.nameKn) ?? matchTyped(active, l.nameKn))?.item : undefined);
+          return {
+            i,
+            name,
+            ...(typeof l.ink === 'object' ? { ink: l.ink } : {}),
+            qty: l.qty,
+            itemId: item?.id,
+            itemName: item ? [item.nameKn, item.nameEn].filter(Boolean).join(' · ') : '',
+            unit: l.unit,
+            ...keptAt(item),
+            fetched: l.fetched,
+          };
+        }),
+      };
+    });
+    res.json([
+      ...drafts,
+      ...bills
         .filter((b) => b.at >= today && !b.cancelled)
         // Newest first by the time it was made: the bill just written is the one to fetch.
         .sort((a, b) => b.at.localeCompare(a.at) || b.no - a.no)
@@ -201,7 +236,7 @@ roleRoutes.get(
             };
           }),
         })),
-    );
+    ]);
   }),
 );
 
@@ -215,9 +250,12 @@ roleRoutes.post(
     if (!bill) throw new HttpError(404, 'No such bill');
     const line = bill.lines.find((l) => l.i === Number(req.params.i));
     if (!line) throw new HttpError(404, 'No such line');
+    const changed = !!line.fetched !== fetched;
     line.fetched = fetched;
     await repo.putDoc('bills', bill);
     emit('bills', {}, String(bill.no));
+    // Billing's given tick follows, in the background.
+    if (changed) void pushGiven(bill.no, line.i, fetched);
     res.json({ ok: true });
   }),
 );
@@ -231,10 +269,33 @@ roleRoutes.post(
     const repo = getRepo();
     const bill = await repo.getDoc<BillMirror>('bills', String(req.params.no));
     if (!bill) throw new HttpError(404, 'No such bill');
+    const changed = bill.lines.filter((l) => !!l.fetched !== fetched);
     for (const l of bill.lines) l.fetched = fetched;
     await repo.putDoc('bills', bill);
+    for (const l of changed) void pushGiven(bill.no, l.i, fetched);
     emit('bills', {}, String(bill.no));
     res.json({ ok: true, lines: bill.lines.length });
+  }),
+);
+
+/** The same two ticks on a bill still being written. Billing reads them back with its next draft. */
+roleRoutes.post(
+  '/worker/drafts/:id/lines/:i/fetched',
+  requireRole('worker', 'admin'),
+  handler(async (req, res) => {
+    const { fetched } = z.object({ fetched: z.boolean() }).parse(req.body);
+    if (!tickDraft(String(req.params.id), Number(req.params.i), fetched)) throw new HttpError(404, 'No such draft line');
+    res.json({ ok: true });
+  }),
+);
+
+roleRoutes.post(
+  '/worker/drafts/:id/fetched',
+  requireRole('worker', 'admin'),
+  handler(async (req, res) => {
+    const { fetched } = z.object({ fetched: z.boolean() }).parse(req.body);
+    if (!tickDraft(String(req.params.id), null, fetched)) throw new HttpError(404, 'No such draft');
+    res.json({ ok: true });
   }),
 );
 

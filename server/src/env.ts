@@ -36,6 +36,11 @@ export const env = {
   billingEveryMs: Number(str('BILLING_EVERY_MS', String(POLL_IDLE_MS))),
   billingBusyMs: Number(str('BILLING_BUSY_MS', String(POLL_BUSY_MS))),
   /**
+   * The shared secret billing sends to /api/billing-link (item search, prices, live drafts). Empty
+   * means that door does not exist. A secret: server/.env only, the same value as billing's.
+   */
+  linkKey: str('LINK_KEY', ''),
+  /**
    * The handwriting reader. The key is the owner's own, set in server/.env only. Without it every
    * handwritten line waits for a person. READER_FAKE is for the tests: a file of fixed readings.
    */

@@ -1,6 +1,6 @@
 import { env } from '../env';
 import { getRepo } from '../store';
-import { billingClient } from './client';
+import { billingClient, type BillingClient } from './client';
 import { emit } from '../events';
 import { pickReader, readPending } from '../reader';
 import { pollDelay, recordLink, syncOnce, POLL_ACTIVE_WINDOW_MS, type SyncResult } from './sync';
@@ -15,12 +15,19 @@ let lastChangeAt = 0;
 
 export const linkConfigured = () => !!(env.billingUrl && env.billingPin);
 
+let shared: BillingClient | null = null;
+/** One signed-in client for reads and pushes alike, so its token is reused, not fetched per read. */
+export function billing(): BillingClient {
+  shared ??= billingClient(env.billingUrl, env.billingPin);
+  return shared;
+}
+
 /** One sync, never two at once: a slow billing server must not pile runs up. */
 export function syncNow(): Promise<SyncResult | null> {
   if (!linkConfigured()) return Promise.resolve(null);
   if (running) return running;
   const repo = getRepo();
-  running = syncOnce(repo, billingClient(env.billingUrl, env.billingPin))
+  running = syncOnce(repo, billing())
     .then(async (r) => {
       last = r;
       // New handwritten lines are read straight after they arrive.

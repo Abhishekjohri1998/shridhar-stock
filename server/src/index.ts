@@ -7,6 +7,7 @@ import { reconcile } from './posting';
 import { actionRoutes } from './routes/actions';
 import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
+import { billingLinkRoutes } from './routes/billingLink';
 import { demoRoutes } from './routes/demo';
 import { liveRoutes } from './routes/live';
 import { reportRoutes } from './routes/reports';
@@ -45,6 +46,8 @@ async function main(): Promise<void> {
       res.json({ ok: true, storage: getRepo().kind });
     }),
   );
+  // Billing's server, with the shared key; not a person's login.
+  api.use('/billing-link', billingLinkRoutes);
   api.use(authRoutes);
   api.use(liveRoutes);
   api.use(adminRoutes);

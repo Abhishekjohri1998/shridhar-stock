@@ -13,17 +13,33 @@ import {
 import { post } from '../posting';
 import type { InvRepo } from '../store/types';
 import type { BillingClient } from './client';
+import { takeDraft, type Draft } from './drafts';
 
 /** A bill as the billing server sends it. Only the fields stock reads. */
 export interface BillingBill {
   no: number;
   at: string;
   customer?: { id: string; name: string; nameKn?: string; phone: string };
-  lines: { nameKn?: string; nameEn?: string; ink?: Ink; moreInk?: Ink[]; lastMode?: 'ink' | 'text'; qty: number; rate: number }[];
+  lines: {
+    nameKn?: string;
+    nameEn?: string;
+    ink?: Ink;
+    moreInk?: Ink[];
+    lastMode?: 'ink' | 'text';
+    qty: number;
+    rate: number;
+    /** Set when the line was picked from stock's items while billing: exact, no guessing. */
+    stockItemId?: string;
+    unit?: string;
+    /** Billing's own given tick. */
+    given?: boolean;
+  }[];
   total: number;
   paid: number;
   balance: number;
   cancelled?: boolean;
+  /** The live draft this bill was written as, when billing sent one. */
+  draftId?: string;
 }
 
 export interface BillingCustomer {
@@ -62,7 +78,9 @@ export function matchTyped(items: Item[], text: string): { item: Item; unit?: st
 
 /** Picks the unit a billed rate fits best, when the name did not say one. */
 function unitForRate(item: Item, qty: number, rate: number, named?: string): string {
-  if (named && item.units.some((u) => unitKey(u.code) === unitKey(named))) return named;
+  // A unit billing names, by its code or its label, is taken as it is.
+  const said = named ? item.units.find((u) => unitKey(u.code) === unitKey(named) || unitKey(u.label) === unitKey(named)) : undefined;
+  if (said) return said.code;
   let best = item.units[0]!.code;
   let bestGap = Infinity;
   for (const u of item.units) {
@@ -76,7 +94,23 @@ function unitForRate(item: Item, qty: number, rate: number, named?: string): str
 }
 
 /** One billing line as stock sees it. Existing lines keep what a person or the reader decided. */
-function toMirrorLine(items: Item[], raw: BillingBill['lines'][number], i: number, before?: MirrorLine): MirrorLine {
+function toMirrorLine(items: Item[], raw: BillingBill['lines'][number], i: number, before?: MirrorLine, drafted?: Draft['lines'][number]): MirrorLine {
+  const line = matchLine(items, raw, i, before);
+  /*
+   * The fetched tick. A draft's tick carries over when the bill is saved. After that, billing's
+   * given is compared with what the last sync saw: if the counter changed it there, that wins;
+   * otherwise the worker's tick here stands.
+   */
+  const given = !!raw.given;
+  const lastGiven = before ? !!before.billingGiven : false;
+  let fetched = !!line.fetched;
+  if (drafted && drafted.at) fetched = drafted.fetched;
+  else if (given !== lastGiven) fetched = given;
+  const { fetched: _f, billingGiven: _g, ...rest } = line;
+  return { ...rest, ...(fetched ? { fetched: true } : {}), ...(given ? { billingGiven: true } : {}) };
+}
+
+function matchLine(items: Item[], raw: BillingBill['lines'][number], i: number, before?: MirrorLine): MirrorLine {
   /*
    * Billing fills both names when only one was typed ("Sugar 2kg" in English and Kannada alike),
    * so the two are de-duplicated, and each is tried on its own for a match.
@@ -100,10 +134,16 @@ function toMirrorLine(items: Item[], raw: BillingBill['lines'][number], i: numbe
   if (before?.reading) base.reading = before.reading;
   if (before?.fetched) base.fetched = before.fetched;
   if (!text && !ink) return { ...base, state: 'not-item' }; // a price with nothing written
+  // Picked from stock's own list while billing: the item is known exactly.
+  const picked = raw.stockItemId ? items.find((x) => x.id === raw.stockItemId && x.active) : undefined;
+  if (picked) {
+    const unit = unitForRate(picked, raw.qty, raw.rate, raw.unit);
+    return { ...base, state: 'typed-match', itemId: picked.id, unit, baseQty: priceFor(picked, unit, raw.qty).baseQty };
+  }
   if (names.length) {
     const m = names.map((n) => matchTyped(items, n)).find((x) => x) ?? null;
     if (m) {
-      const unit = unitForRate(m.item, raw.qty, raw.rate, m.unit);
+      const unit = unitForRate(m.item, raw.qty, raw.rate, raw.unit ?? m.unit);
       return { ...base, state: 'typed-match', itemId: m.item.id, unit, baseQty: priceFor(m.item, unit, raw.qty).baseQty };
     }
   }
@@ -146,6 +186,7 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limit = 10
       key,
       name: c.name,
       ...(c.nameKn ? { nameKn: c.nameKn } : {}),
+      billingId: c.id,
       ...(c.address ? { address: c.address } : before?.address ? { address: before.address } : {}),
       // Stock's own addition for deliveries, kept across syncs.
       ...(before?.landmark ? { landmark: before.landmark } : {}),
@@ -158,7 +199,9 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limit = 10
     const id = String(b.no);
     const before = await repo.getDoc<BillMirror>('bills', id);
     if (!before) result.newBills++;
-    const lines = b.lines.map((l, i) => toMirrorLine(items, l, i, before?.lines[i]));
+    // A bill saved from a live draft takes the draft's place, with the ticks made on it.
+    const draft = b.draftId ? takeDraft(b.draftId) : undefined;
+    const lines = b.lines.map((l, i) => toMirrorLine(items, l, i, before?.lines[i], before ? undefined : draft?.lines[i]));
     const mirror: BillMirror = {
       id,
       no: b.no,

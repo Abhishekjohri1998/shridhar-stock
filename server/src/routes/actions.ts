@@ -20,6 +20,7 @@ import { post } from '../posting';
 import { getRepo } from '../store';
 import { newId } from '../store/types';
 import { emit } from '../events';
+import { pushAddress } from '../billing/push';
 
 /**
  * The things people do, each checked for who may do it and on what, and each moving stock
@@ -515,8 +516,11 @@ actionRoutes.post(
     const c = await repo.getDoc<CustomerProfile>('customers', String(req.params.id));
     if (!c) throw new HttpError(404, 'No such customer');
     if (body.landmark != null) c.landmark = body.landmark;
+    const moved = !!body.address && body.address !== c.address;
     if (body.address) c.address = body.address;
     await repo.putDoc('customers', c);
+    // A customer from billing gets the new address there too, in the background.
+    if (moved && c.billingId) void pushAddress(c.billingId, c.address!);
     res.json(c);
   }),
 );

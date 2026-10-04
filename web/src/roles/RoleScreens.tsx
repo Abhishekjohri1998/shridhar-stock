@@ -72,7 +72,9 @@ interface WorkerLine {
   fetched: boolean;
 }
 interface WorkerBill {
+  /** 0 while the bill is still being written; then draftId says which. */
   no: number;
+  draftId?: string;
   at: string;
   customer: string;
   total: number;
@@ -84,7 +86,8 @@ interface WorkerBill {
 /**
  * The pick list: a bill as soon as it is saved in billing, its lines grouped by where they are
  * kept, so the worker walks the shop once. Handwritten lines show the writing itself, with what
- * the reader made of it underneath.
+ * the reader made of it underneath. A bill still being written at the counter shows as
+ * "Being written", and can be fetched and ticked before it is saved.
  */
 export function WorkerHome({ screen = false }: { screen?: boolean }) {
   const bi = useBi();
@@ -93,20 +96,23 @@ export function WorkerHome({ screen = false }: { screen?: boolean }) {
   const tick = useTick(60_000);
   const [version, setVersion] = useState(0);
   const { value, error } = useLoad(() => http.get<WorkerBill[]>('/worker/bills'), [live, tick, version]);
-  const [open, setOpen] = useState<number | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
   if (value.length === 0) return <Empty>{bi('No bills yet today. New bills appear here by themselves.', 'ಇಂದು ಇನ್ನೂ ಬಿಲ್ ಇಲ್ಲ. ಹೊಸ ಬಿಲ್‌ಗಳು ತಾವಾಗಿ ಇಲ್ಲಿ ಬರುತ್ತವೆ.')}</Empty>;
-  const bill = value.find((b) => b.no === open) ?? value[0]!;
+  const keyOf = (b: WorkerBill) => b.draftId ?? String(b.no);
+  const bill = value.find((b) => keyOf(b) === open) ?? value[0]!;
+  const base = bill.draftId ? '/worker/drafts/' + encodeURIComponent(bill.draftId) : '/worker/bills/' + bill.no;
+  const label = (b: WorkerBill) => (b.draftId ? bi('Being written', 'ಬರೆಯಲಾಗುತ್ತಿದೆ') : '#' + b.no);
   // The shop's racks first, then each godown's, then anything with no rack.
   const groups = groupPick(bill.lines);
   const done = bill.lines.filter((l) => l.fetched).length;
   const tickLine = async (l: WorkerLine) => {
-    await http.post('/worker/bills/' + bill.no + '/lines/' + l.i + '/fetched', { fetched: !l.fetched });
+    await http.post(base + '/lines/' + l.i + '/fetched', { fetched: !l.fetched });
     setVersion((v) => v + 1);
   };
   const tickAll = async (fetched: boolean) => {
-    await http.post('/worker/bills/' + bill.no + '/fetched', { fetched });
+    await http.post(base + '/fetched', { fetched });
     setVersion((v) => v + 1);
   };
   return (
@@ -114,15 +120,15 @@ export function WorkerHome({ screen = false }: { screen?: boolean }) {
       {!screen && value.length > 1 && (
         <div className="chips mb-10">
           {value.map((b) => (
-            <button key={b.no} className={'chip ' + (b.no === bill.no ? 'on' : '')} onClick={() => setOpen(b.no)}>
-              #{b.no} · {b.customer || bi('walk-in', 'ಗ್ರಾಹಕ')} · {b.lines.filter((l) => l.fetched).length}/{b.lines.length}
+            <button key={keyOf(b)} className={'chip ' + (keyOf(b) === keyOf(bill) ? 'on' : '')} onClick={() => setOpen(keyOf(b))}>
+              {label(b)} · {b.customer || bi('walk-in', 'ಗ್ರಾಹಕ')} · {b.lines.filter((l) => l.fetched).length}/{b.lines.length}
             </button>
           ))}
         </div>
       )}
       <div className="bar between">
         <h1 className="title m-0">
-          {bi('Bill', 'ಬಿಲ್')} #{bill.no} · {bill.customer || bi('walk-in', 'ಗ್ರಾಹಕ')}
+          {bill.draftId ? bi('Being written', 'ಬರೆಯಲಾಗುತ್ತಿದೆ') : bi('Bill', 'ಬಿಲ್') + ' #' + bill.no} · {bill.customer || bi('walk-in', 'ಗ್ರಾಹಕ')}
         </h1>
         <span className={'pill ' + (done === bill.lines.length ? 'ok' : 'warn')}>
           {done} {bi('of', '/')} {bill.lines.length} {bi('fetched', 'ತಂದಿದೆ')}
@@ -132,6 +138,9 @@ export function WorkerHome({ screen = false }: { screen?: boolean }) {
         {when(bill.at, lang)} · {bi('Total', 'ಒಟ್ಟು')} <b>{formatRupees(bill.rounded)}</b>
         {bill.roundOff !== 0 && ' (' + formatRupees(bill.total) + ' ' + bi('round off', 'ರೌಂಡ್ ಆಫ್') + ' ' + (bill.roundOff > 0 ? '+' : '−') + formatRupees(Math.abs(bill.roundOff)) + ')'}
       </p>
+      {bill.draftId && (
+        <div className="banner warn">{bi('Not saved yet: lines may still change at the counter.', 'ಇನ್ನೂ ಉಳಿಸಿಲ್ಲ: ಕೌಂಟರ್‌ನಲ್ಲಿ ಸಾಲುಗಳು ಬದಲಾಗಬಹುದು.')}</div>
+      )}
       {!screen && bill.lines.length > 1 && (
         <div className="bar">
           <button className="btn small" disabled={done === bill.lines.length} onClick={() => tickAll(true)}>
