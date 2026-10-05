@@ -54,6 +54,8 @@ check('an item with no units does not', !valid('Items', { ...item, units: undefi
 check('a unit holding 0 does not', !valid('Items', { ...item, units: [{ code: 'pc', perBase: 0, price: 1 }] }));
 check('a negative price does not', !valid('Items', { ...item, units: [{ code: 'pc', perBase: 1, price: -1 }] }));
 check('empty rack maps are kept, not dropped', new models.Items(item).toObject().reorderAt !== undefined);
+check('a running-out level in a unit is kept', JSON.stringify(new models.Items({ ...item, lowAt: { qty: 2, unit: 'pack' } }).toObject().lowAt) === '{"qty":2,"unit":"pack"}');
+check('an item saved before lowAt still validates', valid('Items', { ...item, reorderAt: { loc_shop: 48 } }));
 const move = { id: 'm', key: 'k', at: now, kind: 'sale', itemId: 'it', from: 'shop', qty: 2, by: 'p' };
 check('a move validates', valid('StockMoves', move));
 check('a move of an unknown kind does not', !valid('StockMoves', { ...move, kind: 'gift' }));

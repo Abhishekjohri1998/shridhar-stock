@@ -12,13 +12,12 @@ import type { PersonRecord } from './store/types';
  *
  * The server is one process, so the hub is a set in memory.
  */
-export type EventKind = 'bills' | 'stock' | 'transfers' | 'pos' | 'deliveries' | 'orders' | 'items' | 'link';
+export type EventKind = 'bills' | 'stock' | 'transfers' | 'pos' | 'deliveries' | 'orders' | 'items' | 'link' | 'low';
 
 /** Who an event is for. Absent fields mean "not narrowed by this". */
 export interface Audience {
   roles?: Role[];
   locationIds?: string[];
-  supplierId?: string;
   personId?: string;
   customerKey?: string;
 }
@@ -34,7 +33,6 @@ function wants(p: PersonRecord, a: Audience): boolean {
   if (p.role === 'admin' || p.role === 'owner') return true;
   if (a.roles && !a.roles.includes(p.role)) return false;
   if (p.role === 'godown' && a.locationIds && !a.locationIds.includes(p.linkedId ?? '')) return false;
-  if (p.role === 'vendor' && a.supplierId !== undefined && a.supplierId !== p.linkedId) return false;
   if (p.role === 'delivery' && a.personId !== undefined && a.personId !== p.id) return false;
   if (p.role === 'customer' && a.customerKey !== undefined && a.customerKey !== p.phone) return false;
   return true;
@@ -45,11 +43,13 @@ const DEFAULT_ROLES: Record<EventKind, Role[]> = {
   bills: ['worker', 'customer', 'delivery'],
   stock: ['godown', 'customer'],
   transfers: ['godown'],
-  pos: ['vendor'],
+  pos: [],
   deliveries: ['delivery'],
   orders: ['customer'],
   items: ['worker', 'godown', 'customer'],
   link: [],
+  // An item going below its level: the admin's and owner's screens only.
+  low: [],
 };
 
 export function emit(kind: EventKind, audience: Audience = {}, id?: string): void {

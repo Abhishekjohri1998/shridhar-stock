@@ -1,4 +1,4 @@
-import type { StockLevel, StockMove } from '@stock/core';
+import { describeQty, lowAtOf, lowBase, totalQty, type StockLevel, type StockMove } from '@stock/core';
 import { emit } from './events';
 import type { InvRepo } from './store/types';
 
@@ -30,8 +30,55 @@ export async function post(repo: InvRepo, moves: StockMove[]): Promise<StockMove
   if (posted.length) {
     const places = [...new Set(posted.flatMap((m) => [m.from, m.to]).filter((x): x is string => !!x))];
     emit('stock', { locationIds: places });
+    try {
+      await noteLow(repo, posted);
+    } catch (err) {
+      console.error('[stock] could not check for running low', err);
+    }
   }
   return posted;
+}
+
+/** One item that went below its level, for the Home "Needs you now" card. */
+export interface LowAlert {
+  itemId: string;
+  at: string;
+  /** All places together, just after the move, in base units, and in the shop's words. */
+  total: number;
+  words: string;
+  level: string;
+}
+
+const ALERTS_KEPT = 50;
+
+/**
+ * When a sale or a move takes an item's total, in all places together, from at or above its
+ * running-out level to below it, that is written down once and the admin's screens are told.
+ * Moves that only shift stock between places leave the total alone, so they never alert.
+ */
+async function noteLow(repo: InvRepo, posted: StockMove[]): Promise<void> {
+  const change = new Map<string, number>();
+  for (const m of posted) change.set(m.itemId, (change.get(m.itemId) ?? 0) + (m.to ? m.qty : 0) - (m.from ? m.qty : 0));
+  const down = [...change.entries()].filter(([, d]) => d < 0).map(([id]) => id);
+  if (!down.length) return;
+  const levels = await repo.listStock(down);
+  const fresh: LowAlert[] = [];
+  for (const id of down) {
+    const item = await repo.getItem(id);
+    const level = item ? lowBase(item) : undefined;
+    if (!item || level == null) continue;
+    const now = totalQty(item, levels);
+    const before = now - change.get(id)!;
+    if (before >= level && now < level) {
+      const l = lowAtOf(item)!;
+      fresh.push({ itemId: id, at: new Date().toISOString(), total: now, words: describeQty(item, now), level: l.qty + ' ' + l.unit });
+    }
+  }
+  if (!fresh.length) return;
+  const doc = await repo.getDoc<{ id: string; list: LowAlert[] }>('meta', 'lowAlerts');
+  const kept = (doc?.list ?? []).filter((a) => !fresh.some((f) => f.itemId === a.itemId));
+  await repo.putDoc('meta', { id: 'lowAlerts', list: [...fresh, ...kept].slice(0, ALERTS_KEPT) });
+  for (const a of fresh) emit('low', {}, a.itemId);
 }
 
 export interface Difference {

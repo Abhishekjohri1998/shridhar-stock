@@ -1,7 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import {
+  isLow,
+  OPEN_PO,
   proposeRefill,
+  totalsByItem,
   roundOff,
   type BillMirror,
   type CustomerProfile,
@@ -9,7 +12,6 @@ import {
   type Item,
   type OrderRequest,
   type PurchaseOrder,
-  type Supplier,
   type Transfer,
   type Vehicle,
 } from '@stock/core';
@@ -21,12 +23,13 @@ import { placeOrder, settingsOf } from '../setup';
 import { listDrafts, tickDraft } from '../billing/drafts';
 import { matchTyped } from '../billing/sync';
 import { pushGiven } from '../billing/push';
+import type { LowAlert } from '../posting';
 
 /**
  * What each role reads, and the small things each may do.
  *
  * Every answer is built for its role here, never a full record with fields taken off afterwards:
- * a vendor's purchase order is assembled without sale prices, a customer's catalogue without cost
+ * a godown's stock is assembled without prices, a customer's catalogue without cost
  * or quantities. Which records a person may see is decided from who they are on the server, never
  * from anything the page sends.
  */
@@ -56,20 +59,29 @@ roleRoutes.get(
   adminOrOwner,
   handler(async (_req, res) => {
     const repo = getRepo();
-    const [items, stock, locs, bills, transfers, pos, deliveries, orders, meta] = await Promise.all([
+    const [items, stock, bills, transfers, pos, deliveries, orders, meta, alerts] = await Promise.all([
       repo.listItems(),
       repo.listStock(),
-      repo.listLocations(),
       repo.listDocs<BillMirror>('bills'),
       repo.listDocs<Transfer>('transfers'),
-      repo.listDocs<PurchaseOrder>('pos'),
+      repo.listDocs<PurchaseOrder>('pos', { status: [...OPEN_PO] }),
       repo.listDocs<Delivery>('deliveries'),
       repo.listDocs<OrderRequest>('orders'),
       repo.getDoc<{ id: string; link?: unknown; reader?: unknown }>('meta', 'status'),
+      repo.getDoc<{ id: string; list: LowAlert[] }>('meta', 'lowAlerts'),
     ]);
-    const shop = locs.find((l) => l.kind === 'shop');
-    const qty = new Map(stock.map((s) => [s.itemId + '|' + s.locationId, s.qty]));
-    const low = shop ? items.filter((i) => i.active && i.reorderAt[shop.id] != null && (qty.get(i.id + '|' + shop.id) ?? 0) < i.reorderAt[shop.id]!).length : 0;
+    // Running low is all places together, the same rule as Inventory and the buy list.
+    const totals = totalsByItem(stock);
+    const lowItems = items.filter((i) => i.active && isLow(i, totals.get(i.id) ?? 0));
+    const low = lowItems.length;
+    const stillLow = new Set(lowItems.map((i) => i.id));
+    const names = new Map(items.map((i) => [i.id, i]));
+    // What went low in the last day and is still low: the sales that did it, newest first.
+    const since = new Date(Date.now() - 86_400_000).toISOString();
+    const justLow = (alerts?.list ?? [])
+      .filter((a) => a.at >= since && stillLow.has(a.itemId))
+      .slice(0, 8)
+      .map((a) => ({ ...a, nameEn: names.get(a.itemId)?.nameEn ?? '', nameKn: names.get(a.itemId)?.nameKn ?? '' }));
     const today = istToday();
     const todays = bills.filter((b) => b.at >= today && !b.cancelled);
     const lines = bills.flatMap((b) => (b.cancelled ? [] : b.lines));
@@ -77,10 +89,11 @@ roleRoutes.get(
     res.json({
       toConfirm: lines.filter((l) => l.state === 'to-confirm').length,
       low,
+      justLow,
       negative: new Set(stock.filter((s) => s.qty < 0).map((s) => s.itemId)).size,
       inTransit: transfers.filter((t) => t.status === 'sent').length,
       requested: transfers.filter((t) => t.status === 'requested').length,
-      openPos: pos.filter((p) => p.status !== 'received' && p.status !== 'cancelled').length,
+      openPos: pos.length,
       deliveriesToday: deliveries.filter((d) => d.at >= today).length,
       deliveriesPending: deliveries.filter((d) => d.status === 'pending' || d.status === 'out').length,
       newOrders: orders.filter((o) => o.status === 'new').length,
@@ -138,9 +151,31 @@ roleRoutes.get(
   }),
 );
 
+/**
+ * Purchase orders, open ones first and newest first within each, a page at a time. Open orders are read
+ * with a query, so a long history of received ones costs nothing until "Show more" reaches it.
+ */
+roleRoutes.get(
+  '/admin/pos',
+  adminOrOwner,
+  handler(async (req, res) => {
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const repo = getRepo();
+    const open = (await repo.listDocs<PurchaseOrder>('pos', { status: [...OPEN_PO] })).sort(byNoDesc);
+    let orders = open.slice(offset, offset + limit);
+    let total = open.length;
+    if (req.query.open !== '1') {
+      const closed = (await repo.listDocs<PurchaseOrder>('pos', { status: ['received', 'cancelled'] })).sort(byNoDesc);
+      total += closed.length;
+      if (orders.length < limit) orders = [...orders, ...closed.slice(Math.max(0, offset - open.length), Math.max(0, offset - open.length) + limit - orders.length)];
+    }
+    res.json({ orders, open: open.length, total, next: offset + orders.length < total ? offset + orders.length : null });
+  }),
+);
+
 for (const [path, col] of [
   ['/admin/transfers', 'transfers'],
-  ['/admin/pos', 'pos'],
   ['/admin/suppliers', 'suppliers'],
   ['/admin/deliveries', 'deliveries'],
   ['/admin/orders', 'orders'],
@@ -307,7 +342,7 @@ roleRoutes.post(
  */
 roleRoutes.get(
   '/vehicles',
-  requireRole('admin', 'godown', 'vendor', 'delivery'),
+  requireRole('admin', 'godown', 'delivery'),
   handler(async (_req, res) => {
     const all = await getRepo().listDocs<Vehicle>('vehicles');
     res.json(all.filter((v) => v.active).sort((a, b) => a.number.localeCompare(b.number)).map((v) => ({ number: v.number, type: v.type, driverName: v.driverName })));
@@ -356,53 +391,6 @@ roleRoutes.get(
     const g = myGodown(req);
     const items = await getRepo().listItems();
     res.json(items.map((i) => ({ id: i.id, nameEn: i.nameEn, nameKn: i.nameKn, units: i.units.map((u) => ({ code: u.code, label: u.label, labelKn: u.labelKn, perBase: u.perBase, price: 0 })), rack: i.racks[g] ?? '' })));
-  }),
-);
-
-// ---------------------------------------------------------------- vendor
-
-function mySupplier(req: import('express').Request): string {
-  const id = req.person!.linkedId;
-  if (!id) throw new HttpError(403, 'You are not linked to a supplier yet. Ask the admin.');
-  return id;
-}
-
-/** A vendor's own orders, with item names and the agreed cost only. */
-roleRoutes.get(
-  '/vendor/pos',
-  requireRole('vendor'),
-  handler(async (req, res) => {
-    const s = mySupplier(req);
-    const repo = getRepo();
-    const [pos, items, locs, supplier] = await Promise.all([
-      repo.listDocs<PurchaseOrder>('pos'),
-      repo.listItems(),
-      repo.listLocations(),
-      repo.getDoc<Supplier>('suppliers', s),
-    ]);
-    const byId = new Map(items.map((i) => [i.id, i]));
-    res.json({
-      supplier: supplier ? { name: supplier.name } : null,
-      orders: pos
-        .filter((p) => p.supplierId === s)
-        .sort(byNoDesc)
-        .map((p) => ({
-          id: p.id,
-          no: p.no,
-          status: p.status,
-          at: p.at,
-          times: p.times,
-          to: locs.find((l) => l.id === p.to)?.name ?? '',
-          invoiceNo: p.invoiceNo,
-          vehicle: p.vehicle,
-          eta: p.eta,
-          lines: p.lines.map((l) => {
-            const it = byId.get(l.itemId);
-            return { name: it ? it.nameEn || it.nameKn : l.itemId, nameKn: it?.nameKn ?? '', unit: l.unit, qty: l.qty, cost: l.cost };
-          }),
-          total: p.lines.reduce((sum, l) => sum + l.qty * l.cost, 0),
-        })),
-    });
   }),
 );
 

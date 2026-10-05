@@ -2,11 +2,13 @@ import { Router } from 'express';
 import { z } from 'zod';
 import {
   findUnit,
+  poStage,
   searchKey,
   toBase,
   type BillMirror,
   type Delivery,
   type Ink,
+  type Item,
   type OrderRequest,
   type PurchaseOrder,
   type StockMove,
@@ -37,73 +39,123 @@ const inkBody = z
 
 // ---------------------------------------------------------------- confirming bill lines
 
+/** What a person says one bill line was: an item in a unit, or not stock at all. */
+const answerBody = z.object({
+  i: z.number().int().min(0),
+  itemId: z.string().optional(),
+  unit: z.string().optional(),
+  qty: z.number().positive().max(100000).optional(),
+  notItem: z.boolean().optional(),
+});
+type Answer = z.infer<typeof answerBody>;
+
+/** What confirming lines of one bill needs, read once however many lines there are. */
+interface ConfirmContext {
+  bill: BillMirror;
+  items: Map<string, Item>;
+  shopId: string;
+  by: string;
+  learn: boolean;
+  /** Items that learnt a name, saved once at the end. */
+  changedItems: Set<string>;
+}
+
+async function confirmContext(billNo: number, by: string, learn: boolean): Promise<ConfirmContext> {
+  const repo = getRepo();
+  const [bill, items, locs] = await Promise.all([repo.getDoc<BillMirror>('bills', String(billNo)), repo.listItems(), repo.listLocations()]);
+  if (!bill) throw new HttpError(404, 'No such bill');
+  const shop = locs.find((l) => l.kind === 'shop')!;
+  return { bill, items: new Map(items.map((i) => [i.id, i])), shopId: shop.id, by, learn, changedItems: new Set() };
+}
+
 /**
- * A person says what a bill line was. The sale moves stock, and what the handwriting was read as
- * becomes another name for the item, so the same writing is recognised next time.
+ * One line's answer, applied to a bill already read. Shared by the one-line confirm and "confirm
+ * all on this bill", so the two can never disagree.
+ *
+ * The sale moves stock, and what the handwriting was read as becomes another name for the item,
+ * so the same writing is recognised next time. Returns the name learnt, if any.
  */
+async function confirmLine(ctx: ConfirmContext, a: Answer): Promise<{ learnt: string }> {
+  const { bill } = ctx;
+  const line = bill.lines.find((l) => l.i === a.i);
+  if (!line) throw new HttpError(404, 'No such line');
+  if (line.state !== 'to-confirm') throw new HttpError(409, 'This line is already done');
+  if (a.notItem) {
+    line.state = 'not-item';
+    return { learnt: '' };
+  }
+  if (!a.itemId || !a.unit || !a.qty) throw new HttpError(400, 'Choose the item, unit and quantity');
+  const item = ctx.items.get(a.itemId);
+  if (!item) throw new HttpError(404, 'No such item');
+  if (!findUnit(item, a.unit)) throw new HttpError(400, 'That item has no unit "' + a.unit + '"');
+  const baseQty = toBase(item, a.unit, a.qty);
+
+  line.state = 'confirmed';
+  line.itemId = item.id;
+  line.unit = a.unit;
+  line.baseQty = baseQty;
+  if (line.reading) line.reading = { ...line.reading, by: ctx.by, at: now() };
+  await post(getRepo(), [
+    { id: newId('mv'), key: 'sale:' + bill.no + ':' + line.i, at: now(), kind: line.ink ? 'digitise' : 'sale', itemId: item.id, from: ctx.shopId, qty: baseQty, ref: 'bill ' + bill.no + ' line ' + (line.i + 1), by: ctx.by },
+  ]);
+
+  // Learn the name it was written or typed as.
+  const said = (line.reading?.readText || line.name || '').replace(/^\s*[\d.]+\s*(kg|g|l|pc|pack|line|box)?\s*/i, '').trim();
+  if (!ctx.learn || !said || said.length > 60) return { learnt: '' };
+  const key = searchKey(said);
+  const known = [item.nameEn, item.nameKn, ...item.aliases.map((x) => x.text)].some((t) => searchKey(t) === key);
+  if (known || item.aliases.length >= 20) return { learnt: '' };
+  item.aliases.push({ text: said, unit: a.unit === item.units[0]!.code ? undefined : a.unit });
+  item.aliases = item.aliases.map((x) => (x.unit ? x : { text: x.text }));
+  item.updatedAt = now();
+  ctx.changedItems.add(item.id);
+  return { learnt: said };
+}
+
+/** Saves what confirming changed: the bill, and any item that learnt a name. */
+async function confirmSave(ctx: ConfirmContext): Promise<void> {
+  const repo = getRepo();
+  await repo.putDoc('bills', ctx.bill);
+  for (const id of ctx.changedItems) await repo.saveItem(ctx.items.get(id)!);
+  emit('bills');
+  if (ctx.changedItems.size) emit('items');
+}
+
 actionRoutes.post(
   '/admin/confirm',
   admin,
   handler(async (req, res) => {
+    const body = answerBody.extend({ billNo: z.number().int().positive(), learn: z.boolean().default(true) }).parse(req.body);
+    const ctx = await confirmContext(body.billNo, req.person!.id, body.learn);
+    const { learnt } = await confirmLine(ctx, body);
+    await confirmSave(ctx);
+    res.json(body.notItem ? { ok: true } : { ok: true, learnt });
+  }),
+);
+
+/**
+ * "Confirm all on this bill": every line given, each on its own. A line that cannot be confirmed
+ * (already done, an item or unit that does not exist) is reported and the rest still go through.
+ */
+actionRoutes.post(
+  '/admin/confirm/bill',
+  admin,
+  handler(async (req, res) => {
     const body = z
-      .object({
-        billNo: z.number().int().positive(),
-        i: z.number().int().min(0),
-        itemId: z.string().optional(),
-        unit: z.string().optional(),
-        qty: z.number().positive().max(100000).optional(),
-        notItem: z.boolean().optional(),
-        learn: z.boolean().default(true),
-      })
+      .object({ billNo: z.number().int().positive(), lines: z.array(answerBody).min(1).max(200), learn: z.boolean().default(true) })
       .parse(req.body);
-    const repo = getRepo();
-    const bill = await repo.getDoc<BillMirror>('bills', String(body.billNo));
-    if (!bill) throw new HttpError(404, 'No such bill');
-    const line = bill.lines.find((l) => l.i === body.i);
-    if (!line) throw new HttpError(404, 'No such line');
-    if (line.state !== 'to-confirm') throw new HttpError(409, 'This line is already done');
-
-    if (body.notItem) {
-      line.state = 'not-item';
-      await repo.putDoc('bills', bill);
-      emit('bills');
-      res.json({ ok: true });
-      return;
-    }
-    if (!body.itemId || !body.unit || !body.qty) throw new HttpError(400, 'Choose the item, unit and quantity');
-    const item = await repo.getItem(body.itemId);
-    if (!item) throw new HttpError(404, 'No such item');
-    if (!findUnit(item, body.unit)) throw new HttpError(400, 'That item has no unit "' + body.unit + '"');
-    const baseQty = toBase(item, body.unit, body.qty);
-    const shop = (await repo.listLocations()).find((l) => l.kind === 'shop')!;
-
-    line.state = 'confirmed';
-    line.itemId = item.id;
-    line.unit = body.unit;
-    line.baseQty = baseQty;
-    if (line.reading) line.reading = { ...line.reading, by: req.person!.id, at: now() };
-    await repo.putDoc('bills', bill);
-    await post(repo, [
-      { id: newId('mv'), key: 'sale:' + bill.no + ':' + line.i, at: now(), kind: line.ink ? 'digitise' : 'sale', itemId: item.id, from: shop.id, qty: baseQty, ref: 'bill ' + bill.no + ' line ' + (line.i + 1), by: req.person!.id },
-    ]);
-
-    // Learn the name it was written or typed as.
-    const said = (line.reading?.readText || line.name || '').replace(/^\s*[\d.]+\s*(kg|g|l|pc|pack|line|box)?\s*/i, '').trim();
-    let learnt = '';
-    if (body.learn && said && said.length <= 60) {
-      const key = searchKey(said);
-      const known = [item.nameEn, item.nameKn, ...item.aliases.map((a) => a.text)].some((t) => searchKey(t) === key);
-      if (!known && item.aliases.length < 20) {
-        item.aliases.push({ text: said, unit: body.unit === item.units[0]!.code ? undefined : body.unit });
-        item.aliases = item.aliases.map((a) => (a.unit ? a : { text: a.text }));
-        item.updatedAt = now();
-        await repo.saveItem(item);
-        learnt = said;
+    const ctx = await confirmContext(body.billNo, req.person!.id, body.learn);
+    const done: { i: number; learnt: string }[] = [];
+    const failed: { i: number; error: string }[] = [];
+    for (const a of body.lines) {
+      try {
+        done.push({ i: a.i, ...(await confirmLine(ctx, a)) });
+      } catch (err) {
+        failed.push({ i: a.i, error: err instanceof HttpError ? err.message : 'Could not confirm this line' });
       }
     }
-    emit('bills');
-    if (learnt) emit('items');
-    res.json({ ok: true, learnt });
+    if (done.length) await confirmSave(ctx);
+    res.json({ ok: failed.length === 0, done, failed });
   }),
 );
 
@@ -273,6 +325,7 @@ const supplierBody = z.object({
   name: z.string().trim().min(1, 'Give the supplier a name').max(80),
   phone: z.string().trim().max(20).default(''),
   address: z.string().trim().max(200).optional(),
+  notes: z.string().trim().max(300).optional(),
   active: z.boolean().optional(),
 });
 
@@ -281,7 +334,7 @@ actionRoutes.post(
   admin,
   handler(async (req, res) => {
     const b = supplierBody.parse(req.body);
-    const s: Supplier = { id: newId('sup'), name: b.name, phone: b.phone, ...(b.address ? { address: b.address } : {}), active: true };
+    const s: Supplier = { id: newId('sup'), name: b.name, phone: b.phone, ...(b.address ? { address: b.address } : {}), ...(b.notes ? { notes: b.notes } : {}), active: true };
     await getRepo().putDoc('suppliers', s);
     res.status(201).json(s);
   }),
@@ -295,7 +348,7 @@ actionRoutes.put(
     const repo = getRepo();
     const old = await repo.getDoc<Supplier>('suppliers', String(req.params.id));
     if (!old) throw new HttpError(404, 'No such supplier');
-    const s: Supplier = { ...old, name: b.name, phone: b.phone, ...(b.address != null ? { address: b.address } : {}), active: b.active ?? old.active };
+    const s: Supplier = { ...old, name: b.name, phone: b.phone, ...(b.address != null ? { address: b.address } : {}), ...(b.notes != null ? { notes: b.notes } : {}), active: b.active ?? old.active };
     await repo.putDoc('suppliers', s);
     res.json(s);
   }),
@@ -303,78 +356,64 @@ actionRoutes.put(
 
 // ---------------------------------------------------------------- purchase orders
 
+/*
+ * Purchases are the admin's alone: an order is saved as ordered, then received (the goods go
+ * into the chosen place) or cancelled. Suppliers do not sign in. Orders saved as confirmed or
+ * dispatched, from when they did, are open orders like any other.
+ */
+
+/** Every item named on an order, in one read, refusing any that does not exist. */
+async function itemsFor(ids: string[]): Promise<Map<string, Item>> {
+  const want = new Set(ids);
+  const items = new Map((await getRepo().listItems()).filter((i) => want.has(i.id)).map((i) => [i.id, i]));
+  if (items.size !== want.size) throw new HttpError(400, 'An item on this order does not exist');
+  return items;
+}
+
 actionRoutes.post(
   '/admin/pos',
   admin,
   handler(async (req, res) => {
     const body = z
-      .object({ supplierId: z.string(), to: z.string(), lines: z.array(z.object({ itemId: z.string(), unit: z.string(), qty: z.number().positive(), cost: z.number().min(0) })).min(1).max(100) })
+      .object({
+        supplierId: z.string(),
+        to: z.string(),
+        lines: z.array(z.object({ itemId: z.string(), unit: z.string(), qty: z.number().positive().max(1e6), cost: z.number().min(0).max(1e7).default(0) })).min(1).max(100),
+      })
       .parse(req.body);
     const repo = getRepo();
-    const sup = await repo.getDoc<Supplier>('suppliers', body.supplierId);
+    const [sup, locs, items] = await Promise.all([repo.getDoc<Supplier>('suppliers', body.supplierId), repo.listLocations(), itemsFor(body.lines.map((l) => l.itemId))]);
     if (!sup || !sup.active) throw new HttpError(404, 'No such supplier');
-    if (!(await repo.listLocations()).some((l) => l.id === body.to && l.active)) throw new HttpError(400, 'Choose where the goods go');
+    if (!locs.some((l) => l.id === body.to && l.active)) throw new HttpError(400, 'Choose where the goods go');
+    if (new Set(body.lines.map((l) => l.itemId)).size !== body.lines.length) throw new HttpError(400, 'An item is on this order twice');
     for (const l of body.lines) {
-      const item = await repo.getItem(l.itemId);
-      if (!item) throw new HttpError(400, 'An item on this order does not exist');
+      const item = items.get(l.itemId)!;
       if (!findUnit(item, l.unit)) throw new HttpError(400, item.nameEn + ' has no unit "' + l.unit + '"');
     }
     const no = await repo.nextNo('po');
     const p: PurchaseOrder = { id: 'po_' + no, no, supplierId: body.supplierId, to: body.to, lines: body.lines, status: 'ordered', at: now(), times: { ordered: now() } };
     await repo.putDoc('pos', p);
-    emit('pos', { supplierId: p.supplierId }, p.id);
+    emit('pos', {}, p.id);
     res.status(201).json(p);
   }),
 );
 
-async function loadPo(req: import('express').Request): Promise<PurchaseOrder> {
-  const p = await getRepo().getDoc<PurchaseOrder>('pos', String(req.params.id));
+async function loadPo(id: string): Promise<PurchaseOrder> {
+  const p = await getRepo().getDoc<PurchaseOrder>('pos', id);
   if (!p) throw new HttpError(404, 'No such order');
-  const me = req.person!;
-  if (me.role === 'vendor' && me.linkedId !== p.supplierId) throw new HttpError(403, 'This order is not yours');
   return p;
 }
-
-actionRoutes.post(
-  '/pos/:id/confirm',
-  requireRole('vendor', 'admin'),
-  handler(async (req, res) => {
-    const p = await loadPo(req);
-    if (p.status !== 'ordered') throw new HttpError(409, 'Already ' + p.status);
-    p.status = 'confirmed';
-    p.times.confirmed = now();
-    await getRepo().putDoc('pos', p);
-    emit('pos', { supplierId: p.supplierId }, p.id);
-    res.json({ ok: true });
-  }),
-);
-
-actionRoutes.post(
-  '/pos/:id/dispatch',
-  requireRole('vendor', 'admin'),
-  handler(async (req, res) => {
-    const body = z.object({ invoiceNo: z.string().max(40).optional(), vehicle: z.string().max(40).optional(), eta: z.string().max(40).optional() }).parse(req.body);
-    const p = await loadPo(req);
-    if (p.status !== 'confirmed' && p.status !== 'ordered') throw new HttpError(409, 'Already ' + p.status);
-    p.status = 'dispatched';
-    p.times.dispatched = now();
-    Object.assign(p, body);
-    await getRepo().putDoc('pos', p);
-    emit('pos', { supplierId: p.supplierId }, p.id);
-    res.json({ ok: true });
-  }),
-);
 
 actionRoutes.post(
   '/admin/pos/:id/cancel',
   admin,
   handler(async (req, res) => {
-    const p = await loadPo(req);
-    if (p.status !== 'ordered' && p.status !== 'confirmed') throw new HttpError(409, p.status === 'dispatched' ? 'Already dispatched: receive it, with what arrives' : 'Already ' + p.status);
+    const p = await loadPo(String(req.params.id));
+    if (poStage(p.status) !== 'ordered') throw new HttpError(409, 'Already ' + p.status);
     p.status = 'cancelled';
     p.times.cancelled = now();
     await getRepo().putDoc('pos', p);
-    emit('pos', { supplierId: p.supplierId }, p.id);
+    emit('pos', {}, p.id);
     res.json({ ok: true });
   }),
 );
@@ -387,39 +426,51 @@ actionRoutes.post(
       .object({
         /** Per item: what arrived (in the order's unit) and what it cost per unit. */
         got: z.record(z.string(), z.object({ qty: z.number().min(0).max(1e6), cost: z.number().min(0).max(1e7).optional() })).optional(),
+        /** Where the goods went, when not where the order said. */
+        to: z.string().optional(),
         updateCost: z.boolean().default(false),
       })
       .parse(req.body ?? {});
-    const p = await loadPo(req);
-    if (p.status === 'received' || p.status === 'cancelled') throw new HttpError(409, 'Already ' + p.status);
+    const p = await loadPo(String(req.params.id));
+    if (poStage(p.status) !== 'ordered') throw new HttpError(409, 'Already ' + p.status);
     const repo = getRepo();
+    // One read for every item on the order. An item deleted since is received as a record only.
+    const want = new Set(p.lines.map((l) => l.itemId));
+    const [all, locs] = await Promise.all([repo.listItems(), repo.listLocations()]);
+    const items = new Map(all.filter((i) => want.has(i.id)).map((i) => [i.id, i]));
+    const to = body.to ?? p.to;
+    if (!locs.some((l) => l.id === to && l.active)) throw new HttpError(400, 'Choose where the goods go');
     const moves: StockMove[] = [];
     const received: { itemId: string; qty: number; cost: number }[] = [];
+    const costChanged = new Set<string>();
     for (const l of p.lines) {
       const g = body.got?.[l.itemId];
       const qty = g?.qty ?? l.qty;
       const cost = g?.cost ?? l.cost;
       if (qty > l.qty) throw new HttpError(400, 'More received than ordered: count again, or order the rest separately.');
       received.push({ itemId: l.itemId, qty, cost });
-      const item = await repo.getItem(l.itemId);
+      const item = items.get(l.itemId);
       if (!item || qty === 0) continue;
-      moves.push({ id: newId('mv'), key: 'po:' + p.no + ':' + l.itemId, at: now(), kind: 'purchase', itemId: l.itemId, to: p.to, qty: toBase(item, l.unit, qty), ref: 'order ' + p.no, by: req.person!.id, ...(qty < l.qty ? { note: l.qty - qty + ' ' + l.unit + ' short' } : {}) });
+      moves.push({ id: newId('mv'), key: 'po:' + p.no + ':' + l.itemId, at: now(), kind: 'purchase', itemId: l.itemId, to, qty: toBase(item, l.unit, qty), ref: 'order ' + p.no, by: req.person!.id, ...(qty < l.qty ? { note: l.qty - qty + ' ' + l.unit + ' short' } : {}) });
       // The price paid becomes the item's cost for that unit, when the admin says so.
       if (body.updateCost) {
         const u = item.units.find((x) => x.code === l.unit);
         if (u && u.cost !== cost) {
           u.cost = cost;
           item.updatedAt = now();
-          await repo.saveItem(item);
+          costChanged.add(item.id);
         }
       }
     }
+    for (const id of costChanged) await repo.saveItem(items.get(id)!);
     (p as PurchaseOrder & { received?: typeof received }).received = received;
+    p.to = to;
     p.status = 'received';
     p.times.received = now();
     await repo.putDoc('pos', p);
     await post(repo, moves);
-    emit('pos', { supplierId: p.supplierId }, p.id);
+    emit('pos', {}, p.id);
+    if (costChanged.size) emit('items');
     res.json({ ok: true });
   }),
 );

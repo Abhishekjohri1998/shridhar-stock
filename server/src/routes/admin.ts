@@ -5,15 +5,18 @@ import {
   checkItem,
   checkPin,
   describeQty,
+  isLow,
   itemMatches,
   itemsFromCsv,
   itemsToCsv,
+  lowAtOf,
   normalisePhone,
   parseCsv,
   ROLES,
   ROUND_STEPS,
   toCsv,
   toXlsx,
+  totalsByItem,
   type Cell,
   type Item,
   type ItemInput,
@@ -54,13 +57,12 @@ const personBody = z.object({
   pin: z.string().max(12),
 });
 
-/** A godown person must be tied to a godown that exists, and a vendor to a supplier. */
+/**
+ * A godown person must be tied to a godown that exists. A vendor, from when suppliers signed in,
+ * keeps whatever supplier they were tied to.
+ */
 async function checkLink(role: Role, linkedId: string | undefined): Promise<string | undefined> {
-  if (role === 'vendor') {
-    const sup = linkedId ? await getRepo().getDoc<{ id: string; active: boolean }>('suppliers', linkedId) : null;
-    if (!sup || !sup.active) throw new HttpError(400, 'Choose which supplier this person is');
-    return linkedId;
-  }
+  if (role === 'vendor') return linkedId;
   if (role !== 'godown') return undefined;
   const locs = await getRepo().listLocations();
   if (!linkedId || !locs.some((l) => l.id === linkedId && l.kind === 'godown')) {
@@ -74,6 +76,7 @@ adminRoutes.post(
   admin,
   handler(async (req, res) => {
     const body = personBody.parse(req.body);
+    if (body.role === 'vendor') throw new HttpError(400, NO_VENDORS);
     const phone = normalisePhone(body.phone);
     if (phone.length !== 10) throw new HttpError(400, 'The phone number should be 10 digits');
     const bad = checkPin(body.pin);
@@ -95,6 +98,8 @@ adminRoutes.post(
   }),
 );
 
+const NO_VENDORS = 'Suppliers do not sign in any more. Add them under Purchases, Suppliers.';
+
 const personPatch = z.object({
   name: z.string().trim().min(1).max(60).optional(),
   role: z.enum(ROLES).optional(),
@@ -112,6 +117,7 @@ adminRoutes.put(
     if (!p) throw new HttpError(404, 'No such person');
     const role = patch.role ?? p.role;
     const active = patch.active ?? p.active;
+    if (role === 'vendor' && p.role !== 'vendor') throw new HttpError(400, NO_VENDORS);
     // The shop must never be left with nobody able to run it.
     if (p.role === 'admin' && (role !== 'admin' || !active)) {
       const admins = (await repo.listPeople()).filter((x) => x.role === 'admin' && x.active);
@@ -229,11 +235,20 @@ adminRoutes.get(
   }),
 );
 
-/** Racks and levels may only be keyed by places that exist. */
+/** Racks may only be keyed by places that exist. */
 async function dropUnknownPlaces(input: ItemInput): Promise<ItemInput> {
   const ids = new Set((await getRepo().listLocations()).map((l) => l.id));
-  const keep = <T>(rec: Record<string, T>) => Object.fromEntries(Object.entries(rec).filter(([k]) => ids.has(k)));
-  return { ...input, racks: keep(input.racks), reorderAt: keep(input.reorderAt) };
+  return { ...input, racks: Object.fromEntries(Object.entries(input.racks).filter(([k]) => ids.has(k))) };
+}
+
+/**
+ * An item as saved over an older one. The old per-place levels are kept as they were (they are
+ * never read once lowAt is set); a level the shop cleared is saved as null, so the old ones do
+ * not come back in its place.
+ */
+function keepOld(next: Item, old: Item): Item {
+  if (!old.reorderAt) return next;
+  return { ...next, reorderAt: old.reorderAt, ...(next.lowAt ? {} : { lowAt: null }) };
 }
 
 function checked(body: unknown): ItemInput {
@@ -262,7 +277,7 @@ adminRoutes.put(
     const old = await repo.getItem(String(req.params.id));
     if (!old) throw new HttpError(404, 'No such item');
     const input = await dropUnknownPlaces(checked(req.body));
-    const item: Item = { ...input, id: old.id, active: input.active ?? old.active, updatedAt: new Date().toISOString() };
+    const item = keepOld({ ...input, id: old.id, active: input.active ?? old.active, updatedAt: new Date().toISOString() }, old);
     await repo.saveItem(item);
     emit('items');
     res.json(item);
@@ -523,6 +538,17 @@ adminRoutes.get(
   }),
 );
 
+/** The running-out level as the shop typed it: "2 box". */
+function lowWords(it: Item): string {
+  const l = lowAtOf(it);
+  return l ? l.qty + ' ' + l.unit : '';
+}
+
+/** Below zero is about this place; running low is about all places together. */
+function stockStatus(it: Item, q: number, total: number): string {
+  return q < 0 ? 'below zero' : isLow(it, total) ? 'running low' : '';
+}
+
 /** Stock as a workbook: one sheet per place, the shop first, the same columns as stock.csv. */
 adminRoutes.get(
   '/export/stock.xlsx',
@@ -531,15 +557,16 @@ adminRoutes.get(
     const repo = getRepo();
     const [items, locs, stock] = await Promise.all([repo.listItems(), repo.listLocations(), repo.listStock()]);
     const qty = new Map(stock.map((s) => [s.itemId + '|' + s.locationId, s.qty]));
+    const totals = totalsByItem(stock);
     const sheets = placeOrder(locs).map((loc) => ({
       name: loc.name,
-      header: ['item_id', 'name_en', 'name_kn', 'qty_base', 'base_unit', 'as_units', 'rack', 'running_out_below', 'status'],
+      header: ['item_id', 'name_en', 'name_kn', 'qty_base', 'base_unit', 'as_units', 'rack', 'total_all_places', 'running_out_below', 'status'],
       rows: items
         .filter((i) => i.active)
         .map((it) => {
           const q = qty.get(it.id + '|' + loc.id) ?? 0;
-          const level = it.reorderAt[loc.id];
-          return [it.id, it.nameEn, it.nameKn, q, it.units[0]!.code, describeQty(it, q), it.racks[loc.id] ?? '', level ?? '', q < 0 ? 'below zero' : level != null && q < level ? 'running low' : ''];
+          const total = totals.get(it.id) ?? 0;
+          return [it.id, it.nameEn, it.nameKn, q, it.units[0]!.code, describeQty(it, q), it.racks[loc.id] ?? '', total, lowWords(it), stockStatus(it, q, total)];
         }),
     }));
     sendXlsx(res, 'stock.xlsx', toXlsx(sheets));
@@ -553,11 +580,12 @@ adminRoutes.get(
     const repo = getRepo();
     const [items, locs, stock] = await Promise.all([repo.listItems(), repo.listLocations(), repo.listStock()]);
     const qty = new Map(stock.map((s) => [s.itemId + '|' + s.locationId, s.qty]));
+    const totals = totalsByItem(stock);
     const rows: (string | number)[][] = [];
     for (const it of items.filter((i) => i.active)) {
+      const total = totals.get(it.id) ?? 0;
       for (const loc of locs) {
         const q = qty.get(it.id + '|' + loc.id) ?? 0;
-        const level = it.reorderAt[loc.id];
         rows.push([
           it.id,
           it.nameEn,
@@ -567,15 +595,16 @@ adminRoutes.get(
           it.units[0]!.code,
           describeQty(it, q),
           it.racks[loc.id] ?? '',
-          level ?? '',
-          q < 0 ? 'below zero' : level != null && q < level ? 'running low' : '',
+          total,
+          lowWords(it),
+          stockStatus(it, q, total),
         ]);
       }
     }
     sendCsv(
       res,
       'stock.csv',
-      toCsv(['item_id', 'name_en', 'name_kn', 'place', 'qty_base', 'base_unit', 'as_units', 'rack', 'running_out_below', 'status'], rows),
+      toCsv(['item_id', 'name_en', 'name_kn', 'place', 'qty_base', 'base_unit', 'as_units', 'rack', 'total_all_places', 'running_out_below', 'status'], rows),
     );
   }),
 );
@@ -616,7 +645,7 @@ adminRoutes.get(
 
 /** The parts of an item a spreadsheet can change, for telling "changed" from "unchanged". */
 function comparable(i: ItemInput): string {
-  return JSON.stringify([i.nameEn, i.nameKn, i.category ?? '', i.units, i.aliases, i.racks, i.reorderAt, i.active ?? true]);
+  return JSON.stringify([i.nameEn, i.nameKn, i.category ?? '', i.units, i.aliases, i.racks, lowAtOf(i) ?? null, i.active ?? true]);
 }
 
 /**
@@ -642,9 +671,11 @@ adminRoutes.post(
         errors.push({ row, message: 'item_id "' + raw.id + '" is not in the shop. Leave item_id empty for a new item.' });
         continue;
       }
-      // Keep racks and levels for godowns: the spreadsheet only carries the shop's.
+      // Keep racks for godowns: the spreadsheet only carries the shop's. An empty low_at keeps
+      // the level the item has.
+      const oldLow = old ? lowAtOf(old) : undefined;
       const merged: ItemInput = old
-        ? { ...raw, racks: { ...old.racks, ...raw.racks }, reorderAt: { ...old.reorderAt, ...raw.reorderAt }, active: raw.active ?? old.active }
+        ? { ...raw, racks: { ...old.racks, ...raw.racks }, ...(!raw.lowAt && !raw.reorderAt && oldLow ? { lowAt: oldLow } : {}), active: raw.active ?? old.active }
         : raw;
       const r = checkItem(merged);
       if (!r.ok) {
@@ -662,12 +693,8 @@ adminRoutes.post(
       const now = new Date().toISOString();
       for (const r of ready) {
         if (r.old && comparable(r.input) === comparable(r.old)) continue;
-        await repo.saveItem({
-          ...r.input,
-          id: r.old?.id ?? newId('it'),
-          active: r.input.active ?? true,
-          updatedAt: now,
-        });
+        const next: Item = { ...r.input, id: r.old?.id ?? newId('it'), active: r.input.active ?? true, updatedAt: now };
+        await repo.saveItem(r.old ? keepOld(next, r.old) : next);
       }
     }
     res.json({ added, changed, unchanged, errors, applied: !dry && errors.length === 0 });

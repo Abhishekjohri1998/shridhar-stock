@@ -24,6 +24,15 @@ const eq = (name, got, want) => check(name, got === want, 'got ' + JSON.stringif
 
 async function main() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-roles-'));
+  // The demo, plus a supplier who signed in back when vendors could: seeded here, before the
+  // server starts, as it would be in a shop's data from then.
+  {
+    const { hashPin } = require(path.join(out, 'pin.js'));
+    const repo = await require(path.join(out, 'store', 'file.js')).createFileRepo(dir);
+    await require(path.join(out, 'demo', 'seed.js')).seedDemo(repo);
+    await repo.createPerson({ id: 'p_oldvendor', name: 'Old vendor login', phone: '9111100009', role: 'vendor', linkedId: 'sup_1', active: true, pinHash: hashPin('2468'), tv: 1, createdAt: new Date().toISOString() });
+    await repo.close();
+  }
   const port = 4600 + Math.floor(Math.random() * 300);
   const base = 'http://localhost:' + port;
   const proc = spawn(process.execPath, [path.join(out, 'index.js')], {
@@ -58,24 +67,26 @@ async function main() {
     };
     const as = async (role) => (await call('/demo/login-as', null, { role })).body.token;
     const T = {};
-    for (const r of ['admin', 'owner', 'worker', 'godown', 'vendor', 'delivery', 'customer']) T[r] = await as(r);
-    check('every role has a demo person', Object.values(T).every(Boolean));
+    for (const r of ['admin', 'owner', 'worker', 'godown', 'delivery', 'customer']) T[r] = await as(r);
+    check('every role that signs in has a demo person', Object.values(T).every(Boolean));
+    eq('suppliers have no demo login', (await call('/demo/login-as', null, { role: 'vendor' })).status, 404);
+    eq('a vendor from before cannot sign in', (await call('/auth/login', null, { phone: '9111100009', pin: '2468' })).status, 403);
+    check('but is kept, as a contact', (await call('/people', T.admin)).body.some((p) => p.id === 'p_oldvendor' && p.role === 'vendor'));
+    eq('the vendor screen is gone', (await call('/vendor/pos', T.admin)).status, 404);
+    eq('and so are the vendor\'s steps', (await call('/pos/po_3/confirm', T.admin, {})).status, 404);
+    eq('a new vendor login is refused', (await call('/people', T.admin, { name: 'V', phone: '9111100001', role: 'vendor', pin: '2222', linkedId: 'sup_1' })).status, 400);
     eq('demo PIN works like a real login', (await call('/auth/login', null, { phone: '9000000004', pin: '1111' })).status, 200);
 
     // ---- who sees what
     const summary = (await call('/admin/summary', T.admin)).body;
     check('the admin sees lines to confirm', summary.toConfirm >= 3, JSON.stringify(summary));
-    for (const r of ['worker', 'godown', 'vendor', 'delivery', 'customer']) {
+    for (const r of ['worker', 'godown', 'delivery', 'customer']) {
       eq(r + ' cannot read the admin summary', (await call('/admin/summary', T[r])).status, 403);
     }
     eq('the owner can read it', (await call('/admin/summary', T.owner)).status, 200);
     eq('the owner cannot change items', (await call('/items', T.owner, {})).status, 403);
     eq('the owner cannot confirm lines', (await call('/admin/confirm', T.owner, { billNo: 54, i: 0 })).status, 403);
 
-    const vendor = (await call('/vendor/pos', T.vendor)).body;
-    check('a vendor sees only their own orders', vendor.orders.length === 3 && vendor.orders.every((o) => o.no !== 4), vendor.orders.map((o) => o.no).join());
-    check('a vendor never sees sale prices', !JSON.stringify(vendor).includes('"price"'));
-    eq('a vendor cannot act on another supplier\'s order', (await call('/pos/po_4/confirm', T.vendor, {})).status, 403);
 
     const cat = (await call('/customer/catalogue', T.customer)).body;
     check('the customer catalogue has prices', cat.length > 30 && cat[0].units[0].price > 0);
@@ -129,6 +140,46 @@ async function main() {
     eq('"not stock" leaves stock alone', (await call('/admin/confirm', T.admin, { billNo: 54, i: 3, notItem: true })).status, 200);
     eq('a unit the item does not have is refused', (await call('/admin/confirm', T.admin, { billNo: 53, i: 2, itemId: 'it_ghee', unit: 'tin', qty: 2 })).status, 400);
 
+    // ---- confirm all on one bill
+    const pending = (await call('/admin/confirm', T.admin)).body;
+    check('lines to confirm come in bill order', pending.every((p, i) => i === 0 || pending[i - 1].billNo <= p.billNo));
+    const ghee0 = await shopQty('it_ghee');
+    const all53 = await call('/admin/confirm/bill', T.admin, { billNo: 53, lines: [{ i: 2, itemId: 'it_ghee', unit: 'pc', qty: 2 }, { i: 0, itemId: 'it_onion', unit: 'kg', qty: 10 }, { i: 9, notItem: true }] });
+    eq('a bill confirms in one go', all53.status, 200);
+    check('the good line is done', all53.body.done.length === 1 && all53.body.done[0].i === 2, JSON.stringify(all53.body));
+    check('a line already done and a missing line are reported, not fatal', all53.body.failed.map((x) => x.i).join() === '0,9', JSON.stringify(all53.body.failed));
+    eq('the ghee left the shop once', await shopQty('it_ghee'), ghee0 - 2);
+    eq('again changes nothing', (await call('/admin/confirm/bill', T.admin, { billNo: 53, lines: [{ i: 2, itemId: 'it_ghee', unit: 'pc', qty: 2 }] })).body.done.length, 0);
+    eq('and stock stays put', await shopQty('it_ghee'), ghee0 - 2);
+    eq('a bill that does not exist', (await call('/admin/confirm/bill', T.admin, { billNo: 999, lines: [{ i: 0, notItem: true }] })).status, 404);
+    eq('the owner cannot', (await call('/admin/confirm/bill', T.owner, { billNo: 54, lines: [{ i: 0, notItem: true }] })).status, 403);
+    check('bill 53 has nothing left to confirm', !(await call('/admin/confirm', T.admin)).body.some((p) => p.billNo === 53));
+
+    // ---- running low: one level, all places together
+    const put = async (p, token, body) => {
+      const r = await fetch(base + '/api' + p, { method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      return { status: r.status, body: await r.json() };
+    };
+    const levels = (await call('/stock', T.admin)).body.filter((x) => x.itemId === 'it_parle');
+    const total = levels.reduce((a, x) => a + x.qty, 0);
+    const parleNow = (await call('/items/it_parle', T.admin)).body;
+    eq('the demo level is in packs', JSON.stringify(parleNow.lowAt), JSON.stringify({ qty: 2, unit: 'pack' }));
+    const low0 = (await call('/admin/summary', T.admin)).body;
+    check('toor dal is low in all places together', (await call('/admin/refill', T.admin)).body.buy.some((b) => b.itemId === 'it_toor'));
+    const set = await put('/items/it_parle', T.admin, { ...parleNow, lowAt: { qty: total, unit: 'pc' } });
+    eq('a level is set in pieces', set.status, 200);
+    eq('a level in a unit the item does not have is refused', (await put('/items/it_parle', T.admin, { ...parleNow, lowAt: { qty: 1, unit: 'crate' } })).status, 400);
+    eq('exactly the level is not low', (await call('/admin/summary', T.admin)).body.low, low0.low);
+    const shopParle = levels.find((x) => x.locationId === 'loc_shop').qty;
+    await call('/stock/adjust', T.admin, { itemId: 'it_parle', locationId: 'loc_shop', actual: shopParle - 1, reason: 'damaged' });
+    const s1 = (await call('/admin/summary', T.admin)).body;
+    eq('one piece less in the shop makes it low', s1.low, low0.low + 1);
+    check('and it shows as just gone low', s1.justLow.some((a) => a.itemId === 'it_parle' && a.nameEn === 'Parle-G'), JSON.stringify(s1.justLow));
+    const stockCsv = await (await fetch(base + '/api/export/stock.csv', { headers: { Authorization: 'Bearer ' + T.admin } })).text();
+    check('stock.csv says so, with the total and the level', stockCsv.split('\n').some((l) => l.includes('it_parle') && l.includes(total - 1 + ',' + total + ' pc,running low')), stockCsv.split('\n').find((l) => l.includes('it_parle')));
+    await put('/items/it_parle', T.admin, { ...parleNow, lowAt: undefined });
+    eq('a cleared level is never low', (await call('/admin/summary', T.admin)).body.low, low0.low);
+
     // ---- a trip: requested, sent short by the godown, received at the shop
     const g0 = await (async () => ((await call('/stock', T.admin)).body.find((s) => s.itemId === 'it_clinic' && s.locationId === 'loc_g1')).qty)();
     const s0 = await shopQty('it_clinic');
@@ -170,9 +221,7 @@ async function main() {
     eq('a request can be cancelled before it leaves', (await call('/transfers/' + c.body.id + '/cancel', T.admin, {})).status, 200);
     eq('and then cannot be sent', (await call('/transfers/' + c.body.id + '/send', T.godown, {})).status, 409);
 
-    // ---- vendor, purchase, delivery, customer order
-    eq('the vendor confirms order 3', (await call('/pos/po_3/confirm', T.vendor, {})).status, 200);
-    eq('and dispatches it', (await call('/pos/po_3/dispatch', T.vendor, { invoiceNo: 'SLT/1', vehicle: 'KA-02' })).status, 200);
+    // ---- purchase, delivery, customer order
     const cof = async () => ((await call('/stock', T.admin)).body.find((s) => s.itemId === 'it_coffee' && s.locationId === 'loc_g2') ?? { qty: 0 }).qty;
     const c0 = await cof();
     eq('the admin receives it', (await call('/admin/pos/po_3/receive', T.admin, {})).status, 200);
@@ -188,28 +237,38 @@ async function main() {
     // ---- suppliers and purchase orders
     const sup = await call('/admin/suppliers', T.admin, { name: 'Ganesh Oils', phone: '9000000099' });
     eq('a supplier is added', sup.status, 201);
-    eq('a vendor login needs a supplier', (await call('/people', T.admin, { name: 'V', phone: '9111100001', role: 'vendor', pin: '2222' })).status, 400);
-    eq('and gets one', (await call('/people', T.admin, { name: 'V', phone: '9111100001', role: 'vendor', pin: '2222', linkedId: sup.body.id })).status, 201);
+    const noted = await put('/admin/suppliers/' + sup.body.id, T.admin, { name: 'Ganesh Oils', phone: '9000000099', notes: 'Oil tins, cash only' });
+    eq('a supplier keeps notes', noted.body.notes, 'Oil tins, cash only');
     eq('a unit the item does not have is refused', (await call('/admin/pos', T.admin, { supplierId: sup.body.id, to: 'loc_g1', lines: [{ itemId: 'it_goil', unit: 'drum', qty: 1, cost: 1 }] })).status, 400);
     eq('a place that does not exist is refused', (await call('/admin/pos', T.admin, { supplierId: sup.body.id, to: 'loc_moon', lines: [{ itemId: 'it_goil', unit: 'tin', qty: 1, cost: 1 }] })).status, 400);
     const po = await call('/admin/pos', T.admin, { supplierId: sup.body.id, to: 'loc_g1', lines: [{ itemId: 'it_goil', unit: 'tin', qty: 4, cost: 2500 }] });
     eq('an order for 4 tins of groundnut oil', po.status, 201);
-    const vt = (await call('/auth/login', null, { phone: '9111100001', pin: '2222' })).body.token;
-    check('the new vendor sees it', (await call('/vendor/pos', vt)).body.orders.some((o) => o.id === po.body.id));
-    check('the demo vendor does not', !(await call('/vendor/pos', T.vendor)).body.orders.some((o) => o.id === po.body.id));
+    eq('it is ordered', po.body.status, 'ordered');
+    eq('an item twice is refused', (await call('/admin/pos', T.admin, { supplierId: sup.body.id, to: 'loc_g1', lines: [{ itemId: 'it_goil', unit: 'tin', qty: 1 }, { itemId: 'it_goil', unit: 'l', qty: 1 }] })).status, 400);
+    eq('an item that does not exist is refused', (await call('/admin/pos', T.admin, { supplierId: sup.body.id, to: 'loc_g1', lines: [{ itemId: 'it_nope', unit: 'pc', qty: 1 }] })).status, 400);
+    eq('the cost may be left out', (await call('/admin/pos', T.admin, { supplierId: sup.body.id, to: 'loc_g1', lines: [{ itemId: 'it_rava', unit: 'kg', qty: 5 }] })).body.lines[0].cost, 0);
+    const page = (await call('/admin/pos?limit=2', T.admin)).body;
+    check('orders come a page at a time, open first', page.orders.length === 2 && page.next === 2 && page.orders.every((o) => o.status !== 'received' && o.status !== 'cancelled'), JSON.stringify(page));
+    const everything = (await call('/admin/pos?limit=100', T.admin)).body;
+    check('then the rest', everything.next === null && everything.orders.length === everything.total && everything.orders.findIndex((o) => o.status === 'received') >= everything.open);
+    check('old confirmed and dispatched orders are open', everything.orders.slice(0, everything.open).some((o) => o.status === 'dispatched') && everything.orders.slice(0, everything.open).some((o) => o.status === 'confirmed'));
     eq('receiving more than ordered is refused', (await call('/admin/pos/' + po.body.id + '/receive', T.admin, { got: { it_goil: { qty: 5 } } })).status, 400);
     const oil0 = await gq('it_goil', 'loc_g1');
     eq('3 tins arrive, at ₹2520', (await call('/admin/pos/' + po.body.id + '/receive', T.admin, { got: { it_goil: { qty: 3, cost: 2520 } }, updateCost: true })).status, 200);
     eq('the godown gains 45 litres (3 × 15)', await gq('it_goil', 'loc_g1'), oil0 + 45);
     eq('the tin\'s cost becomes what was paid', (await call('/items/it_goil', T.admin)).body.units.find((u) => u.code === 'tin').cost, 2520);
-    const recd = (await call('/admin/pos', T.admin)).body.find((p) => p.id === po.body.id);
+    const recd = (await call('/admin/pos?limit=100', T.admin)).body.orders.find((p) => p.id === po.body.id);
     check('what arrived is on record', recd.received[0].qty === 3 && recd.received[0].cost === 2520);
     const oilMove = (await call('/items/it_goil/moves', T.admin)).body.find((m) => m.ref === 'order ' + recd.no);
     eq('and the short tin in the ledger', oilMove && oilMove.note, '1 tin short');
     const po2 = await call('/admin/pos', T.admin, { supplierId: sup.body.id, to: 'loc_g1', lines: [{ itemId: 'it_goil', unit: 'tin', qty: 1, cost: 2500 }] });
-    eq('an order can be cancelled before dispatch', (await call('/admin/pos/' + po2.body.id + '/cancel', T.admin, {})).status, 200);
-    eq('a dispatched one cannot', (await call('/admin/pos/po_2/cancel', T.admin, {})).status, 409);
-    eq('a vendor cannot cancel', (await call('/admin/pos/' + po2.body.id + '/cancel', vt, {})).status, 403);
+    eq('the owner cannot cancel', (await call('/admin/pos/' + po2.body.id + '/cancel', T.owner, {})).status, 403);
+    eq('an order can be cancelled', (await call('/admin/pos/' + po2.body.id + '/cancel', T.admin, {})).status, 200);
+    eq('but not received after', (await call('/admin/pos/' + po2.body.id + '/receive', T.admin, {})).status, 409);
+    const mus0 = await gq('it_mustard', 'loc_shop');
+    eq('an old dispatched order is received, into another place', (await call('/admin/pos/po_2/receive', T.admin, { to: 'loc_shop' })).status, 200);
+    eq('and its goods arrive there', await gq('it_mustard', 'loc_shop'), mus0 + 60);
+    eq('a confirmed one can still be cancelled', (await call('/admin/pos/po_4/cancel', T.admin, {})).status, 200);
 
     // ---- deliveries from bills
     const lak = (await call('/admin/customers', T.admin)).body.find((c) => c.key === '9000000017');
@@ -278,14 +337,13 @@ async function main() {
     // ---- vehicles
     const vlist = (await call('/admin/vehicles', T.admin)).body;
     eq('the demo has two vehicles', vlist.length, 2);
-    for (const r of ['owner', 'worker', 'godown', 'vendor', 'delivery', 'customer']) {
+    for (const r of ['owner', 'worker', 'godown', 'delivery', 'customer']) {
       eq(r + ' cannot manage vehicles', (await call('/admin/vehicles', T[r])).status, 403);
     }
     eq('a godown cannot add one', (await call('/admin/vehicles', T.godown, { number: 'KA-01 X 1' })).status, 403);
     const pick = await call('/vehicles', T.godown);
     check('the godown gets the pick list', pick.status === 200 && pick.body.length === 2);
     check('without drivers\' phones', !JSON.stringify(pick.body).includes('9000000011'));
-    eq('the vendor gets it too', (await call('/vehicles', T.vendor)).status, 200);
     eq('a customer does not', (await call('/vehicles', T.customer)).status, 403);
     eq('a worker does not', (await call('/vehicles', T.worker)).status, 403);
     const nv = await call('/admin/vehicles', T.admin, { number: 'KA-17 Z 99', type: 'Auto', driverName: 'Raju', driverPhone: '98450 12345' });

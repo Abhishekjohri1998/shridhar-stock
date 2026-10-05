@@ -14,3 +14,4 @@ export * from './refill';
 export * from './ink';
 export * from './xlsx';
 export * from './pick';
+export * from './stockTotals';

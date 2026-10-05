@@ -62,7 +62,8 @@ export function requireRole(...roles: Role[]) {
     getRepo()
       .getPerson(body.pid)
       .then((p) => {
-        if (!p || !p.active || p.tv !== body.tv) throw new HttpError(401, 'Sign in again');
+        // A vendor's old session ends too: suppliers no longer sign in.
+        if (!p || !p.active || p.tv !== body.tv || p.role === 'vendor') throw new HttpError(401, 'Sign in again');
         if (roles.length && !roles.includes(p.role)) throw new HttpError(403, 'This is not open to your role');
         req.person = p;
         next();

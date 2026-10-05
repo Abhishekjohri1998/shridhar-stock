@@ -1,3 +1,4 @@
+import { lowAtOf } from './stockTotals';
 import type { Item, ItemInput } from './types';
 
 /**
@@ -25,7 +26,9 @@ export interface ItemForm {
   /** One other name per line, with ", unit" when it means a unit: "parle pack, pack". */
   aliases: string;
   racks: Record<string, string>;
-  reorderAt: Record<string, string>;
+  /** Running out below this many, in all places together, of the unit `lowUnit`. */
+  lowQty: string;
+  lowUnit: string;
 }
 
 export function blankUnit(base: boolean): UnitForm {
@@ -43,7 +46,7 @@ export function blankUnit(base: boolean): UnitForm {
 }
 
 export function blankItemForm(): ItemForm {
-  return { nameEn: '', nameKn: '', category: '', units: [blankUnit(true)], aliases: '', racks: {}, reorderAt: {} };
+  return { nameEn: '', nameKn: '', category: '', units: [blankUnit(true)], aliases: '', racks: {}, lowQty: '', lowUnit: 'pc' };
 }
 
 const text = (n: number | undefined) => (n == null ? '' : String(n));
@@ -67,7 +70,8 @@ export function itemToForm(item: Item): ItemForm {
     })),
     aliases: item.aliases.map((a) => (a.unit ? a.text + ', ' + a.unit : a.text)).join('\n'),
     racks: { ...item.racks },
-    reorderAt: Object.fromEntries(Object.entries(item.reorderAt).map(([k, v]) => [k, String(v)])),
+    lowQty: text(lowAtOf(item)?.qty),
+    lowUnit: lowAtOf(item)?.unit ?? item.units[0]?.code ?? '',
   };
 }
 
@@ -97,11 +101,10 @@ export function formToInput(f: ItemForm, active?: boolean): ItemInput {
         return unit ? { text: t!, unit } : { text: t! };
       }),
     racks: f.racks,
-    reorderAt: Object.fromEntries(
-      Object.entries(f.reorderAt)
-        .filter(([, v]) => v.trim() !== '')
-        .map(([k, v]) => [k, Number(v)]),
-    ),
+    // A unit that was removed from the item falls back to the base unit.
+    ...(f.lowQty.trim() !== ''
+      ? { lowAt: { qty: Number(f.lowQty), unit: f.units.some((u) => u.code === f.lowUnit) ? f.lowUnit : f.units[0]?.code ?? '' } }
+      : {}),
     ...(active != null ? { active } : {}),
   };
 }

@@ -154,6 +154,7 @@ async function main() {
     const made = await call('/items', { method: 'POST', token: admin, body: parle });
     eq('an item is added', made.status, 201);
     const parleId = made.body.id;
+    check('an old level for the shop becomes one level in pieces', made.body.lowAt && made.body.lowAt.qty === 48 && made.body.lowAt.unit === 'pc', JSON.stringify(made.body.lowAt));
     check('a rack for a place that does not exist is dropped', !('loc_nowhere' in made.body.racks) && made.body.racks[shop] === 'Rack 3');
     eq('a bad item is refused with a reason', (await call('/items', { method: 'POST', token: admin, body: { ...parle, units: [] } })).status, 400);
     await call('/items', {

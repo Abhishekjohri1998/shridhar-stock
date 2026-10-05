@@ -37,7 +37,6 @@ export const DEMO_PEOPLE: { id: string; name: string; phone: string; role: Role;
   { id: 'p_owner', name: 'Partner Suresh', phone: '9000000002', role: 'owner' },
   { id: 'p_worker', name: 'Ravi (shop)', phone: '9000000003', role: 'worker' },
   { id: 'p_godown', name: 'Manju (main godown)', phone: '9000000004', role: 'godown', linkedId: 'loc_g1' },
-  { id: 'p_vendor', name: 'Sri Lakshmi Traders', phone: '9000000005', role: 'vendor', linkedId: 'sup_1' },
   { id: 'p_delivery', name: 'Kiran (delivery)', phone: '9000000006', role: 'delivery' },
   { id: 'p_customer', name: 'Ramesh Gowda', phone: '9000000007', role: 'customer' },
 ];
@@ -75,7 +74,7 @@ const S: Spec[] = [
   { id: 'it_colgate', en: 'Colgate 100g', kn: 'ಕೋಲ್ಗೇಟ್', cat: 'Personal care', units: [['pc', 'Piece', 'ಪೀಸ್', 1, 58, 50]], rack: 'Rack 4', reorder: 6, shop: 4, g1: 36, g2: 0 },
   { id: 'it_rice', en: 'Sona Masoori rice', kn: 'ಸೋನಾ ಮಸೂರಿ ಅಕ್ಕಿ', cat: 'Grains', units: [['kg', 'Kg', 'ಕೆಜಿ', 1, 58, 50], ['bag', 'Bag 25kg', '25 ಕೆಜಿ ಚೀಲ', 25, 1400, 1250]], aka: ['rice', 'akki'], rack: 'Back room', rackG1: 'Bay B', reorder: 50, shop: 60, g1: 500, g2: 250, slabs: { kg: [[10, 55]] } },
   { id: 'it_rawrice', en: 'Raw rice', kn: 'ದೋಸೆ ಅಕ್ಕಿ', cat: 'Grains', units: [['kg', 'Kg', 'ಕೆಜಿ', 1, 42, 36], ['bag', 'Bag 25kg', '25 ಕೆಜಿ ಚೀಲ', 25, 1000, 890]], rack: 'Back room', reorder: 25, shop: 40, g1: 200, g2: 0 },
-  { id: 'it_toor', en: 'Toor dal', kn: 'ತೊಗರಿ ಬೇಳೆ', cat: 'Grains', units: [['kg', 'Kg', 'ಕೆಜಿ', 1, 150, 132]], aka: ['toor', 'togari'], rack: 'Rack 2', reorder: 10, shop: 8, g1: 75, g2: 0 },
+  { id: 'it_toor', en: 'Toor dal', kn: 'ತೊಗರಿ ಬೇಳೆ', cat: 'Grains', units: [['kg', 'Kg', 'ಕೆಜಿ', 1, 150, 132]], aka: ['toor', 'togari'], rack: 'Rack 2', reorder: 90, shop: 8, g1: 75, g2: 0 },
   { id: 'it_moong', en: 'Moong dal', kn: 'ಹೆಸರು ಬೇಳೆ', cat: 'Grains', units: [['kg', 'Kg', 'ಕೆಜಿ', 1, 130, 115]], rack: 'Rack 2', reorder: 5, shop: 12, g1: 40, g2: 0 },
   { id: 'it_urad', en: 'Urad dal', kn: 'ಉದ್ದಿನ ಬೇಳೆ', cat: 'Grains', units: [['kg', 'Kg', 'ಕೆಜಿ', 1, 140, 124]], rack: 'Rack 2', reorder: 5, shop: 3, g1: 30, g2: 0 },
   { id: 'it_chana', en: 'Chana dal', kn: 'ಕಡಲೆ ಬೇಳೆ', cat: 'Grains', units: [['kg', 'Kg', 'ಕೆಜಿ', 1, 95, 84]], rack: 'Rack 2', reorder: 5, shop: 9, g1: 30, g2: 0 },
@@ -95,7 +94,7 @@ const S: Spec[] = [
   { id: 'it_jeera', en: 'Jeera', kn: 'ಜೀರಿಗೆ', cat: 'Masala', units: [['pc', '100g pack', '100 ಗ್ರಾಂ', 1, 45, 38]], rack: 'Rack 5', reorder: 6, shop: 7, g1: 25, g2: 0 },
   { id: 'it_salt', en: 'Tata salt', kn: 'ಉಪ್ಪು', cat: 'Masala', units: [['pc', '1kg pack', '1 ಕೆಜಿ', 1, 28, 24]], rack: 'Rack 2', reorder: 10, shop: 18, g1: 60, g2: 0 },
   { id: 'it_tea', en: 'Red Label tea 250g', kn: 'ಟೀ ಪುಡಿ', cat: 'Beverages', units: [['pc', 'Pack', 'ಪ್ಯಾಕ್', 1, 140, 124]], rack: 'Counter', reorder: 5, shop: 6, g1: 24, g2: 0 },
-  { id: 'it_coffee', en: 'Filter coffee 200g', kn: 'ಕಾಫಿ ಪುಡಿ', cat: 'Beverages', units: [['pc', 'Pack', 'ಪ್ಯಾಕ್', 1, 150, 130]], aka: ['coffee'], rack: 'Counter', reorder: 5, shop: 2, g1: 0, g2: 20 },
+  { id: 'it_coffee', en: 'Filter coffee 200g', kn: 'ಕಾಫಿ ಪುಡಿ', cat: 'Beverages', units: [['pc', 'Pack', 'ಪ್ಯಾಕ್', 1, 150, 130]], aka: ['coffee'], rack: 'Counter', reorder: 30, shop: 2, g1: 0, g2: 20 },
   { id: 'it_bru', en: 'Bru sachet', kn: 'ಬ್ರೂ', cat: 'Beverages', units: [['pc', 'Piece', 'ಪೀಸ್', 1, 2, 1.6], ['line', 'Line', 'ಲೈನ್', 12, 22, 18]], rack: 'Counter', reorder: 24, shop: 36, g1: 144, g2: 0 },
   { id: 'it_milk', en: 'Nandini milk 500ml', kn: 'ನಂದಿನಿ ಹಾಲು', cat: 'Dairy', units: [['pc', 'Packet', 'ಪ್ಯಾಕೆಟ್', 1, 24, 22]], aka: ['milk', 'halu'], rack: 'Fridge', reorder: 20, shop: -2, g1: 0, g2: 0 },
   { id: 'it_curd', en: 'Nandini curd 500g', kn: 'ಮೊಸರು', cat: 'Dairy', units: [['pc', 'Packet', 'ಪ್ಯಾಕೆಟ್', 1, 28, 25]], rack: 'Fridge', reorder: 10, shop: 12, g1: 0, g2: 0 },
@@ -107,6 +106,12 @@ const S: Spec[] = [
   { id: 'it_egg', en: 'Eggs', kn: 'ಮೊಟ್ಟೆ', cat: 'Dairy', units: [['pc', 'Piece', 'ಪೀಸ್', 1, 7, 6], ['tray', 'Tray of 30', '30ರ ಟ್ರೇ', 30, 195, 170]], rack: 'Counter', reorder: 30, shop: 45, g1: 0, g2: 90 },
   { id: 'it_onion', en: 'Onion', kn: 'ಈರುಳ್ಳಿ', cat: 'Vegetables', units: [['kg', 'Kg', 'ಕೆಜಿ', 1, 40, 32]], rack: 'Floor', reorder: 10, shop: 25, g1: 0, g2: 100 },
 ];
+
+/** A level in base units as the shop would say it: 48 Parle-G is "2 pack". */
+function lowIn(units: ItemUnit[], base: number): { qty: number; unit: string } {
+  const u = [...units].sort((a, b) => b.perBase - a.perBase).find((x) => base % x.perBase === 0) ?? units[0]!;
+  return { qty: base / u.perBase, unit: u.code };
+}
 
 function toItem(s: Spec, now: string): Item {
   const units: ItemUnit[] = s.units.map(([code, label, labelKn, perBase, price, cost]) => ({
@@ -127,7 +132,7 @@ function toItem(s: Spec, now: string): Item {
     units,
     aliases: (s.aka ?? []).map((text) => ({ text })),
     racks: { loc_shop: s.rack, ...(s.rackG1 ? { loc_g1: s.rackG1 } : {}), ...(s.g2 ? { loc_g2: 'Shed' } : {}) },
-    reorderAt: { loc_shop: s.reorder },
+    lowAt: lowIn(units, s.reorder),
     active: true,
     updatedAt: now,
   };
@@ -177,8 +182,8 @@ export async function seedDemo(repo: InvRepo): Promise<void> {
 
   // Suppliers, and the customers billing knows about.
   const suppliers: Supplier[] = [
-    { id: 'sup_1', name: 'Sri Lakshmi Traders', phone: '9000000005', address: 'APMC yard, shop 14', active: true },
-    { id: 'sup_2', name: 'Nandini Dairy agent', phone: '9000000015', address: 'KMF depot', active: true },
+    { id: 'sup_1', name: 'Sri Lakshmi Traders', phone: '9000000005', address: 'APMC yard, shop 14', notes: 'Dal, biscuits, masala. Comes Tuesdays.', active: true },
+    { id: 'sup_2', name: 'Nandini Dairy agent', phone: '9000000015', address: 'KMF depot', notes: 'Milk and curd, every morning', active: true },
   ];
   for (const s of suppliers) await repo.putDoc('suppliers', s);
   const customers: CustomerProfile[] = [

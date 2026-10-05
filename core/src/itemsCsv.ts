@@ -1,4 +1,5 @@
 import { parseCsv, toCsv, unguard } from './csv';
+import { lowAtOf } from './stockTotals';
 import { unitKey } from './units';
 import type { Alias, Item, ItemInput, ItemUnit, Slab } from './types';
 
@@ -6,8 +7,9 @@ import type { Alias, Item, ItemInput, ItemUnit, Slab } from './types';
  * The items spreadsheet: one row per unit, so an item sold three ways is three rows sharing an
  * item_id. The shop can type a whole catalogue in Excel and bring it in at once.
  *
- * The first row of an item is its base unit. Racks and running-out levels are for the shop and
- * are read from that first row.
+ * The first row of an item is its base unit. The shop's rack and the running-out level are read
+ * from that first row. low_at is for all places together, with its unit: "5 box", or a bare
+ * number in the base unit. The old reorder_shop column is still read, as base units.
  */
 export const ITEM_COLUMNS = [
   'item_id',
@@ -25,7 +27,7 @@ export const ITEM_COLUMNS = [
   'slabs',
   'other_names',
   'rack_shop',
-  'reorder_shop',
+  'low_at',
   'active',
 ] as const;
 
@@ -68,12 +70,25 @@ export function itemsToCsv(items: Item[], shopId: string): string {
         slabsToText(u.slabs),
         names,
         i === 0 ? it.racks[shopId] ?? '' : '',
-        i === 0 ? it.reorderAt[shopId] : undefined,
+        i === 0 ? lowText(it) : '',
         i === 0 ? (it.active ? 'yes' : 'no') : '',
       ]);
     });
   }
   return toCsv([...ITEM_COLUMNS], rows);
+}
+
+function lowText(it: Item): string {
+  const l = lowAtOf(it);
+  return l ? l.qty + ' ' + l.unit : '';
+}
+
+/** "5 box" or "5": a quantity and, maybe, its unit. */
+function lowFromText(text: string): { qty: number; unit?: string } | undefined {
+  const m = /^([\d.,]+)\s*(.*)$/.exec(text.trim());
+  if (!m) return text.trim() ? { qty: NaN } : undefined;
+  const qty = Number(m[1]!.replace(/,/g, ''));
+  return m[2]!.trim() ? { qty, unit: m[2]!.trim() } : { qty };
 }
 
 export interface ItemsCsvResult {
@@ -130,7 +145,7 @@ export function itemsFromCsv(text: string, shopId: string): ItemsCsvResult {
         units: [],
         aliases: [],
         racks: get('rack_shop') ? { [shopId]: get('rack_shop') } : {},
-        reorderAt: get('reorder_shop') ? { [shopId]: Number(get('reorder_shop')) } : {},
+        ...(get('low_at') ? { lowAt: lowFromText(get('low_at')) as Item['lowAt'] } : get('reorder_shop') ? { reorderAt: { [shopId]: Number(get('reorder_shop')) } } : {}),
         ...(get('active') ? { active: !/^(no|n|0|false)$/i.test(get('active')) } : {}),
       };
       items.push(item);

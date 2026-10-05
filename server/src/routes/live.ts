@@ -33,7 +33,7 @@ liveRoutes.get(
     tickets.delete(String(req.query.ticket ?? ''));
     if (!t || t.until < Date.now()) throw new HttpError(401, 'Ask for a new ticket');
     const person = await getRepo().getPerson(t.personId);
-    if (!person || !person.active) throw new HttpError(401, 'Sign in again');
+    if (!person || !person.active || person.role === 'vendor') throw new HttpError(401, 'Sign in again');
     subscribe(person, res);
   }),
 );

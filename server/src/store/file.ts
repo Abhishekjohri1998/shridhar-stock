@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { Item, Location, StockLevel, StockMove } from '@stock/core';
-import { levelsFromMoves, type DocCollection, type InvRepo, type MoveQuery, type PersonRecord } from './types';
+import { withLowAt, type Item, type Location, type StockLevel, type StockMove } from '@stock/core';
+import { levelsFromMoves, matchesFilter, type DocCollection, type DocFilter, type InvRepo, type MoveQuery, type PersonRecord } from './types';
 
 interface Db {
   people: PersonRecord[];
@@ -87,8 +87,12 @@ export async function createFileRepo(dir: string): Promise<InvRepo> {
         else db.locations.push(clone(loc));
       }),
 
-    listItems: () => serial(() => clone(db.items)),
-    getItem: (id) => serial(() => clone(db.items.find((i) => i.id === id) ?? null)),
+    listItems: () => serial(() => clone(db.items).map(withLowAt)),
+    getItem: (id) =>
+      serial(() => {
+        const it = db.items.find((i) => i.id === id);
+        return it ? withLowAt(clone(it)) : null;
+      }),
     saveItem: (item) =>
       write(() => {
         const i = db.items.findIndex((x) => x.id === item.id);
@@ -128,7 +132,8 @@ export async function createFileRepo(dir: string): Promise<InvRepo> {
         stockRow(itemId, locationId).qty = qty;
       }),
 
-    listDocs: <T>(col: DocCollection) => serial(() => clone(Object.values(db.docs[col] ?? {})) as T[]),
+    listDocs: <T>(col: DocCollection, filter?: DocFilter) =>
+      serial(() => clone(Object.values(db.docs[col] ?? {}).filter((d) => !filter || matchesFilter(d as Record<string, unknown>, filter))) as T[]),
     getDoc: <T>(col: DocCollection, id: string) => serial(() => clone((db.docs[col]?.[id] ?? null) as T | null)),
     putDoc: (col, doc) =>
       write(() => {

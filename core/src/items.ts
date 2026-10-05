@@ -1,7 +1,7 @@
 import { searchKey } from './kannada';
-import { round2 } from './money';
+import { round2, round3 } from './money';
 import { unitKey } from './units';
-import type { Alias, ItemInput, ItemUnit, Slab } from './types';
+import type { Alias, ItemInput, ItemUnit, LowAt, Slab } from './types';
 
 export type Checked<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -96,12 +96,24 @@ export function checkItem(input: ItemInput): Checked<ItemInput> {
     const r = String(rack ?? '').trim();
     if (r) racks[loc] = r.slice(0, 40);
   }
-  const reorderAt: Record<string, number> = {};
-  for (const [loc, level] of Object.entries(input.reorderAt ?? {})) {
-    const n = num(level);
-    if (n == null) continue;
+  // One running-out level for all places together, in any unit. A screen that still sends the
+  // old level per place (an older admin app) has it summed into the base unit.
+  let lowAt: LowAt | undefined;
+  if (input.lowAt && num(input.lowAt.qty) != null) {
+    const n = num(input.lowAt.qty)!;
     if (Number.isNaN(n) || n < 0) return { ok: false, error: 'The running-out level must be 0 or more' };
-    reorderAt[loc] = n;
+    const unit = units.find((u) => unitKey(u.code) === unitKey(String(input.lowAt!.unit ?? '') || units[0]!.code));
+    if (!unit) return { ok: false, error: 'The running-out level is in a unit the item does not have' };
+    lowAt = { qty: round3(n), unit: unit.code };
+  } else if (!input.lowAt) {
+    let sum: number | undefined;
+    for (const level of Object.values(input.reorderAt ?? {})) {
+      const n = num(level);
+      if (n == null) continue;
+      if (Number.isNaN(n) || n < 0) return { ok: false, error: 'The running-out level must be 0 or more' };
+      sum = (sum ?? 0) + n;
+    }
+    if (sum != null) lowAt = { qty: round3(sum), unit: units[0]!.code };
   }
 
   return {
@@ -114,7 +126,7 @@ export function checkItem(input: ItemInput): Checked<ItemInput> {
       units,
       aliases,
       racks,
-      reorderAt,
+      ...(lowAt ? { lowAt } : {}),
       ...(input.active != null ? { active: !!input.active } : {}),
     },
   };

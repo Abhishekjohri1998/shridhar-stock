@@ -1,7 +1,7 @@
 import mongoose, { Schema } from 'mongoose';
 import type { Item, Location, StockLevel, StockMove } from '@stock/core';
-import { MOVE_KINDS, ROLES } from '@stock/core';
-import { DOC_COLLECTIONS, type DocCollection, type InvRepo, type MoveQuery, type PersonRecord } from './types';
+import { MOVE_KINDS, ROLES, withLowAt } from '@stock/core';
+import { DOC_COLLECTIONS, type DocCollection, type DocFilter, type InvRepo, type MoveQuery, type PersonRecord } from './types';
 
 /*
  * Schema style, as in the billing app: no __v, no _id on subdocuments, and an optional field is
@@ -71,7 +71,9 @@ const itemSchema = new Schema(
     },
     aliases: { type: [aliasSchema], required: false, default: [] },
     racks: { type: Schema.Types.Mixed, required: false, default: {} },
-    reorderAt: { type: Schema.Types.Mixed, required: false, default: {} },
+    // The old level per place. Kept as saved; new saves write lowAt instead.
+    reorderAt: { type: Schema.Types.Mixed, required: false },
+    lowAt: { type: Schema.Types.Mixed, required: false },
     active: { type: Boolean, required: false, default: true },
     updatedAt: { type: String, required: true },
   },
@@ -124,6 +126,12 @@ export const schemas = {
   StockMoves: moveSchema,
   Stock: stockSchema,
 };
+
+/** A DocFilter as a Mongo query: equality, or one of a list. */
+function mongoFilter(filter?: DocFilter): Record<string, unknown> {
+  if (!filter) return {};
+  return Object.fromEntries(Object.entries(filter).map(([k, v]) => [k, Array.isArray(v) ? { $in: v } : v]));
+}
 
 /** Drops Mongo's own fields so what comes out is exactly the shared type. */
 function strip<T>(doc: unknown): T {
@@ -188,10 +196,10 @@ export async function createMongoRepo(uri: string, dbName: string): Promise<InvR
       await Locations.replaceOne({ id: loc.id }, loc, { upsert: true, runValidators: true });
     },
 
-    listItems: async () => (await Items.find().lean()).map((d) => strip<Item>(d)),
+    listItems: async () => (await Items.find().lean()).map((d) => withLowAt(strip<Item>(d))),
     getItem: async (id) => {
       const d = await Items.findOne({ id }).lean();
-      return d ? strip<Item>(d) : null;
+      return d ? withLowAt(strip<Item>(d)) : null;
     },
     saveItem: async (item) => {
       await Items.replaceOne({ id: item.id }, item, { upsert: true, runValidators: true });
@@ -248,7 +256,7 @@ export async function createMongoRepo(uri: string, dbName: string): Promise<InvR
       await Stock.updateOne({ itemId, locationId }, { $set: { qty } }, { upsert: true });
     },
 
-    listDocs: async <T>(col: DocCollection) => (await Docs[col].find().lean()).map((d) => strip<T>(d)),
+    listDocs: async <T>(col: DocCollection, filter?: DocFilter) => (await Docs[col].find(mongoFilter(filter)).lean()).map((d) => strip<T>(d)),
     getDoc: async <T>(col: DocCollection, id: string) => {
       const d = await Docs[col].findOne({ id }).lean();
       return d ? strip<T>(d) : null;

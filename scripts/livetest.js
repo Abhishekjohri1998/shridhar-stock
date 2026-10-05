@@ -85,11 +85,10 @@ async function main() {
     const admin = await listen('admin');
     const worker = await listen('worker');
     const godown = await listen('godown'); // main godown
-    const vendor = await listen('vendor'); // sup_1
     const delivery = await listen('delivery');
     const customer = await listen('customer');
     await wait(300);
-    check('every stream opens', [admin, worker, godown, vendor, delivery, customer].every((s) => s.hello));
+    check('every stream opens', [admin, worker, godown, delivery, customer].every((s) => s.hello));
     const reset = () => streams.forEach((s) => (s.heard.length = 0));
 
     eq('a used ticket cannot open a second stream', (await fetch(base + '/api/events?ticket=' + admin.ticket)).status, 401);
@@ -101,17 +100,16 @@ async function main() {
     await wait(300);
     check('the admin hears a tick', admin.heard.includes('bills'));
     check('the worker hears it', worker.heard.includes('bills'));
-    check('a vendor does not', !vendor.heard.includes('bills'));
     check('a godown does not', !godown.heard.includes('bills'));
 
-    // A transfer from the main godown: that godown hears it, the vendor does not.
+    // A transfer from the main godown: that godown hears it, the delivery person does not.
     reset();
     await call('/transfers/tr_3/send', godown.token, { vehicle: 'KA' });
     await wait(300);
     check('the godown hears its transfer', godown.heard.includes('transfers'));
     check('and its stock changing', godown.heard.includes('stock'));
     check('the admin hears it', admin.heard.includes('transfers'));
-    check('the vendor does not', vendor.heard.length === 0, vendor.heard.join());
+    check('the delivery person does not', delivery.heard.length === 0, delivery.heard.join());
     check('the worker does not hear transfers', !worker.heard.includes('transfers'));
 
     // A transfer to another godown's stock: the main godown hears nothing.
@@ -120,14 +118,12 @@ async function main() {
     await wait(300);
     check('the shop receiving from another godown is not the main godown\'s business', !godown.heard.includes('transfers'), godown.heard.join());
 
-    // Purchase orders: only their own vendor.
+    // Purchase orders are the admin's alone.
     reset();
-    await call('/pos/po_4/confirm', admin.token, {}); // the dairy's order, not sup_1's
+    await call('/admin/pos/po_4/cancel', admin.token, {});
     await wait(300);
-    check('a vendor does not hear another supplier\'s order', !vendor.heard.includes('pos'));
-    await call('/pos/po_3/confirm', vendor.token, {});
-    await wait(300);
-    check('but hears their own', vendor.heard.includes('pos'));
+    check('the admin hears an order change', admin.heard.includes('pos'));
+    check('nobody else does', [worker, godown, delivery, customer].every((x) => !x.heard.includes('pos')));
 
     // Deliveries: only the person it is assigned to.
     reset();

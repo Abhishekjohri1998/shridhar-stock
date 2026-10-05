@@ -98,7 +98,9 @@ const rice = { units: [{ code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price
     check('slabs come out in order', r.value.units[1].slabs[0].minQty === 5);
     check('a repeated other name is kept once', r.value.aliases.length === 2);
     check('empty racks are dropped and full ones trimmed', r.value.racks.loc_shop === 'Rack 3' && !('loc_x' in r.value.racks));
-    check('levels become numbers', r.value.reorderAt.loc_shop === 48);
+    check('an old level per place becomes one level in the base unit', r.value.lowAt.qty === 48 && r.value.lowAt.unit === 'pc' && !('reorderAt' in r.value));
+    const boxed = C.checkItem({ ...good, lowAt: { qty: '2', unit: 'PACK' } });
+    check('a level in another unit keeps that unit, spelt as the item spells it', boxed.ok && boxed.value.lowAt.qty === 2 && boxed.value.lowAt.unit === 'pack');
   }
   const bad = (patch, name) => {
     const res = C.checkItem({ ...good, ...patch });
@@ -116,6 +118,8 @@ const rice = { units: [{ code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price
   bad({ units: [{ ...good.units[0], slabs: [{ minQty: 5, rate: 4 }, { minQty: 5, rate: 3 }] }] }, 'two slabs from the same quantity are refused');
   bad({ aliases: [{ text: 'parle crate', unit: 'crate' }] }, 'an other name pointing at a missing unit is refused');
   bad({ reorderAt: { loc_shop: -1 } }, 'a negative running-out level is refused');
+  bad({ lowAt: { qty: 2, unit: 'crate' } }, 'a running-out level in a unit the item does not have is refused');
+  bad({ lowAt: { qty: -1, unit: 'pc' } }, 'a negative running-out level in units is refused');
 }
 
 // ---------------------------------------------------------------- search, both scripts
@@ -156,7 +160,7 @@ const rice = { units: [{ code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price
       ],
       aliases: [{ text: 'parle' }, { text: 'parle pack', unit: 'pack' }],
       racks: { loc_shop: 'Rack 3' },
-      reorderAt: { loc_shop: 48 },
+      lowAt: { qty: 2, unit: 'pack' },
       active: true,
       updatedAt: '',
     },
@@ -170,7 +174,11 @@ const rice = { units: [{ code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price
   check('slabs survive', JSON.stringify(it.units[1].slabs) === JSON.stringify(items[0].units[1].slabs));
   check('range and cost survive', it.units[0].min === 5 && it.units[0].max === 5.5 && it.units[0].cost === 4.2);
   check('other names keep their unit', JSON.stringify(it.aliases) === JSON.stringify(items[0].aliases), JSON.stringify(it.aliases));
-  check('the shop rack and level survive', it.racks.loc_shop === 'Rack 3' && it.reorderAt.loc_shop === 48);
+  check('the shop rack and level survive', it.racks.loc_shop === 'Rack 3' && it.lowAt.qty === 2 && it.lowAt.unit === 'pack', JSON.stringify(it.lowAt));
+  const old = C.itemsFromCsv('name_en,unit_code,price,reorder_shop' + String.fromCharCode(10) + 'Tea,pc,10,6', 'loc_shop').items[0];
+  check('an old file with reorder_shop still reads', C.checkItem(old).ok && C.checkItem(old).value.lowAt.qty === 6);
+  const bare = C.checkItem(C.itemsFromCsv('name_en,unit_code,price,low_at' + String.fromCharCode(10) + 'Tea,pc,10,7', 'loc_shop').items[0]);
+  check('low_at with no unit is in the base unit', bare.ok && bare.value.lowAt.unit === 'pc' && bare.value.lowAt.qty === 7);
   check('the row of each item is known', back.rows[0] === 2);
 
   const typed = [
@@ -205,6 +213,27 @@ check('every role has a home screen', C.ROLES.every((r) => typeof C.ROLE_HOME[r]
   check('Kannada keeps every {placeholder}', mismatched.length === 0, mismatched.join(', '));
 }
 
+// ---------------------------------------------------------------- one total across places
+{
+  const box = { id: 'p', units: parle.units, racks: {}, active: true };
+  const lv = [{ itemId: 'p', locationId: 'shop', qty: 100 }, { itemId: 'p', locationId: 'g1', qty: 150 }, { itemId: 'q', locationId: 'g1', qty: 999 }];
+  check('the total adds the shop and every godown', C.totalQty(box, lv) === 250);
+  check('totals for every item in one pass', C.totalsByItem(lv).get('q') === 999);
+  const two = { ...box, lowAt: { qty: 2, unit: 'box' } };
+  check('2 box is 288 pieces', C.lowBase(two) === 288);
+  check('250 pieces in all is below 2 box', C.isLow(two, 250));
+  check('300 is not, however little the shop has', !C.isLow(two, 300));
+  check('an item with no level is never low', !C.isLow(box, -5));
+  const legacy = { ...box, reorderAt: { shop: 48, g1: 24 } };
+  check('an old level per place is read as their sum, in pieces', JSON.stringify(C.lowAtOf(legacy)) === JSON.stringify({ qty: 72, unit: 'pc' }));
+  check('and filled in as lowAt when read', C.withLowAt(legacy).lowAt.qty === 72 && C.withLowAt(legacy).reorderAt.g1 === 24);
+  check('a saved lowAt wins over the old levels', C.lowAtOf({ ...legacy, lowAt: { qty: 1, unit: 'pack' } }).unit === 'pack');
+  const form = C.itemToForm({ ...legacy, nameEn: 'P', nameKn: '', aliases: [], updatedAt: '' });
+  check('the editor shows the old levels as one number', form.lowQty === '72' && form.lowUnit === 'pc');
+  const back = C.formToInput({ ...form, lowQty: '3', lowUnit: 'pack' });
+  check('and sends back one level with its unit', back.lowAt.qty === 3 && back.lowAt.unit === 'pack' && !back.reorderAt);
+}
+
 // ---------------------------------------------------------------- refill trips
 {
   const L = (id, kind) => ({ id, name: id, nameKn: '', kind, active: true });
@@ -230,6 +259,9 @@ check('every role has a home screen', C.ROLES.every((r) => typeof C.ROLE_HOME[r]
   check('an item that is not low is left alone', !r.trips.some((t) => t.lines.some((l) => l.itemId === 'c')));
   check('the busiest trip comes first', r.trips[0].from === 'g1');
   check('no shop, no trips', C.proposeRefill(items, stock, [L('g1', 'godown')]).trips.length === 0);
+  check('a short shelf with plenty in the godowns is not to buy', !r.buy.some((b) => b.itemId === 'a' || b.itemId === 'e'));
+  const full = C.proposeRefill([it('f', 10)], [st('f', 'shop', 20), st('f', 'g1', -15)], locs);
+  check('a full shelf whose total is low is still to buy', full.trips.length === 0 && full.buy[0] && full.buy[0].itemId === 'f' && full.buy[0].qty === 15, JSON.stringify(full));
 }
 
 // ---------------------------------------------------------------- handwriting drawn on screen

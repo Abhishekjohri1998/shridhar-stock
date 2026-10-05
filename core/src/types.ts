@@ -11,7 +11,10 @@ export type Lang = 'en' | 'kn';
 export const ROLES = ['admin', 'owner', 'worker', 'godown', 'vendor', 'delivery', 'customer'] as const;
 export type Role = (typeof ROLES)[number];
 
-/** A person who signs in. `linkedId` ties a godown person to a place, a vendor to a supplier. */
+/**
+ * A person who signs in. `linkedId` ties a godown person to a place. The vendor role is kept so old
+ * records still read, but a vendor no longer signs in: suppliers are contacts under Purchases.
+ */
 export interface Person {
   id: string;
   name: string;
@@ -61,6 +64,12 @@ export interface Alias {
   unit?: string;
 }
 
+/** A quantity in one of an item's units, as the shop typed it. */
+export interface LowAt {
+  qty: number;
+  unit: string;
+}
+
 export interface Item {
   id: string;
   nameEn: string;
@@ -71,8 +80,16 @@ export interface Item {
   aliases: Alias[];
   /** Where it is kept in each place: "Rack 3", "Back room". Keyed by location id. */
   racks: Record<string, string>;
-  /** The level, in base units, below which a place is running out. Keyed by location id. */
-  reorderAt: Record<string, number>;
+  /**
+   * Running out below this, in all places together, in any of the item's units: "5 box". null
+   * when the shop cleared it on an item that still carries old per-place levels.
+   */
+  lowAt?: LowAt | null;
+  /**
+   * The old level per place, in base units, kept as it was saved. Read only through `lowAtOf`,
+   * which sums it when the item has no `lowAt` yet. New saves do not write it.
+   */
+  reorderAt?: Record<string, number>;
   active: boolean;
   updatedAt: string;
 }
@@ -242,10 +259,24 @@ export interface Supplier {
   name: string;
   phone: string;
   address?: string;
+  /** Anything the shop wants to remember: what they supply, when they come. */
+  notes?: string;
   active: boolean;
 }
 
+/**
+ * Ordered, then received or cancelled. 'confirmed' and 'dispatched' were the vendor's steps when
+ * vendors signed in; orders saved in those states are still open and show as ordered.
+ */
 export type POStatus = 'ordered' | 'confirmed' | 'dispatched' | 'received' | 'cancelled';
+
+/** The states of an order still waiting for its goods. */
+export const OPEN_PO = ['ordered', 'confirmed', 'dispatched'] as const;
+
+/** What an order shows as: every open state is simply "ordered". */
+export function poStage(status: POStatus): 'ordered' | 'received' | 'cancelled' {
+  return status === 'received' || status === 'cancelled' ? status : 'ordered';
+}
 
 export interface POLine {
   itemId: string;

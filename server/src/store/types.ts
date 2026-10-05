@@ -15,6 +15,14 @@ export interface PersonRecord extends Person {
 export const DOC_COLLECTIONS = ['bills', 'customers', 'transfers', 'suppliers', 'pos', 'deliveries', 'orders', 'vehicles', 'meta'] as const;
 export type DocCollection = (typeof DOC_COLLECTIONS)[number];
 
+/** Top-level fields equal to a value, or to one of a list: `{ status: ['ordered', 'confirmed'] }`. */
+export type DocFilter = Record<string, string | number | boolean | (string | number)[]>;
+
+/** The file store's reading of a DocFilter, the same as Mongo's. */
+export function matchesFilter(doc: Record<string, unknown>, filter: DocFilter): boolean {
+  return Object.entries(filter).every(([k, v]) => (Array.isArray(v) ? v.includes(doc[k] as string) : doc[k] === v));
+}
+
 export interface MoveQuery {
   itemId?: string;
   locationId?: string;
@@ -56,7 +64,8 @@ export interface InvRepo {
   incStock(itemId: string, locationId: string, delta: number): Promise<void>;
   setStock(itemId: string, locationId: string, qty: number): Promise<void>;
 
-  listDocs<T extends { id: string }>(col: DocCollection): Promise<T[]>;
+  /** All of a collection, or only the documents matching `filter`, read with a query. */
+  listDocs<T extends { id: string }>(col: DocCollection, filter?: DocFilter): Promise<T[]>;
   getDoc<T extends { id: string }>(col: DocCollection, id: string): Promise<T | null>;
   /** Adds or replaces the whole document. */
   putDoc<T extends { id: string }>(col: DocCollection, doc: T): Promise<void>;
