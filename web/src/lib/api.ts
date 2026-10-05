@@ -1,4 +1,6 @@
-import type { Item, ItemInput, Location, Person, Role, StockLevel, StockMove, AdjustReason } from '@stock/core';
+import type { ItemSupplierRow, StockInfo, Item, ItemInput, Location, Person, Role, StockLevel, StockMove, AdjustReason } from '@stock/core';
+
+import { takeHandoff } from './handoff';
 
 const TOKEN_KEY = 'stock.token';
 
@@ -26,7 +28,8 @@ export function setToken(token: string): void {
   memToken = token;
 }
 
-let memToken = readToken();
+// A session handed over by the billing app wins over whatever was kept here.
+let memToken = takeHandoff(TOKEN_KEY) ?? readToken();
 export const hasToken = () => !!memToken;
 
 /** Called when the server says the session is over, so the app can go back to sign-in. */
@@ -124,6 +127,9 @@ export const api = {
   item: (id: string) => request<Item>('/items/' + id),
   addItem: (i: ItemInput) => request<Item>('/items', send('POST', i)),
   saveItem: (id: string, i: ItemInput) => request<Item>('/items/' + id, send('PUT', i)),
+  categories: () => request<string[]>('/categories'),
+  itemInfo: (id: string) => request<{ info: StockInfo; suppliers: ItemSupplierRow[] }>('/items/' + id + '/info'),
+  itemSuppliers: () => request<Record<string, ItemSupplierRow[]>>('/item-suppliers'),
 
   stock: () => request<StockLevel[]>('/stock'),
   moves: (itemId: string) => request<StockMove[]>('/items/' + itemId + '/moves?limit=30'),

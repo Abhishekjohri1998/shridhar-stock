@@ -234,6 +234,18 @@ check('every role has a home screen', C.ROLES.every((r) => typeof C.ROLE_HOME[r]
   check('and sends back one level with its unit', back.lowAt.qty === 3 && back.lowAt.unit === 'pack' && !back.reorderAt);
 }
 
+// ---------------------------------------------------------------- a session handed over by billing's Stock tab
+{
+  const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJwaWQiOiJwXzEifQ.sig-_x';
+  const a = C.tokenFromHash('#token=' + jwt);
+  check('#token= gives the token and leaves no hash', a && a.token === jwt && a.rest === '', JSON.stringify(a));
+  const b = C.tokenFromHash('#tab=2&token=' + encodeURIComponent(jwt));
+  check('other hash parts are kept', b && b.token === jwt && b.rest === '#tab=2', JSON.stringify(b));
+  check('no hash, no handover', C.tokenFromHash('') === null && C.tokenFromHash('#') === null);
+  check('a hash with no token is left alone', C.tokenFromHash('#step=3') === null);
+  check('something that is not a JWT is refused', C.tokenFromHash('#token=<script>') === null && C.tokenFromHash('#token=') === null);
+}
+
 // ---------------------------------------------------------------- default unit, slabs in the editor, suppliers per item
 {
   const it = { id: 'p', nameEn: 'Parle-G', nameKn: '', units: parle.units, aliases: [], racks: {}, active: true, updatedAt: '' };
