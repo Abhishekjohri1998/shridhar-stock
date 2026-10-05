@@ -116,6 +116,16 @@ export function checkItem(input: ItemInput): Checked<ItemInput> {
     if (sum != null) lowAt = { qty: round3(sum), unit: units[0]!.code };
   }
 
+  // A default unit the item does not have is dropped: the item then reads its first unit.
+  const du = String(input.defaultUnit ?? '').trim();
+  const defaultUnit = du ? units.find((u) => unitKey(u.code) === unitKey(du))?.code : undefined;
+  const suppliers: string[] = [];
+  for (const s of input.suppliers ?? []) {
+    const id = String(s ?? '').trim();
+    if (id && id.length <= 60 && !suppliers.includes(id)) suppliers.push(id);
+  }
+  if (suppliers.length > 20) return { ok: false, error: 'Twenty suppliers at most for one item' };
+
   return {
     ok: true,
     value: {
@@ -124,6 +134,8 @@ export function checkItem(input: ItemInput): Checked<ItemInput> {
       nameKn,
       ...(String(input.category ?? '').trim() ? { category: String(input.category).trim() } : {}),
       units,
+      ...(defaultUnit ? { defaultUnit } : {}),
+      ...(suppliers.length ? { suppliers } : {}),
       aliases,
       racks,
       ...(lowAt ? { lowAt } : {}),

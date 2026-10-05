@@ -1,7 +1,20 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { findUnit, hasInk, itemMatches, priceFor, rateRange } from '@stock/core';
+import {
+  findUnit,
+  hasInk,
+  isActiveRole,
+  itemMatches,
+  normalisePhone,
+  priceFor,
+  rateRange,
+  retiredRoleMessage,
+  unitsDefaultFirst,
+} from '@stock/core';
+import { issueToken } from '../auth';
+import { verifyPin } from '../pin';
+import { lockedFor, recordFailure, recordSuccess } from '../ratelimit';
 import { env } from '../env';
 import { handler, HttpError } from '../http';
 import { getRepo } from '../store';
@@ -44,7 +57,8 @@ billingLinkRoutes.get(
         nameEn: i.nameEn,
         nameKn: i.nameKn,
         // The base rate before slabs; cost never leaves stock.
-        units: i.units.map((u) => ({
+        // The default unit first, so billing's suggestion chips lead with it.
+        units: unitsDefaultFirst(i).map((u) => ({
           code: u.code,
           label: u.label,
           labelKn: u.labelKn,
@@ -107,5 +121,32 @@ billingLinkRoutes.post(
     const body = draftBody.parse(req.body);
     // The writing itself when billing sends it, so the worker sees it as on a saved bill.
     res.json({ ticks: putDraft({ ...body, lines: body.lines.map((l) => ({ ...l, ink: typeof l.ink === 'object' && hasInk(l.ink) ? l.ink : !!l.ink })) }) });
+  }),
+);
+
+const authBody = z.object({ phone: z.string().max(20), pin: z.string().max(12) });
+
+/**
+ * Billing's sign-in by person: the phone and PIN of a stock account. Answers the role, the name
+ * and a normal stock session, the same one /api/auth/login issues, so the billing app can open
+ * the Stock tab already signed in. The login's lock applies too. Every try arrives from billing's
+ * one server, so the address part of the lock is the link itself.
+ */
+billingLinkRoutes.post(
+  '/auth',
+  handler(async (req, res) => {
+    const { phone: rawPhone, pin } = authBody.parse(req.body);
+    const phone = normalisePhone(rawPhone);
+    const ip = 'billing-link';
+    const wait = lockedFor(ip, phone);
+    if (wait > 0) throw new HttpError(429, 'Too many wrong PINs. Try again in ' + Math.ceil(wait / 60000) + ' minutes.');
+    const p = phone ? await getRepo().findPersonByPhone(phone) : null;
+    if (!p || !p.active || !verifyPin(pin, p.pinHash)) {
+      recordFailure(ip, phone);
+      throw new HttpError(401, 'Wrong phone number or PIN');
+    }
+    recordSuccess(ip, phone);
+    if (!isActiveRole(p.role)) throw new HttpError(403, retiredRoleMessage(p.role));
+    res.json({ role: p.role, name: p.name, token: issueToken(p) });
   }),
 );

@@ -1,4 +1,5 @@
 import { lowAtOf } from './stockTotals';
+import { defaultUnitOf } from './units';
 import type { Item, ItemInput } from './types';
 
 /**
@@ -29,6 +30,10 @@ export interface ItemForm {
   /** Running out below this many, in all places together, of the unit `lowUnit`. */
   lowQty: string;
   lowUnit: string;
+  /** The unit shown and offered first; empty means the first unit. */
+  defaultUnit: string;
+  /** Supplier ids the shop added by hand. */
+  suppliers: string[];
 }
 
 export function blankUnit(base: boolean): UnitForm {
@@ -46,7 +51,7 @@ export function blankUnit(base: boolean): UnitForm {
 }
 
 export function blankItemForm(): ItemForm {
-  return { nameEn: '', nameKn: '', category: '', units: [blankUnit(true)], aliases: '', racks: {}, lowQty: '', lowUnit: 'pc' };
+  return { nameEn: '', nameKn: '', category: '', units: [blankUnit(true)], aliases: '', racks: {}, lowQty: '', lowUnit: 'pc', defaultUnit: '', suppliers: [] };
 }
 
 const text = (n: number | undefined) => (n == null ? '' : String(n));
@@ -71,7 +76,9 @@ export function itemToForm(item: Item): ItemForm {
     aliases: item.aliases.map((a) => (a.unit ? a.text + ', ' + a.unit : a.text)).join('\n'),
     racks: { ...item.racks },
     lowQty: text(lowAtOf(item)?.qty),
-    lowUnit: lowAtOf(item)?.unit ?? item.units[0]?.code ?? '',
+    lowUnit: lowAtOf(item)?.unit ?? defaultUnitOf(item).code,
+    defaultUnit: defaultUnitOf(item).code,
+    suppliers: [...(item.suppliers ?? [])],
   };
 }
 
@@ -87,7 +94,8 @@ export function formToInput(f: ItemForm, active?: boolean): ItemInput {
       labelKn: u.labelKn,
       perBase: i === 0 ? 1 : Number(u.perBase),
       price: u.price.trim() === '' ? NaN : Number(u.price),
-      ...(u.slabs.length ? { slabs: u.slabs.map((x) => ({ minQty: Number(x.minQty), rate: Number(x.rate) })) } : {}),
+      // A slab row left wholly empty is ignored; a half-filled one goes to the server, which says what is missing.
+      ...(liveSlabs(u).length ? { slabs: liveSlabs(u).map((x) => ({ minQty: num(x.minQty) ?? NaN, rate: num(x.rate) ?? NaN })) } : {}),
       ...(num(u.min) != null ? { min: num(u.min) } : {}),
       ...(num(u.max) != null ? { max: num(u.max) } : {}),
       ...(num(u.cost) != null ? { cost: num(u.cost) } : {}),
@@ -101,6 +109,8 @@ export function formToInput(f: ItemForm, active?: boolean): ItemInput {
         return unit ? { text: t!, unit } : { text: t! };
       }),
     racks: f.racks,
+    ...(f.defaultUnit.trim() && f.units.some((u) => u.code === f.defaultUnit) ? { defaultUnit: f.defaultUnit } : {}),
+    ...(f.suppliers.length ? { suppliers: f.suppliers } : {}),
     // A unit that was removed from the item falls back to the base unit.
     ...(f.lowQty.trim() !== ''
       ? { lowAt: { qty: Number(f.lowQty), unit: f.units.some((u) => u.code === f.lowUnit) ? f.lowUnit : f.units[0]?.code ?? '' } }
@@ -108,3 +118,5 @@ export function formToInput(f: ItemForm, active?: boolean): ItemInput {
     ...(active != null ? { active } : {}),
   };
 }
+
+const liveSlabs = (u: UnitForm) => u.slabs.filter((x) => x.minQty.trim() !== '' || x.rate.trim() !== '');

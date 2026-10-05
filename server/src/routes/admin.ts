@@ -18,6 +18,11 @@ import {
   toCsv,
   toXlsx,
   totalsByItem,
+  itemSuppliers,
+  stockInfo,
+  totalQty,
+  type ItemSupplierRow,
+  type PurchaseOrder,
   type Cell,
   type Item,
   type ItemInput,
@@ -241,7 +246,15 @@ adminRoutes.get(
 /** Racks may only be keyed by places that exist. */
 async function dropUnknownPlaces(input: ItemInput): Promise<ItemInput> {
   const ids = new Set((await getRepo().listLocations()).map((l) => l.id));
-  return { ...input, racks: Object.fromEntries(Object.entries(input.racks).filter(([k]) => ids.has(k))) };
+  const out = { ...input, racks: Object.fromEntries(Object.entries(input.racks).filter(([k]) => ids.has(k))) };
+  // Suppliers too: only ones that exist are kept on the item.
+  if (input.suppliers?.length) {
+    const sups = new Set((await getRepo().listDocs<{ id: string }>('suppliers')).map((s) => s.id));
+    const kept = input.suppliers.filter((s) => sups.has(s));
+    if (kept.length) out.suppliers = kept;
+    else delete out.suppliers;
+  }
+  return out;
 }
 
 /**
@@ -284,6 +297,53 @@ adminRoutes.put(
     await repo.saveItem(item);
     emit('items');
     res.json(item);
+  }),
+);
+
+/** The categories items already use, for the category box to suggest. */
+adminRoutes.get(
+  '/categories',
+  admin,
+  handler(async (_req, res) => {
+    const seen = new Map<string, string>();
+    for (const i of await getRepo().listItems()) {
+      const c = String(i.category ?? '').trim();
+      if (c && !seen.has(c.toLowerCase())) seen.set(c.toLowerCase(), c);
+    }
+    res.json([...seen.values()].sort((a, b) => a.localeCompare(b)));
+  }),
+);
+
+/** Who supplies each item, the usual one first: hand-added ones and those found in purchase orders. */
+adminRoutes.get(
+  '/item-suppliers',
+  admin,
+  handler(async (_req, res) => {
+    const repo = getRepo();
+    const [items, pos] = await Promise.all([repo.listItems(), repo.listDocs<PurchaseOrder>('pos')]);
+    const out: Record<string, ItemSupplierRow[]> = {};
+    for (const it of items) {
+      const rows = itemSuppliers(it, pos);
+      if (rows.length) out[it.id] = rows;
+    }
+    res.json(out);
+  }),
+);
+
+/**
+ * The summary at the top of an item's Stock tab: the total, its value at cost, the last time it
+ * was bought and sold, and how many days it lasts at the last 30 days' sales. Plus its suppliers.
+ */
+adminRoutes.get(
+  '/items/:id/info',
+  admin,
+  handler(async (req, res) => {
+    const repo = getRepo();
+    const item = await repo.getItem(String(req.params.id));
+    if (!item) throw new HttpError(404, 'No such item');
+    const [stock, moves, pos] = await Promise.all([repo.listStock([item.id]), repo.listMoves({ itemId: item.id, limit: 5000 }), repo.listDocs<PurchaseOrder>('pos')]);
+    const mine = pos.filter((p) => p.lines.some((l) => l.itemId === item.id));
+    res.json({ info: stockInfo(item, totalQty(item, stock), moves, mine), suppliers: itemSuppliers(item, mine) });
   }),
 );
 

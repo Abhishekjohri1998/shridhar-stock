@@ -26,8 +26,13 @@ const eq = (name, got, want) => check(name, got === want, 'got ' + JSON.stringif
 const KEY = 'billing-link-test-key';
 
 /** A stock server of its own, on its own port and data folder. Never a database. */
-async function start(extra) {
+async function start(extra, seed) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-blink-'));
+  if (seed) {
+    const repo = await require(path.join(out, 'store', 'file.js')).createFileRepo(dir);
+    await seed(repo, require(path.join(out, 'pin.js')).hashPin);
+    await repo.close();
+  }
   const port = 4900 + Math.floor(Math.random() * 300);
   const base = 'http://localhost:' + port;
   const proc = spawn(process.execPath, [path.join(out, 'index.js')], {
@@ -56,7 +61,15 @@ async function start(extra) {
 }
 
 async function main() {
-  const on = await start({ LINK_KEY: KEY });
+  // A shop worker, a godown person and a login that was removed, for billing's sign-in by person.
+  const on = await start({ LINK_KEY: KEY }, async (repo, hashPin) => {
+    const at = new Date().toISOString();
+    // People already there means SEED_ADMIN_* is ignored, so the admin is seeded here too.
+    await repo.createPerson({ id: 'p_a', name: 'Test admin', phone: '9000000001', role: 'admin', active: true, pinHash: hashPin('4821'), tv: 1, createdAt: at });
+    for (const [id, role, phone, extra] of [['p_w', 'worker', '9111100021', {}], ['p_g', 'godown', '9111100022', { linkedId: 'loc_g' }], ['p_v', 'vendor', '9111100023', {}]]) {
+      await repo.createPerson({ id, name: 'Test ' + role, phone, role, ...extra, active: true, pinHash: hashPin('2468'), tv: 1, createdAt: at });
+    }
+  });
   const off = await start({});
   try {
     const login = await fetch(on.base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: '9000000001', pin: '4821' }) });
@@ -96,6 +109,12 @@ async function main() {
     eq('switching an item off', (await put(parle.id, { ...parleBody, active: false })).status, 200);
     check('a switched-off item is not offered', !(await names('parle')).includes(parle.id));
     await put(parle.id, { ...parleBody, active: true });
+    // The default unit comes first, so billing's chips lead with it; an older item keeps its order.
+    eq('a pack default is saved', (await put(parle.id, { ...parleBody, defaultUnit: 'PACK' })).status, 200);
+    const pd = (await link('/items?q=parle')).body.items[0];
+    check('the default unit comes first, the rest after', pd.units.map((u) => u.code).join() === 'pack,pc', JSON.stringify(pd.units));
+    await put(parle.id, parleBody);
+    eq('with no default, the first unit leads again', (await link('/items?q=parle')).body.items[0].units[0].code, 'pc');
 
     // ---- quote
     const q1 = (await link('/quote?item=' + rice.id + '&unit=kg&qty=2')).body;
@@ -116,6 +135,29 @@ async function main() {
     const set = await fetch(on.base + '/api/admin/settings', { method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ roundTo: 5 }) });
     eq('the shop sets round to 5', set.status, 200);
     eq('and billing reads it', (await link('/settings')).body.roundTo, 5);
+
+    // ---- sign-in by person, for billing
+    const auth = (phone, pin, key = KEY) => link('/auth', { phone, pin }, key);
+    const a1 = await auth('9000000001', '4821');
+    check('admin signs in through the link', a1.status === 200 && a1.body.role === 'admin' && typeof a1.body.name === 'string' && typeof a1.body.token === 'string', JSON.stringify(a1));
+    const me = await fetch(on.base + '/api/me', { headers: { Authorization: 'Bearer ' + a1.body.token } });
+    check('and the token is a normal stock session', me.status === 200 && (await me.json()).role === 'admin');
+    const a2 = await auth('9111100021', '2468');
+    check('a shop worker', a2.status === 200 && a2.body.role === 'worker' && a2.body.name === 'Test worker' && a2.body.token, JSON.stringify(a2));
+    const wb = await fetch(on.base + '/api/worker/bills', { headers: { Authorization: 'Bearer ' + a2.body.token } });
+    eq('whose session opens the worker screen', wb.status, 200);
+    const a3 = await auth('+91 91111 00022', '2468');
+    check('a godown person, phone written any way', a3.status === 200 && a3.body.role === 'godown', JSON.stringify(a3));
+    const a4 = await auth('9111100021', '0000');
+    check('a wrong PIN is 401 with a message', a4.status === 401 && a4.body.error && !a4.body.token, JSON.stringify(a4));
+    eq('an unknown phone is 401', (await auth('9999999999', '2468')).status, 401);
+    const a5 = await auth('9111100023', '2468');
+    check('a removed login is 403 with its message', a5.status === 403 && /no longer/i.test(a5.body.error) && !a5.body.token, JSON.stringify(a5));
+    eq('no key, no sign-in', (await auth('9000000001', '4821', null)).status, 401);
+    eq('a wrong key, no sign-in', (await auth('9000000001', '4821', 'nope')).status, 401);
+    eq('no door when stock has no key', (await link('/auth', { phone: '9000000001', pin: '4821' }, KEY, off.base)).status, 404);
+    for (let i = 0; i < 5; i++) await auth('9111100022', '0000');
+    eq('five wrong PINs lock it, as the login does', (await auth('9111100022', '2468')).status, 429);
 
     // ---- a live draft, ticks both ways
     const lines = [

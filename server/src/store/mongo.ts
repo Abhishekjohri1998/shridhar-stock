@@ -69,6 +69,8 @@ const itemSchema = new Schema(
       default: undefined,
       validate: { validator: (v: unknown[]) => Array.isArray(v) && v.length > 0, message: 'An item needs its base unit' },
     },
+    defaultUnit: { type: String, required: false },
+    suppliers: { type: [String], required: false, default: undefined },
     aliases: { type: [aliasSchema], required: false, default: [] },
     racks: { type: Schema.Types.Mixed, required: false, default: {} },
     // The old level per place. Kept as saved; new saves write lowAt instead.

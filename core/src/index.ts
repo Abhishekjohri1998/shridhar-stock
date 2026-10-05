@@ -15,3 +15,4 @@ export * from './ink';
 export * from './xlsx';
 export * from './pick';
 export * from './stockTotals';
+export * from './itemInfo';

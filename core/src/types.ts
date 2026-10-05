@@ -80,6 +80,13 @@ export interface Item {
   category?: string;
   /** units[0] is the base unit, with perBase 1. */
   units: ItemUnit[];
+  /**
+   * The unit stock is shown, counted, moved and bought in by default, and the first one billing
+   * offers. Absent on older items, which read it as their first unit (`defaultUnitOf`).
+   */
+  defaultUnit?: string;
+  /** Suppliers the shop added by hand as ones who supply this item (supplier ids). Purchase orders add more when read. */
+  suppliers?: string[];
   aliases: Alias[];
   /** Where it is kept in each place: "Rack 3", "Back room". Keyed by location id. */
   racks: Record<string, string>;

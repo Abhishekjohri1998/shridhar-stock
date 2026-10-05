@@ -55,3 +55,24 @@ export function describeQty(item: Pick<Item, 'units'>, baseQty: number, lang: 'e
   if (left > 0 || parts.length === 0) parts.push(left + ' ' + label(base));
   return sign + parts.join(' ');
 }
+
+/**
+ * The unit the shop counts this item in by default: the one it chose, or for older items (and a
+ * choice whose unit was since removed) the first unit. Read here, never written back, so items
+ * saved before there was a default need no change in the database.
+ */
+export function defaultUnitOf(item: Pick<Item, 'units'> & { defaultUnit?: string }): ItemUnit {
+  return (item.defaultUnit ? findUnit(item, item.defaultUnit) : undefined) ?? baseUnit(item);
+}
+
+/** The item's units with the default one first and the rest in their own order. */
+export function unitsDefaultFirst(item: Pick<Item, 'units'> & { defaultUnit?: string }): ItemUnit[] {
+  const d = defaultUnitOf(item);
+  return [d, ...item.units.filter((u) => u !== d)];
+}
+
+/** A base quantity in one unit, as a plain number and the unit: 150 pc is "1.042 box". */
+export function qtyInUnit(item: Pick<Item, 'units'>, code: string, baseQty: number, lang: 'en' | 'kn' = 'en'): string {
+  const u = findUnit(item, code) ?? baseUnit(item);
+  return round3(baseQty / u.perBase) + ' ' + (lang === 'kn' && u.labelKn ? u.labelKn : u.code);
+}

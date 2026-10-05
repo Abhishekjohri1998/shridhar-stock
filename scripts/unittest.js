@@ -234,6 +234,60 @@ check('every role has a home screen', C.ROLES.every((r) => typeof C.ROLE_HOME[r]
   check('and sends back one level with its unit', back.lowAt.qty === 3 && back.lowAt.unit === 'pack' && !back.reorderAt);
 }
 
+// ---------------------------------------------------------------- default unit, slabs in the editor, suppliers per item
+{
+  const it = { id: 'p', nameEn: 'Parle-G', nameKn: '', units: parle.units, aliases: [], racks: {}, active: true, updatedAt: '' };
+  check('an older item defaults to its first unit', C.defaultUnitOf(it).code === parle.units[0].code);
+  check('a chosen default is used', C.defaultUnitOf({ ...it, defaultUnit: 'pack' }).code === 'pack');
+  check('a default whose unit was removed falls back to the first', C.defaultUnitOf({ ...it, defaultUnit: 'crate' }).code === parle.units[0].code);
+  const order = C.unitsDefaultFirst({ ...it, defaultUnit: 'pack' }).map((u) => u.code);
+  check('the default comes first, the rest in their order', order[0] === 'pack' && order.length === parle.units.length && order.slice(1).join() === parle.units.filter((u) => u.code !== 'pack').map((u) => u.code).join(), order.join());
+  check('a quantity in one unit', C.qtyInUnit(it, 'pack', 48) === '2 pack');
+  const ok = C.checkItem({ ...it, defaultUnit: 'PACK', suppliers: ['sup_1', 'sup_1', ' sup_2 '] });
+  check('checkItem keeps the default in the unit\'s own spelling, and suppliers once each', ok.ok && ok.value.defaultUnit === 'pack' && ok.value.suppliers.join() === 'sup_1,sup_2', JSON.stringify(ok));
+  const gone = C.checkItem({ ...it, defaultUnit: 'crate' });
+  check('a default the item lacks is dropped', gone.ok && !('defaultUnit' in gone.value));
+
+  // Slabs and min/max round-trip through the editor.
+  const withSlabs = { ...it, defaultUnit: 'pack', suppliers: ['sup_1'], units: [{ ...parle.units[0], min: 4, max: 6 }, { ...parle.units[1], slabs: [{ minQty: 5, rate: 108 }, { minQty: 10, rate: 105 }] }, ...parle.units.slice(2)] };
+  const f = C.itemToForm(withSlabs);
+  check('the form shows the default unit and suppliers', f.defaultUnit === 'pack' && f.suppliers.join() === 'sup_1');
+  check('the form shows slabs and the range as text', f.units[1].slabs[1].minQty === '10' && f.units[1].slabs[1].rate === '105' && f.units[0].min === '4' && f.units[0].max === '6');
+  const f2 = { ...f, units: f.units.map((u, i) => (i === 1 ? { ...u, slabs: [...u.slabs, { minQty: '', rate: '' }] } : u)) };
+  const r = C.checkItem(C.formToInput(f2));
+  check('and back again, an empty slab row ignored', r.ok && JSON.stringify(r.value.units[1].slabs) === JSON.stringify(withSlabs.units[1].slabs) && r.value.units[0].min === 4 && r.value.units[0].max === 6 && r.value.defaultUnit === 'pack' && r.value.suppliers[0] === 'sup_1', JSON.stringify(r));
+  const half = { ...f, units: f.units.map((u, i) => (i === 1 ? { ...u, slabs: [{ minQty: '5', rate: '' }] } : u)) };
+  const hr = C.checkItem(C.formToInput(half));
+  check('a half-filled slab is refused with a reason', !hr.ok && /slab/.test(hr.error), JSON.stringify(hr));
+  const p = C.priceFor(C.checkItem(C.formToInput(f)).value, 'pack', 10);
+  check('the saved slab prices the quantity', p.rate === 105);
+  const back = C.formToInput({ ...f, defaultUnit: 'gone' });
+  check('a default unit not on the form is not sent', !('defaultUnit' in back));
+
+  // Suppliers per item: by hand, and from purchase orders.
+  const po = (id, sup, status, at, cost, extra) => ({ id, no: 1, supplierId: sup, to: 'shop', lines: [{ itemId: 'p', unit: 'pack', qty: 10, cost }], status, at, times: status === 'received' ? { received: at } : {}, ...extra });
+  const pos = [po('a', 'sup_2', 'received', '2026-01-01T00:00:00Z', 100), po('b', 'sup_3', 'received', '2026-03-01T00:00:00Z', 98), po('c', 'sup_2', 'cancelled', '2026-04-01T00:00:00Z', 90), { ...po('d', 'sup_4', 'ordered', '2026-02-01T00:00:00Z', 1), lines: [{ itemId: 'other', unit: 'pc', qty: 1, cost: 1 }] }];
+  const rows = C.itemSuppliers({ id: 'p', suppliers: ['sup_1', 'sup_2'] }, pos);
+  check('the latest one bought from is the usual supplier', rows[0].supplierId === 'sup_3' && rows[0].lastCost === 98 && !rows[0].manual, JSON.stringify(rows));
+  check('a hand-added one with orders keeps both', rows[1].supplierId === 'sup_2' && rows[1].manual && rows[1].lastCost === 100 && rows[1].orders === 1);
+  check('a hand-added one never ordered from comes last', rows[2].supplierId === 'sup_1' && rows[2].manual && rows[2].lastAt === undefined && rows.length === 3);
+  check('the buy list groups by the usual one', C.usualSuppliers([{ id: 'p' }, { id: 'q', suppliers: ['sup_9'] }, { id: 'none' }], pos).get('p') === 'sup_3' && C.usualSuppliers([{ id: 'q', suppliers: ['sup_9'] }], pos).get('q') === 'sup_9');
+  check('a new order line starts in the default unit at the last cost', JSON.stringify(C.poLineDefault({ ...it, defaultUnit: 'pack' }, rows, 'sup_2')) === JSON.stringify({ unit: 'pack', cost: 100 }));
+
+  // The Stock tab summary.
+  const now = Date.parse('2026-03-31T00:00:00Z');
+  const mv = (kind, qty, at) => ({ id: kind + at, key: kind + at, at, kind, itemId: 'p', qty, ref: '', by: '' });
+  const moves = [mv('sale', 60, '2026-03-20T00:00:00Z'), mv('sale', 30, '2026-03-25T00:00:00Z'), mv('cancel', 30, '2026-03-26T00:00:00Z'), mv('sale', 999, '2026-01-01T00:00:00Z')];
+  const costed = { ...it, units: [{ ...parle.units[0], cost: 4 }, ...parle.units.slice(1)] };
+  const si = C.stockInfo(costed, 120, moves, pos, now);
+  check('value at cost', si.valueAtCost === 480, JSON.stringify(si));
+  check('last bought: the newest received order', si.lastBought.supplierId === 'sup_3' && si.lastBought.cost === 98 && si.lastBought.unit === 'pack');
+  check('last sold', si.lastSold.at === '2026-03-25T00:00:00Z' && si.lastSold.qty === 30);
+  check('30 days sold, cancels taken off, old sales left out', si.sold30 === 60);
+  check('days left at that rate', si.daysLeft === 60);
+  check('nothing sold: no days left figure', C.stockInfo(it, 5, [], [], now).daysLeft === undefined);
+}
+
 // ---------------------------------------------------------------- refill trips
 {
   const L = (id, kind) => ({ id, name: id, nameKn: '', kind, active: true });
