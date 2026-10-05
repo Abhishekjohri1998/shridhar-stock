@@ -9,6 +9,7 @@ import {
   isLow,
   itemToForm,
   pickName,
+  toBase,
   totalQty,
   type AdjustReason,
   type Item,
@@ -280,6 +281,12 @@ function ItemStock({ item, locs, stock, readOnly, onChanged }: { item: Item; loc
   const bi = useBi();
   const [loc, setLoc] = useState(locs[0]?.id ?? '');
   const [actual, setActual] = useState('');
+  /* Counted in whichever unit is on the shelf -- "4 box" -- and turned into the smallest unit
+     here, which is what the ledger keeps. Typing pieces for a godown full of boxes was the
+     shop's complaint. */
+  const [countUnit, setCountUnit] = useState(item.units[0]!.code);
+  const unitOk = item.units.some((u) => u.code === countUnit) ? countUnit : item.units[0]!.code;
+  const counted = actual.trim() === '' || !Number.isFinite(Number(actual)) ? null : toBase(item, unitOk, Number(actual));
   const [reason, setReason] = useState<AdjustReason>('counted');
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
@@ -308,7 +315,8 @@ function ItemStock({ item, locs, stock, readOnly, onChanged }: { item: Item; loc
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    run(() => api.adjust({ itemId: item.id, locationId: loc, actual: Number(actual), reason, ...(note.trim() ? { note } : {}), requestId: crypto.randomUUID() }));
+    if (counted === null) return;
+    run(() => api.adjust({ itemId: item.id, locationId: loc, actual: counted, reason, ...(note.trim() ? { note } : {}), requestId: crypto.randomUUID() }));
   };
 
   const isFirst = (moves.value ?? []).every((m: StockMove) => m.from !== loc && m.to !== loc);
@@ -344,10 +352,21 @@ function ItemStock({ item, locs, stock, readOnly, onChanged }: { item: Item; loc
               <Select value={loc} onChange={setLoc} aria-label={t('places.title')} options={locs.map((l) => ({ value: l.id, label: pickName(l.name, l.nameKn, lang) }))} />
             </label>
             <label className="field">
-              <span>
-                {t('stock.actual')} · {item.units[0]!.code}
-              </span>
-              <input inputMode="decimal" value={actual} onChange={(e) => setActual(e.target.value)} />
+              <span>{t('stock.actual')}</span>
+              <div className="bar mb-0">
+                <input inputMode="decimal" className="in-qty" value={actual} onChange={(e) => setActual(e.target.value)} aria-label={t('stock.actual')} />
+                {item.units.length > 1 && (
+                  <Select
+                    value={unitOk}
+                    onChange={setCountUnit}
+                    className="w-auto"
+                    aria-label={bi('Unit', 'ಘಟಕ')}
+                    options={item.units.map((u) => ({ value: u.code, label: (lang === 'kn' && u.labelKn) || u.code }))}
+                  />
+                )}
+                {item.units.length === 1 && <span className="muted">{(lang === 'kn' && item.units[0]!.labelKn) || item.units[0]!.code}</span>}
+                {counted !== null && unitOk !== item.units[0]!.code && <span className="muted">= {describeQty(item, counted, lang)}</span>}
+              </div>
             </label>
             {!isFirst && (
               <>
@@ -363,11 +382,11 @@ function ItemStock({ item, locs, stock, readOnly, onChanged }: { item: Item; loc
             )}
             <div className="bar">
               {isFirst ? (
-                <button type="button" className="btn primary" disabled={busy || actual.trim() === ''} onClick={() => run(() => api.openStock(item.id, loc, Number(actual)))}>
+                <button type="button" className="btn primary" disabled={busy || counted === null} onClick={() => counted !== null && run(() => api.openStock(item.id, loc, counted))}>
                   {t('stock.open')}
                 </button>
               ) : (
-                <button className="btn primary" disabled={busy || actual.trim() === ''}>
+                <button className="btn primary" disabled={busy || counted === null}>
                   {t('stock.adjust')}
                 </button>
               )}
