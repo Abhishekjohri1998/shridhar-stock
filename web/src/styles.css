@@ -543,10 +543,13 @@ img, svg.ink { max-width: 100%; }
   .shell.has-nav { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
   .shell.has-nav .top-menu { display: inline-flex; }
   .top { gap: 2px; padding-left: 10px; padding-right: 10px; }
-  .brand { font-size: 1.05rem; }
+  /* Five buttons and a name on 375px: the name gives way, never the sign-in button. */
+  .brand { font-size: 1.05rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
+  .top > * { flex-shrink: 0; }
+  .top > .brand { flex-shrink: 1; }
+  .icon-btn { padding: 0 6px; }
   .live-word, .lang-word, .who { display: none; }
   .user-btn { padding: 2px; border: 0; background: transparent; }
-  .icon-btn { padding: 0 8px; }
   .tabbar {
     display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
     position: fixed; z-index: 30; left: 0; right: 0; bottom: 0;
