@@ -24,6 +24,8 @@ import { FilesPage } from './pages/admin/Files';
 import { VehiclesPage } from './pages/admin/Vehicles';
 import { firstTourSeen, markFirstTourSeen, TourButton, TourProvider, useTour } from './components/Tour';
 import { FIRST_TOUR, tourForPath } from './tours';
+import { ExplainerModal, explainerOffered, markExplainerOffered } from './explainer/Player';
+import { RecordPage } from './explainer/Record';
 
 /** A screen inside one menu place, shown as a tab. */
 type Tab = { to: string; en: string; kn: string };
@@ -309,19 +311,36 @@ function ToInventory({ base }: { base: string }) {
   return <Navigate to={base + (id ? '/' + id : '') + loc.search} replace />;
 }
 
-/** The first time a person signs in, their role's tour plays by itself, once per device. */
+/**
+ * The first time a person signs in, their role's tour plays by itself, once per device. The admin
+ * is first offered the explainer video, once; the tour follows when it is closed.
+ */
 function FirstTour() {
   const { me } = useSession();
   const { start } = useTour();
   const loc = useLocation();
+  const [offer, setOffer] = useState(false);
   useEffect(() => {
-    if (!me) return;
+    if (!me || offer) return;
     const id = FIRST_TOUR[me.role];
     if (!id || loc.pathname !== ROLE_HOME[me.role] || firstTourSeen(me.id, me.role)) return;
+    if (me.role === 'admin' && !explainerOffered(me.id)) {
+      setOffer(true);
+      return;
+    }
     const timer = setTimeout(() => start(id, () => markFirstTourSeen(me.id, me.role)), 400);
     return () => clearTimeout(timer);
-  }, [me, loc.pathname, start]);
-  return null;
+  }, [me, loc.pathname, start, offer]);
+  if (!offer || !me) return null;
+  return (
+    <ExplainerModal
+      offer
+      onClose={() => {
+        markExplainerOffered(me.id);
+        setOffer(false);
+      }}
+    />
+  );
 }
 
 export function App() {
@@ -359,6 +378,8 @@ function Shell() {
       </>
     );
   }
+  // The explainer's recording page: the bare canvas, for the admin only.
+  if (loc.pathname === '/explainer/record' && me.role === 'admin') return <RecordPage />;
   const home = ROLE_HOME[me.role];
   const r: Role = me.role;
   const hasNav = r === 'admin';
@@ -390,6 +411,7 @@ function Shell() {
                 <Route path="/admin/vehicles" element={<VehiclesPage />} />
                 <Route path="/admin/files" element={<FilesPage />} />
                 <Route path="/admin/settings" element={<SettingsPage />} />
+                <Route path="/explainer/record" element={<RecordPage />} />
                 {/* Old links and bookmarks still land somewhere sensible. */}
                 <Route path="/admin/setup" element={<Navigate to="/admin/places" replace />} />
                 <Route path="/admin/move" element={<Navigate to="/admin/purchases" replace />} />

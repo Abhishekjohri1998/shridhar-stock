@@ -71,5 +71,30 @@ for (const id of Object.keys(tours.TOURS)) check('"Show me" knows where ' + id +
 const help = fs.readFileSync(path.join(web, 'pages', 'Help.tsx'), 'utf8');
 for (const m of help.matchAll(/tour: '([a-z]+)'/g)) check('help section ' + m[1] + ' has a tour', !!tours.TOURS[m[1]]);
 
+// The explainer: every chapter and caption in both languages, real routes and tours, 2 to 3⅓ minutes.
+{
+  const exOut = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-explainer-'));
+  for (const f of ['draw.ts', 'scenes.ts']) {
+    const src = fs.readFileSync(path.join(web, 'explainer', f), 'utf8');
+    fs.writeFileSync(path.join(exOut, f.replace(/\.ts$/, '.js')), ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText);
+  }
+  const ex = require(path.join(exOut, 'scenes.js'));
+  fs.rmSync(exOut, { recursive: true, force: true });
+  const app = fs.readFileSync(path.join(web, 'App.tsx'), 'utf8');
+  check('explainer has 8 chapters', ex.CHAPTERS.length === 8, ex.CHAPTERS.length);
+  check('explainer lasts 120 to 200 s', ex.TOTAL >= 120 && ex.TOTAL <= 200, ex.TOTAL);
+  check('the record page has a route', app.includes('path="/explainer/record"'));
+  for (const ch of ex.CHAPTERS) {
+    check('explainer ' + ch.id + ': title in both languages', filled(ch.title), JSON.stringify(ch.title));
+    check('explainer ' + ch.id + ': 15 to 25 s', ch.dur >= 15 && ch.dur <= 25, ch.dur);
+    check('explainer ' + ch.id + ': route ' + ch.route + ' exists', app.includes('path="' + ch.route + '"'));
+    check('explainer ' + ch.id + ': tour ' + ch.tour + ' exists', !!tours.TOURS[ch.tour]);
+    ch.cues.forEach((c, i) => {
+      check('explainer ' + ch.id + ' caption ' + (i + 1) + ' in both languages', filled(c.text), JSON.stringify(c.text));
+      check('explainer ' + ch.id + ' caption ' + (i + 1) + ' inside the chapter', c.at >= 0 && c.at + ex.TITLE < ch.dur - 2, c.at);
+    });
+  }
+}
+
 console.log('tourtest: ' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

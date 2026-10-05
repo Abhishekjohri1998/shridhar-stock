@@ -5,6 +5,8 @@ import { useLoad, useSession } from '../../lib/session';
 import { Link } from 'react-router-dom';
 import { Greeting, Loading, Money, Tile, useBi, useWeekSales, WeekChart, when } from '../../components/ui';
 import { Icon } from '../../components/Icon';
+import { useState } from 'react';
+import { ExplainerCard, ExplainerModal } from '../../explainer/Player';
 
 export interface Summary {
   toConfirm: number;
@@ -29,6 +31,7 @@ export function AdminHome() {
   const live = useLive('bills', 'stock', 'transfers', 'pos', 'link', 'low');
   const { value: s, error } = useLoad(() => http.get<Summary>('/admin/summary'), [live]);
   const week = useWeekSales([live]);
+  const [watch, setWatch] = useState(false);
   if (error) return <div className="msg err">{error}</div>;
   if (!s) return <Loading />;
   const needs = [
@@ -39,6 +42,8 @@ export function AdminHome() {
   ];
   return (
     <>
+      <ExplainerCard onOpen={() => setWatch(true)} />
+      {watch && <ExplainerModal onClose={() => setWatch(false)} />}
       {me && <Greeting name={me.name} />}
       <div className={'banner ' + (s.link?.ok ? 'ok' : 'bad')} data-tour="home-link">
         {s.link?.ok ? '●' : '○'} {bi('Billing link', 'ಬಿಲ್ಲಿಂಗ್ ಸಂಪರ್ಕ')}:{' '}

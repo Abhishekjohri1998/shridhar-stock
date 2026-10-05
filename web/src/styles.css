@@ -681,3 +681,33 @@ img, svg.ink { max-width: 100%; }
 .flow .flow-step.down { background: var(--gold-wash); color: var(--gold-600); }
 .flow .flow-arrow { color: var(--ink-400); }
 .help-section { scroll-margin-top: 80px; }
+
+/* ---- "Watch how it works": the explainer player ------------------------- */
+.explainer { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
+.explainer-stage { position: relative; cursor: pointer; border-radius: var(--r-md); overflow: hidden; border: 1px solid var(--line); background: var(--paper-0); }
+.explainer-stage canvas { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; }
+.explainer-big-play {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: inline-flex; align-items: center; justify-content: center; width: 72px; height: 72px; border-radius: var(--r-pill);
+  background: var(--brand-600); color: var(--on-brand); font-size: 1.6rem; box-shadow: var(--sh-brand); pointer-events: none;
+}
+.explainer-controls { display: flex; align-items: center; gap: var(--gap); min-width: 0; }
+.explainer-controls .btn { flex: none; min-width: var(--tap); }
+.explainer-seek { flex: 1; min-width: 0; accent-color: var(--brand-600); }
+.explainer-time { flex: none; font-size: 0.88rem; }
+.explainer-now { margin-bottom: 0; }
+.explainer-now b { color: var(--ink-900); }
+.explainer-chapters { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+.explainer-chapters .chip { flex: none; white-space: nowrap; }
+.explainer-wrap { position: fixed; inset: 0; z-index: 65; background: rgba(20, 18, 15, 0.38); display: flex; align-items: center; justify-content: center; padding: var(--pad); animation: fade var(--t-base) var(--ease); }
+.explainer-modal {
+  width: min(1100px, 100%, calc((100vh - 260px) * 16 / 9)); min-width: min(100%, 320px); max-height: 100%; overflow-y: auto;
+  background: var(--paper-1); border-radius: var(--r-lg); box-shadow: var(--sh-3); padding: var(--pad);
+}
+.explainer-card { display: flex; align-items: center; gap: var(--gap); width: 100%; text-align: left; font: inherit; color: inherit; margin-bottom: var(--gap); }
+.explainer-card-play {
+  display: inline-flex; align-items: center; justify-content: center; flex: none; width: 42px; height: 42px; border-radius: var(--r-pill);
+  background: var(--brand-600); color: var(--on-brand); box-shadow: var(--sh-brand);
+}
+.explainer-card .need-text b { font-size: 1.1rem; }
+.explainer-record { display: block; width: 100%; height: auto; }

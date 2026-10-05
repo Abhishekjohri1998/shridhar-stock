@@ -4,6 +4,7 @@ import { useSession } from '../lib/session';
 import { useBi } from '../components/ui';
 import { useTour } from '../components/Tour';
 import { TOUR_HOME } from '../tours';
+import { ExplainerPlayer } from '../explainer/Player';
 
 type Pair = [en: string, kn: string];
 
@@ -115,6 +116,11 @@ export function HelpPage() {
   return (
     <>
       <h1 className="title">{bi('How it all works', 'ಇದೆಲ್ಲ ಹೇಗೆ ಕೆಲಸ ಮಾಡುತ್ತದೆ')}</h1>
+      {role === 'admin' && (
+        <div className="card">
+          <ExplainerPlayer />
+        </div>
+      )}
       <div className="card">
         <ol className="flow" aria-label={bi('How stock moves', 'ಸ್ಟಾಕ್ ಹೇಗೆ ಬದಲಾಗುತ್ತದೆ')}>
           {FLOW.map((f, i) => (
