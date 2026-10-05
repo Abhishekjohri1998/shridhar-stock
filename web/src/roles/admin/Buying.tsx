@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { formatRupees, pickName, poStage, type Item, type Location, type PurchaseOrder, type Refill, type Supplier } from '@stock/core';
+import { formatRupees, pickName, poStage, type Item, type ItemSupplierRow, type Location, type PurchaseOrder, type Refill, type Supplier } from '@stock/core';
 import { api, http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
@@ -8,7 +8,7 @@ import { statusWord } from '../../lib/words';
 import { Empty, Loading, Money, Select, Status, useBi, when, Table } from '../../components/ui';
 
 /** An item as the orders page needs it: names and units, never the whole catalogue. */
-type ItemBrief = Pick<Item, 'id' | 'nameEn' | 'nameKn'> & { units: { code: string; label: string; labelKn: string; perBase: number; cost?: number }[] };
+type ItemBrief = Pick<Item, 'id' | 'nameEn' | 'nameKn' | 'defaultUnit'> & { units: { code: string; label: string; labelKn: string; perBase: number; cost?: number }[] };
 
 interface Page {
   orders: (PurchaseOrder & { received?: { itemId: string; qty: number; cost: number }[] })[];
@@ -25,10 +25,23 @@ interface Line {
   cost: string;
 }
 
-/** The unit an item is bought in: the biggest one, which is how suppliers sell. */
+/**
+ * The unit an item is bought in: its default unit when the shop chose one, else the biggest one,
+ * which is how suppliers sell.
+ */
 function buyUnit(item: ItemBrief) {
-  return [...item.units].sort((a, b) => b.perBase - a.perBase)[0]!;
+  const chosen = item.defaultUnit ? item.units.find((u) => u.code === item.defaultUnit) : undefined;
+  return chosen ?? [...item.units].sort((a, b) => b.perBase - a.perBase)[0]!;
 }
+
+/** The cost to start a line with: the last one paid in that unit (this supplier's first), else the item's own. */
+function startCost(rows: ItemSupplierRow[] | undefined, supplierId: string, unit: ItemBrief['units'][number]): string {
+  const r = (rows ?? []).find((x) => x.supplierId === supplierId && x.lastUnit === unit.code && x.lastCost != null) ?? (rows ?? []).find((x) => x.lastUnit === unit.code && x.lastCost != null);
+  const c = r?.lastCost ?? unit.cost;
+  return c != null ? String(c) : '';
+}
+
+const NO_USUAL = '';
 
 const briefName = (it: ItemBrief | undefined, id: string, lang: 'en' | 'kn') => (it ? pickName(it.nameEn, it.nameKn, lang) : id);
 
@@ -296,32 +309,52 @@ function NewOrder({ locs, sups, fromBuyList, onDone }: { locs: Location[]; sups:
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const found = useItemSearch(q).filter((i) => !lines.some((l) => l.itemId === i.id));
+  // Who supplies each item, the usual one first: added by hand on the item, or from past orders.
+  const [whoSupplies, setWho] = useState<Record<string, ItemSupplierRow[]>>({});
+  /* The buy list, grouped by each item's usual supplier: one order is one supplier, so the shop
+     orders one group at a time. */
+  const [buyAll, setBuyAll] = useState<(Line & { usual: string })[]>([]);
+  const [group, setGroup] = useState<string | null>(null);
+  useEffect(() => {
+    api.itemSuppliers().then(setWho).catch(() => undefined);
+  }, []);
+  const supName = (id: string) => sups.find((s) => s.id === id)?.name ?? '';
 
   // "Order these" from the buy list: what is low in all places together, in the unit suppliers
   // sell it in, enough to bring the total back to twice its level.
   useEffect(() => {
     if (!fromBuyList) return;
-    http
-      .get<Refill>('/admin/refill')
-      .then(async (r) => {
+    Promise.all([http.get<Refill>('/admin/refill'), api.itemSuppliers().catch(() => ({}) as Record<string, ItemSupplierRow[]>)])
+      .then(async ([r, who]) => {
         const got = (await Promise.all(r.buy.map((b) => api.item(b.itemId).catch(() => null)))).filter((x): x is Item => !!x);
         setKnown(new Map(got.map((i) => [i.id, i])));
-        setLines(
-          r.buy.flatMap((b) => {
-            const it = got.find((i) => i.id === b.itemId);
-            if (!it) return [];
-            const u = buyUnit(it);
-            return [{ itemId: it.id, unit: u.code, qty: String(Math.max(1, Math.ceil(b.qty / u.perBase))), cost: u.cost != null ? String(u.cost) : '' }];
-          }),
-        );
+        const live = new Set(sups.map((s) => s.id));
+        const all = r.buy.flatMap((b) => {
+          const it = got.find((i) => i.id === b.itemId);
+          if (!it) return [];
+          const u = buyUnit(it);
+          const usual = (who[it.id] ?? []).find((x) => live.has(x.supplierId))?.supplierId ?? NO_USUAL;
+          return [{ itemId: it.id, unit: u.code, qty: String(Math.max(1, Math.ceil(b.qty / u.perBase))), cost: startCost(who[it.id], usual, u), usual }];
+        });
+        setBuyAll(all);
+        const first = all.find((l) => l.usual !== NO_USUAL)?.usual ?? NO_USUAL;
+        pickGroup(first, all);
       })
       .catch((e: Error) => setErr(e.message));
   }, [fromBuyList]);
 
+  /** One supplier's share of the buy list becomes the order, with that supplier chosen. */
+  function pickGroup(g: string, all = buyAll) {
+    setGroup(g);
+    if (g !== NO_USUAL) setSupplier(g);
+    setLines(all.filter((l) => l.usual === g).map(({ usual: _u, ...l }) => l));
+  }
+  const groups = [...new Set(buyAll.map((l) => l.usual))];
+
   const add = (it: Item) => {
     const u = buyUnit(it);
     setKnown(new Map(known).set(it.id, it));
-    setLines([...lines, { itemId: it.id, unit: u.code, qty: '1', cost: u.cost != null ? String(u.cost) : '' }]);
+    setLines([...lines, { itemId: it.id, unit: u.code, qty: '1', cost: startCost(whoSupplies[it.id], supplierId, u) }]);
     setQ('');
   };
   const set = (i: number, patch: Partial<Line>) => setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
@@ -351,6 +384,18 @@ function NewOrder({ locs, sups, fromBuyList, onDone }: { locs: Location[]; sups:
           <Select value={to} onChange={setTo} aria-label={bi('Goods go to', 'ಸಾಮಾನು ಹೋಗುವುದು')} options={locs.map((l) => ({ value: l.id, label: pickName(l.name, l.nameKn, lang) }))} />
         </label>
       </div>
+      {groups.length > 0 && (
+        <div className="field" data-tour="purchases-groups">
+          <span>{bi('The buy list, by usual supplier: one order each', 'ಖರೀದಿ ಪಟ್ಟಿ, ಯಾವಾಗಲೂ ಕೊಡುವವರ ಪ್ರಕಾರ: ಒಬ್ಬರಿಗೆ ಒಂದು ಆರ್ಡರ್')}</span>
+          <div className="chips">
+            {groups.map((g) => (
+              <button key={g || 'none'} type="button" className={'chip' + (group === g ? ' on' : '')} onClick={() => pickGroup(g)}>
+                {(g ? supName(g) : bi('No usual supplier', 'ಯಾವಾಗಲೂ ಕೊಡುವವರಿಲ್ಲ')) + ' · ' + buyAll.filter((l) => l.usual === g).length}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <input placeholder={bi('Search an item to add…', 'ಸೇರಿಸಲು ಸಾಮಾನು ಹುಡುಕಿ…')} value={q} onChange={(e) => setQ(e.target.value)} />
       {found.length > 0 && (
         <div className="chips mt-6">
@@ -363,8 +408,11 @@ function NewOrder({ locs, sups, fromBuyList, onDone }: { locs: Location[]; sups:
       )}
       {lines.map((l, i) => {
         const it = known.get(l.itemId);
+        // The item's own suppliers, so the shop sees who usually brings it before saving.
+        const others = (whoSupplies[l.itemId] ?? []).filter((x) => sups.some((s) => s.id === x.supplierId)).slice(0, 3);
         return (
-          <div className="bar mt-6" key={l.itemId}>
+          <div key={l.itemId}>
+          <div className="bar mt-6">
             <span className="grow name">{briefName(it, l.itemId, lang)}</span>
             <input inputMode="decimal" value={l.qty} onChange={(e) => set(i, { qty: e.target.value })} className="in-qty" aria-label={bi('Quantity', 'ಪ್ರಮಾಣ')} />
             <Select
@@ -381,6 +429,24 @@ function NewOrder({ locs, sups, fromBuyList, onDone }: { locs: Location[]; sups:
             <button className="btn ghost small" onClick={() => setLines(lines.filter((_, j) => j !== i))} aria-label={bi('Remove', 'ತೆಗೆಯಿರಿ')}>
               ✕
             </button>
+          </div>
+          {others.length > 0 && (
+            <div className="chips mt-6" data-tour="purchases-item-suppliers">
+              <span className="muted">{bi('Supplied by', 'ಕೊಡುವವರು')}:</span>
+              {others.map((x) => (
+                <button
+                  key={x.supplierId}
+                  type="button"
+                  className={'chip' + (x.supplierId === supplierId ? ' on' : '')}
+                  title={x.lastAt ? when(x.lastAt, lang) : ''}
+                  onClick={() => setSupplier(x.supplierId)}
+                >
+                  {supName(x.supplierId)}
+                  {x.lastCost != null && ' · ' + formatRupees(x.lastCost) + '/' + x.lastUnit}
+                </button>
+              ))}
+            </div>
+          )}
           </div>
         );
       })}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { findUnit, itemMatches, pickName, toBase, type Item, type Location, type Refill, type Transfer } from '@stock/core';
+import { defaultUnitOf, findUnit, itemMatches, pickName, toBase, type Item, type Location, type Refill, type Transfer } from '@stock/core';
 import { http } from '../../lib/api';
 import { itemName, placeName, qtyText, useCatalog } from '../../lib/catalog';
 import { useLive } from '../../lib/live';
@@ -16,6 +16,9 @@ function QtyInput({ item, base, onChange }: { item: Item | undefined; base: numb
   const { lang } = useSession();
   const pickUnit = () => {
     if (!item) return 'pc';
+    // The item's default unit when the amount is a whole number of it; else the biggest that fits.
+    const d = defaultUnitOf(item);
+    if (item.defaultUnit && (base === 0 || base % d.perBase === 0)) return d.code;
     const fits = [...item.units].sort((a, b) => b.perBase - a.perBase).find((u) => base > 0 && base % u.perBase === 0);
     return (fits ?? item.units[0]!).code;
   };
@@ -380,7 +383,7 @@ function NewTransfer({ items, locs, onDone }: { items: Map<string, Item>; locs: 
               key={i.id}
               className="chip"
               onClick={() => {
-                setLines([...lines, { itemId: i.id, qty: i.units[0]!.perBase }]);
+                setLines([...lines, { itemId: i.id, qty: defaultUnitOf(i).perBase }]);
                 setQ('');
               }}
             >

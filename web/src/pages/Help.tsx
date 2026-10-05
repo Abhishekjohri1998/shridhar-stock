@@ -38,7 +38,7 @@ const SECTIONS: Section[] = [
     tour: 'inventory',
     roles: ['admin'],
     title: ['Inventory', 'ಸಾಮಾನು ಮತ್ತು ಸ್ಟಾಕ್'],
-    body: ['Every item, its units and prices, and its stock in each place. Open an item to correct its count, in boxes or pieces.', 'ಪ್ರತಿ ಸಾಮಾನು, ಘಟಕ ಮತ್ತು ಬೆಲೆ, ಪ್ರತಿ ಸ್ಥಳದ ಸ್ಟಾಕ್. ಎಣಿಕೆ ಸರಿಪಡಿಸಲು ಸಾಮಾನು ತೆರೆಯಿರಿ, ಬಾಕ್ಸ್ ಅಥವಾ ತುಂಡಿನಲ್ಲಿ.'],
+    body: ['Every item, its units and prices, and its stock in each place. Open an item to correct its count, in boxes or pieces. Its Stock tab sums it up: total, value at cost, last bought and sold, days left. Details holds its units (any name, a default unit), price by quantity, category and suppliers.', 'ಪ್ರತಿ ಸಾಮಾನು, ಘಟಕ ಮತ್ತು ಬೆಲೆ, ಪ್ರತಿ ಸ್ಥಳದ ಸ್ಟಾಕ್. ಎಣಿಕೆ ಸರಿಪಡಿಸಲು ಸಾಮಾನು ತೆರೆಯಿರಿ, ಬಾಕ್ಸ್ ಅಥವಾ ತುಂಡಿನಲ್ಲಿ. ಸ್ಟಾಕ್ ಟ್ಯಾಬ್: ಒಟ್ಟು, ಖರೀದಿ ಮೌಲ್ಯ, ಕೊನೆಯ ಖರೀದಿ ಮತ್ತು ಮಾರಾಟ, ಎಷ್ಟು ದಿನಕ್ಕೆ ಸಾಕು. ವಿವರ: ಘಟಕಗಳು (ಯಾವ ಹೆಸರೂ, ಮೊದಲ ಆಯ್ಕೆಯ ಘಟಕ), ಪ್ರಮಾಣದ ಪ್ರಕಾರ ಬೆಲೆ, ವರ್ಗ ಮತ್ತು ಸರಬರಾಜುದಾರರು.'],
   },
   {
     tour: 'refill',
@@ -50,7 +50,7 @@ const SECTIONS: Section[] = [
     tour: 'purchases',
     roles: ['admin'],
     title: ['Purchases', 'ಖರೀದಿ'],
-    body: ['What you ordered from suppliers. “Mark received” when the goods come: stock goes up in that place.', 'ಸರಬರಾಜುದಾರರಿಂದ ಆರ್ಡರ್ ಮಾಡಿದ್ದು. ಸಾಮಾನು ಬಂದಾಗ “ಬಂದಿದೆ ಎಂದು ಗುರುತಿಸಿ”: ಆ ಸ್ಥಳದ ಸ್ಟಾಕ್ ಹೆಚ್ಚುತ್ತದೆ.'],
+    body: ['What you ordered from suppliers. “Mark received” when the goods come: stock goes up in that place. “Order these” groups the buy list by each item’s usual supplier.', 'ಸರಬರಾಜುದಾರರಿಂದ ಆರ್ಡರ್ ಮಾಡಿದ್ದು. ಸಾಮಾನು ಬಂದಾಗ “ಬಂದಿದೆ ಎಂದು ಗುರುತಿಸಿ”: ಆ ಸ್ಥಳದ ಸ್ಟಾಕ್ ಹೆಚ್ಚುತ್ತದೆ. “ಇವನ್ನು ಆರ್ಡರ್ ಮಾಡಿ” ಖರೀದಿ ಪಟ್ಟಿಯನ್ನು ಯಾವಾಗಲೂ ಕೊಡುವವರ ಪ್ರಕಾರ ಗುಂಪು ಮಾಡುತ್ತದೆ.'],
   },
   {
     tour: 'transfers',

@@ -4,7 +4,10 @@ import {
   ADJUST_REASONS,
   blankItemForm,
   blankUnit,
+  defaultUnitOf,
   describeQty,
+  formatRupees,
+  qtyInUnit,
   formToInput,
   isLow,
   itemToForm,
@@ -14,16 +17,19 @@ import {
   type AdjustReason,
   type Item,
   type ItemForm,
+  type ItemSupplierRow,
+  type StockInfo,
+  type Supplier,
   type Location,
   type MsgKey,
   type StockLevel,
   type StockMove,
   type UnitForm,
 } from '@stock/core';
-import { api } from '../../lib/api';
+import { api, http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
-import { Loading, Select, Table, Tabs, useBi } from '../../components/ui';
+import { Loading, Select, Table, Tabs, useBi, when } from '../../components/ui';
 import { lowWords } from './Inventory';
 
 type Tab = 'details' | 'stock';
@@ -40,20 +46,29 @@ export function InventoryItemPage({ readOnly = false }: { readOnly?: boolean }) 
   const [tab, setTab] = useState<Tab>('stock');
   const live = useLive('stock', 'items');
   const { value, error, reload } = useLoad(async () => {
-    const [locs, item, stock] = await Promise.all([api.locations(), id ? api.item(id) : Promise.resolve(null), id ? api.stock() : Promise.resolve([] as StockLevel[])]);
-    return { locs: locs.filter((l) => l.active), item, stock: stock.filter((s) => s.itemId === id) };
+    const none = { info: null as StockInfo | null, suppliers: [] as ItemSupplierRow[] };
+    const [locs, item, stock, cats, sups, about] = await Promise.all([
+      api.locations(),
+      id ? api.item(id) : Promise.resolve(null),
+      id ? api.stock() : Promise.resolve([] as StockLevel[]),
+      readOnly ? Promise.resolve([] as string[]) : api.categories().catch(() => [] as string[]),
+      readOnly ? Promise.resolve([] as Supplier[]) : http.get<Supplier[]>('/admin/suppliers').catch(() => [] as Supplier[]),
+      id && !readOnly ? api.itemInfo(id).catch(() => none) : Promise.resolve(none),
+    ]);
+    return { locs: locs.filter((l) => l.active), item, stock: stock.filter((s) => s.itemId === id), cats, sups, about };
   }, [id, live]);
 
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
-  const { item, locs, stock } = value;
-  if (!item) return readOnly ? <div className="msg err">{bi('No such item', 'ಈ ಸಾಮಾನು ಇಲ್ಲ')}</div> : <ItemDetails item={null} locs={locs} />;
+  const { item, locs, stock, cats, sups, about } = value;
+  if (!item) return readOnly ? <div className="msg err">{bi('No such item', 'ಈ ಸಾಮಾನು ಇಲ್ಲ')}</div> : <ItemDetails item={null} locs={locs} cats={cats} sups={sups} found={[]} />;
   const total = totalQty(item, stock);
   return (
     <>
       <h1 className="title">{pickName(item.nameEn, item.nameKn, lang)}</h1>
       <p className="muted">
-        {bi('In all places', 'ಎಲ್ಲಾ ಕಡೆ ಸೇರಿ')}: <b className={total < 0 ? 'qty-neg' : isLow(item, total) ? 'qty-low' : ''}>{describeQty(item, total, lang)}</b>
+        {bi('In all places', 'ಎಲ್ಲಾ ಕಡೆ ಸೇರಿ')}: <b className={total < 0 ? 'qty-neg' : isLow(item, total) ? 'qty-low' : ''}>{qtyInUnit(item, defaultUnitOf(item).code, total, lang)}</b>
+        {item.units.length > 1 && <span> ({describeQty(item, total, lang)})</span>}
         {lowWords(item, lang) && ' · ' + bi('running out below', 'ಮುಗಿಯುತ್ತಿದೆ, ಇದಕ್ಕಿಂತ ಕಡಿಮೆ:') + ' ' + lowWords(item, lang)}
         {!item.active && ' · ' + bi('not sold any more', 'ಈಗ ಮಾರುವುದಿಲ್ಲ')}
       </p>
@@ -67,12 +82,37 @@ export function InventoryItemPage({ readOnly = false }: { readOnly?: boolean }) 
         onChange={setTab}
       />
       </div>
-      {tab === 'details' ? <ItemDetails item={item} locs={locs} readOnly={readOnly} onSaved={reload} /> : <ItemStock item={item} locs={locs} stock={stock} readOnly={readOnly} onChanged={reload} />}
+      {tab === 'details' ? (
+        <ItemDetails item={item} locs={locs} cats={cats} sups={sups} found={about.suppliers} readOnly={readOnly} onSaved={reload} />
+      ) : (
+        <>
+          {about.info && <StockSummary item={item} locs={locs} stock={stock} info={about.info} sups={sups} />}
+          <ItemStock item={item} locs={locs} stock={stock} readOnly={readOnly} onChanged={reload} />
+        </>
+      )}
     </>
   );
 }
 
-function ItemDetails({ item, locs, readOnly = false, onSaved }: { item: Item | null; locs: Location[]; readOnly?: boolean; onSaved?: () => void }) {
+function ItemDetails({
+  item,
+  locs,
+  cats,
+  sups,
+  found,
+  readOnly = false,
+  onSaved,
+}: {
+  item: Item | null;
+  locs: Location[];
+  /** Categories other items already use, suggested as the shop types. */
+  cats: string[];
+  sups: Supplier[];
+  /** This item's suppliers as the server sees them: added by hand, or from purchase orders. */
+  found: ItemSupplierRow[];
+  readOnly?: boolean;
+  onSaved?: () => void;
+}) {
   const { t, lang } = useSession();
   const bi = useBi();
   const nav = useNavigate();
@@ -134,17 +174,48 @@ function ItemDetails({ item, locs, readOnly = false, onSaved }: { item: Item | n
           </div>
           <label className="field">
             <span>{t('items.category')}</span>
-            <input value={form.category} onChange={(e) => set({ category: e.target.value })} />
+            <input list="item-categories" data-tour="item-category" value={form.category} onChange={(e) => set({ category: e.target.value })} />
+            <datalist id="item-categories">
+              {cats.map((c) => (
+                <option key={c} value={c} />
+              ))}
+            </datalist>
           </label>
         </div>
 
         <div className="card">
           <h2 className="subtitle mt-0">{t('items.units')}</h2>
           <p className="muted">{t('items.unitHint')}</p>
+          <p className="muted">
+            {bi(
+              'The first unit is the smallest one, the base: every other unit is a number of it. Name a unit anything the shop says: line, bundle, crate.',
+              'ಮೊದಲ ಘಟಕ ಅತಿ ಚಿಕ್ಕದು, ಮೂಲ ಘಟಕ: ಉಳಿದವು ಅದರ ಎಷ್ಟು ಎಂದು. ಅಂಗಡಿಯಲ್ಲಿ ಹೇಳುವ ಯಾವ ಹೆಸರೂ ಆಗುತ್ತದೆ: ಲೈನ್, ಬಂಡಲ್, ಕ್ರೇಟ್.',
+            )}
+          </p>
+          <label className="field" data-tour="item-default-unit">
+            <span>{bi('Default unit', 'ಮೊದಲ ಆಯ್ಕೆಯ ಘಟಕ')}</span>
+            <Select
+              value={unitChoices.some((u) => u.code === form.defaultUnit) ? form.defaultUnit : base}
+              onChange={(defaultUnit) => set({ defaultUnit, ...(form.lowQty.trim() === '' ? { lowUnit: defaultUnit } : {}) })}
+              aria-label={bi('Default unit', 'ಮೊದಲ ಆಯ್ಕೆಯ ಘಟಕ')}
+              options={unitChoices.map((u) => ({ value: u.code, label: (lang === 'kn' && u.labelKn) || u.label || u.code }))}
+            />
+          </label>
+          <p className="muted">
+            {bi(
+              'Stock is shown in it, and counting, moving, buying and billing start with it.',
+              'ಸ್ಟಾಕ್ ಇದರಲ್ಲಿ ಕಾಣುತ್ತದೆ; ಎಣಿಕೆ, ಸಾಗಣೆ, ಖರೀದಿ, ಬಿಲ್ ಇದರಿಂದ ಶುರು.',
+            )}
+          </p>
           {form.units.map((u, i) => (
             <div className="unit" key={i}>
               <div className="unit-head">
-                <b>{i === 0 ? u.code || '—' : (u.code || '?') + ' = ' + (u.perBase || '?') + ' ' + base}</b>
+                <b>
+                  {i === 0
+                    ? bi('Base unit', 'ಮೂಲ ಘಟಕ') + ': ' + (u.code || '—')
+                    : '1 ' + (u.code || '?') + ' = ' + (u.perBase || '?') + ' ' + base}
+                  {(form.defaultUnit || base) === u.code && u.code && ' · ' + bi('default', 'ಮೊದಲ ಆಯ್ಕೆ')}
+                </b>
                 {i > 0 && !readOnly && (
                   <button type="button" className="btn ghost small" onClick={() => set({ units: form.units.filter((_, j) => j !== i) })}>
                     {t('common.remove')}
@@ -166,8 +237,8 @@ function ItemDetails({ item, locs, readOnly = false, onSaved }: { item: Item | n
                 </label>
                 {i > 0 && (
                   <label className="field">
-                    <span>{t('items.perBase')}</span>
-                    <input inputMode="numeric" value={u.perBase} onChange={(e) => setUnit(i, { perBase: e.target.value })} />
+                    <span>{'1 ' + (u.code || bi('of these', 'ಇದು')) + ' = ? ' + base}</span>
+                    <input inputMode="numeric" value={u.perBase} onChange={(e) => setUnit(i, { perBase: e.target.value })} aria-label={t('items.perBase')} />
                   </label>
                 )}
                 <label className="field">
@@ -187,7 +258,13 @@ function ItemDetails({ item, locs, readOnly = false, onSaved }: { item: Item | n
                   <input inputMode="decimal" value={u.cost} onChange={(e) => setUnit(i, { cost: e.target.value })} />
                 </label>
               </div>
-              {u.slabs.length > 0 && <div className="muted mb-4">{t('items.slabs')}</div>}
+              <div className="muted mb-4" data-tour={i === 0 ? 'item-slabs' : undefined}>
+                <b>{bi('Price by quantity', 'ಪ್ರಮಾಣದ ಪ್ರಕಾರ ಬೆಲೆ')}</b>
+                {' · '}
+                {u.slabs.length
+                  ? bi('from this many ' + (u.code || '') + ' upwards, this rate for each', 'ಇಷ್ಟು ' + (u.code || '') + ' ಅಥವಾ ಹೆಚ್ಚು ಆದರೆ, ಒಂದಕ್ಕೆ ಈ ಬೆಲೆ')
+                  : bi('none: every quantity is at the price above', 'ಇಲ್ಲ: ಎಲ್ಲ ಪ್ರಮಾಣಕ್ಕೂ ಮೇಲಿನ ಬೆಲೆ')}
+              </div>
               {u.slabs.map((sl, k) => (
                 <div className="slab" key={k}>
                   <label className="field">
@@ -207,17 +284,19 @@ function ItemDetails({ item, locs, readOnly = false, onSaved }: { item: Item | n
               ))}
               {!readOnly && (
                 <button type="button" className="btn ghost small" onClick={() => setUnit(i, { slabs: [...u.slabs, { minQty: '', rate: '' }] })}>
-                  + {t('items.addSlab')}
+                  + {bi('Price from a quantity', 'ಪ್ರಮಾಣದಿಂದ ಬೆಲೆ')}
                 </button>
               )}
             </div>
           ))}
           {!readOnly && (
-            <button type="button" className="btn" onClick={() => set({ units: [...form.units, blankUnit(false)] })}>
-              + {t('items.addUnit')}
+            <button type="button" className="btn" data-tour="item-add-unit" onClick={() => set({ units: [...form.units, blankUnit(false)] })}>
+              + {bi('Add unit', 'ಘಟಕ ಸೇರಿಸಿ')}
             </button>
           )}
         </div>
+
+        {item && <ItemSuppliersCard form={form} set={set} sups={sups} found={found} readOnly={readOnly} />}
 
         <div className="card">
           <label className="field">
@@ -286,8 +365,8 @@ function ItemStock({ item, locs, stock, readOnly, onChanged }: { item: Item; loc
   /* Counted in whichever unit is on the shelf -- "4 box" -- and turned into the smallest unit
      here, which is what the ledger keeps. Typing pieces for a godown full of boxes was the
      shop's complaint. */
-  const [countUnit, setCountUnit] = useState(item.units[0]!.code);
-  const unitOk = item.units.some((u) => u.code === countUnit) ? countUnit : item.units[0]!.code;
+  const [countUnit, setCountUnit] = useState(defaultUnitOf(item).code);
+  const unitOk = item.units.some((u) => u.code === countUnit) ? countUnit : defaultUnitOf(item).code;
   const counted = actual.trim() === '' || !Number.isFinite(Number(actual)) ? null : toBase(item, unitOk, Number(actual));
   const [reason, setReason] = useState<AdjustReason>('counted');
   const [note, setNote] = useState('');
@@ -416,5 +495,147 @@ function ItemStock({ item, locs, stock, readOnly, onChanged }: { item: Item; loc
         </div>
       ))}
     </>
+  );
+}
+
+/**
+ * The top of the Stock tab: how much there is (in the default unit, and per place), what it is
+ * worth at cost, when it was last bought and sold, and how long it lasts at the recent rate.
+ */
+function StockSummary({ item, locs, stock, info, sups }: { item: Item; locs: Location[]; stock: StockLevel[]; info: StockInfo; sups: Supplier[] }) {
+  const { lang } = useSession();
+  const bi = useBi();
+  const du = defaultUnitOf(item).code;
+  const inDu = (base: number) => qtyInUnit(item, du, base, lang);
+  const supName = (id: string) => sups.find((s) => s.id === id)?.name ?? bi('a supplier', 'ಒಬ್ಬ ಸರಬರಾಜುದಾರ');
+  const qtyAt = (id: string) => stock.find((s) => s.locationId === id)?.qty ?? 0;
+  return (
+    <div className="card" data-tour="item-summary">
+      <div className="grid2">
+        <div>
+          <div className="muted">{bi('In all places', 'ಎಲ್ಲಾ ಕಡೆ ಸೇರಿ')}</div>
+          <b className={info.total < 0 ? 'qty-neg' : isLow(item, info.total) ? 'qty-low' : ''}>{inDu(info.total)}</b>
+          <div className="muted">{locs.map((l) => pickName(l.name, l.nameKn, lang) + ': ' + inDu(qtyAt(l.id))).join(' · ')}</div>
+        </div>
+        <div>
+          <div className="muted">{bi('Value at cost', 'ಖರೀದಿ ಬೆಲೆಯಲ್ಲಿ ಮೌಲ್ಯ')}</div>
+          <b>{info.valueAtCost != null ? formatRupees(info.valueAtCost) : bi('no cost saved', 'ಖರೀದಿ ಬೆಲೆ ಇಲ್ಲ')}</b>
+        </div>
+        <div>
+          <div className="muted">{bi('Last bought', 'ಕೊನೆಯ ಖರೀದಿ')}</div>
+          {info.lastBought ? (
+            <span>
+              {when(info.lastBought.at, lang)} · {supName(info.lastBought.supplierId)} · {info.lastBought.qty} {info.lastBought.unit} · {formatRupees(info.lastBought.cost)}/{info.lastBought.unit}
+            </span>
+          ) : (
+            <span className="muted">{bi('not through a purchase order yet', 'ಇನ್ನೂ ಖರೀದಿ ಆರ್ಡರ್ ಮೂಲಕ ಇಲ್ಲ')}</span>
+          )}
+        </div>
+        <div>
+          <div className="muted">{bi('Last sold', 'ಕೊನೆಯ ಮಾರಾಟ')}</div>
+          {info.lastSold ? (
+            <span>
+              {when(info.lastSold.at, lang)} · {inDu(info.lastSold.qty)}
+            </span>
+          ) : (
+            <span className="muted">{bi('not yet', 'ಇನ್ನೂ ಇಲ್ಲ')}</span>
+          )}
+        </div>
+        <div>
+          <div className="muted">{bi('Days of stock left', 'ಎಷ್ಟು ದಿನಕ್ಕೆ ಸಾಕು')}</div>
+          {info.daysLeft != null ? (
+            <span>
+              <b>{info.daysLeft}</b> {bi('days', 'ದಿನ')} · {bi('sold in the last 30 days', 'ಕಳೆದ 30 ದಿನ ಮಾರಾಟ')}: {inDu(info.sold30)}
+            </span>
+          ) : (
+            <span className="muted">{bi('no sales in the last 30 days', 'ಕಳೆದ 30 ದಿನ ಮಾರಾಟ ಇಲ್ಲ')}</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Who supplies this item: the ones the shop added by hand, which it can remove, and the ones
+ * found in its purchase orders, with the last cost and date. A new order suggests these.
+ */
+function ItemSuppliersCard({
+  form,
+  set,
+  sups,
+  found,
+  readOnly,
+}: {
+  form: ItemForm;
+  set: (patch: Partial<ItemForm>) => void;
+  sups: Supplier[];
+  found: ItemSupplierRow[];
+  readOnly: boolean;
+}) {
+  const { lang } = useSession();
+  const bi = useBi();
+  const [pick, setPick] = useState('');
+  const name = (id: string) => sups.find((s) => s.id === id)?.name ?? id;
+  const fromOrders = found.filter((r) => r.lastAt && !form.suppliers.includes(r.supplierId));
+  const row = (id: string) => found.find((r) => r.supplierId === id);
+  const choices = sups.filter((s) => s.active && !form.suppliers.includes(s.id));
+  const last = (r: ItemSupplierRow | undefined) =>
+    r?.lastAt ? ' · ' + bi('last', 'ಕೊನೆಗೆ') + ' ' + (r.lastCost != null ? formatRupees(r.lastCost) + '/' + r.lastUnit + ', ' : '') + when(r.lastAt, lang) : '';
+  return (
+    <div className="card" data-tour="item-suppliers">
+      <h2 className="subtitle mt-0">{bi('Suppliers', 'ಸರಬರಾಜುದಾರರು')}</h2>
+      <p className="muted">
+        {bi('Who brings this item. A new purchase order suggests them.', 'ಈ ಸಾಮಾನು ಯಾರು ತರುತ್ತಾರೆ. ಹೊಸ ಖರೀದಿ ಆರ್ಡರ್ ಇವರನ್ನು ಸೂಚಿಸುತ್ತದೆ.')}
+      </p>
+      {form.suppliers.length === 0 && fromOrders.length === 0 && <p className="muted">{bi('None yet.', 'ಇನ್ನೂ ಇಲ್ಲ.')}</p>}
+      {form.suppliers.map((id) => (
+        <div className="bar mb-0" key={id}>
+          <span className="grow name">
+            {name(id)}
+            <span className="muted">{last(row(id))}</span>
+          </span>
+          {!readOnly && (
+            <button type="button" className="btn ghost small" onClick={() => set({ suppliers: form.suppliers.filter((x) => x !== id) })}>
+              {bi('Remove', 'ತೆಗೆಯಿರಿ')}
+            </button>
+          )}
+        </div>
+      ))}
+      {fromOrders.map((r) => (
+        <div className="bar mb-0" key={r.supplierId}>
+          <span className="grow name">
+            {name(r.supplierId)}
+            <span className="muted">
+              {last(r)} · {bi('from purchase orders', 'ಖರೀದಿ ಆರ್ಡರ್‌ಗಳಿಂದ')}
+            </span>
+          </span>
+        </div>
+      ))}
+      {!readOnly && choices.length > 0 && (
+        <div className="bar mt-6">
+          <Select
+            value={pick}
+            onChange={setPick}
+            className="grow"
+            placeholder={bi('Choose a supplier…', 'ಸರಬರಾಜುದಾರರನ್ನು ಆರಿಸಿ…')}
+            aria-label={bi('Supplier', 'ಸರಬರಾಜುದಾರ')}
+            options={choices.map((s) => ({ value: s.id, label: s.name, hint: s.phone }))}
+          />
+          <button
+            type="button"
+            className="btn"
+            disabled={!pick}
+            onClick={() => {
+              set({ suppliers: [...form.suppliers, pick] });
+              setPick('');
+            }}
+          >
+            + {bi('Add supplier', 'ಸರಬರಾಜುದಾರ ಸೇರಿಸಿ')}
+          </button>
+        </div>
+      )}
+      {!readOnly && sups.length === 0 && <p className="muted">{bi('Add suppliers under Purchases, Suppliers first.', 'ಮೊದಲು ಖರೀದಿ → ಸರಬರಾಜುದಾರರಲ್ಲಿ ಸೇರಿಸಿ.')}</p>}
+    </div>
   );
 }

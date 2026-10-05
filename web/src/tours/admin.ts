@@ -283,6 +283,13 @@ export const itemTour = tour('item', ['An item', 'ಒಂದು ಸಾಮಾನ�
     ['That tab opens.', 'ಆ ಟ್ಯಾಬ್ ತೆರೆಯುತ್ತದೆ.'],
   ),
   step(
+    'item-summary',
+    ['Stock at a glance', 'ಸ್ಟಾಕ್ ಒಂದೇ ನೋಟದಲ್ಲಿ'],
+    ['The total in the default unit, each place, its value at cost, last bought and last sold.', 'ಮೊದಲ ಆಯ್ಕೆಯ ಘಟಕದಲ್ಲಿ ಒಟ್ಟು, ಪ್ರತಿ ಸ್ಥಳ, ಖರೀದಿ ಬೆಲೆಯಲ್ಲಿ ಮೌಲ್ಯ, ಕೊನೆಯ ಖರೀದಿ ಮತ್ತು ಮಾರಾಟ.'],
+    ['Days left is the stock divided by the last 30 days of sales.', 'ಎಷ್ಟು ದಿನಕ್ಕೆ ಸಾಕು ಎಂಬುದು ಕಳೆದ 30 ದಿನದ ಮಾರಾಟದಿಂದ ಲೆಕ್ಕ.'],
+    ['Nothing: it is worked out for you.', 'ಏನೂ ಇಲ್ಲ: ಇದು ತಾನಾಗಿ ಲೆಕ್ಕವಾಗುತ್ತದೆ.'],
+  ),
+  step(
     'item-places',
     ['Stock in each place', 'ಪ್ರತಿ ಸ್ಥಳದ ಸ್ಟಾಕ್'],
     ['The shop and each godown, with the rack it sits on.', 'ಅಂಗಡಿ ಮತ್ತು ಪ್ರತಿ ಗೋದಾಮು, ಅದು ಇರುವ ರ‍್ಯಾಕ್ ಜೊತೆ.'],
@@ -309,6 +316,20 @@ export const itemTour = tour('item', ['An item', 'ಒಂದು ಸಾಮಾನ�
     ['Saves the count for that place.', 'ಆ ಸ್ಥಳದ ಎಣಿಕೆ ಉಳಿಸುತ್ತದೆ.'],
     ['The place’s stock becomes your number.', 'ಆ ಸ್ಥಳದ ಸ್ಟಾಕ್ ನಿಮ್ಮ ಸಂಖ್ಯೆ ಆಗುತ್ತದೆ.'],
     ['One line says what changed, and a “Counted” line appears in Last changes.', 'ಏನು ಬದಲಾಯಿತು ಎಂದು ಒಂದು ಸಾಲು, “ಎಣಿಸಿದ್ದು” ಸಾಲು ಕೊನೆಯ ಬದಲಾವಣೆಗಳಲ್ಲಿ ಬರುತ್ತದೆ.'],
+  ),
+  step(
+    'item-default-unit',
+    ['Units and the default unit (Details)', 'ಘಟಕಗಳು ಮತ್ತು ಮೊದಲ ಆಯ್ಕೆಯ ಘಟಕ (ವಿವರ)'],
+    ['On Details: “+ Add unit” with any name, as “1 line = 12 pc”, and which unit comes first.', 'ವಿವರದಲ್ಲಿ: ಯಾವ ಹೆಸರಿನಲ್ಲೂ “+ ಘಟಕ ಸೇರಿಸಿ”, “1 ಲೈನ್ = 12 ಪೀಸ್” ಹಾಗೆ, ಮತ್ತು ಯಾವುದು ಮೊದಲು.'],
+    ['Each unit can have “Price by quantity”: from this many, this rate; plus the lowest and highest rate.', 'ಪ್ರತಿ ಘಟಕಕ್ಕೆ “ಪ್ರಮಾಣದ ಪ್ರಕಾರ ಬೆಲೆ”: ಇಷ್ಟರಿಂದ ಈ ಬೆಲೆ; ಜೊತೆಗೆ ಕನಿಷ್ಠ ಮತ್ತು ಗರಿಷ್ಠ ಬೆಲೆ.'],
+    ['Nothing changes until you tap Save.', 'ಉಳಿಸಿ ಒತ್ತುವವರೆಗೆ ಏನೂ ಬದಲಾಗುವುದಿಲ್ಲ.'],
+  ),
+  step(
+    'item-suppliers',
+    ['Suppliers of this item (Details)', 'ಈ ಸಾಮಾನಿನ ಸರಬರಾಜುದಾರರು (ವಿವರ)'],
+    ['Who brings it: added by hand, and found in past purchase orders with the last cost.', 'ಯಾರು ತರುತ್ತಾರೆ: ಕೈಯಾರೆ ಸೇರಿಸಿದವರು, ಮತ್ತು ಹಿಂದಿನ ಖರೀದಿ ಆರ್ಡರ್‌ಗಳಿಂದ ಕೊನೆಯ ಬೆಲೆಯೊಂದಿಗೆ.'],
+    ['A new purchase order suggests them for this item.', 'ಹೊಸ ಖರೀದಿ ಆರ್ಡರ್ ಈ ಸಾಮಾನಿಗೆ ಇವರನ್ನು ಸೂಚಿಸುತ್ತದೆ.'],
+    ['Add supplier puts one on the list; Save keeps it.', 'ಸರಬರಾಜುದಾರ ಸೇರಿಸಿ ಪಟ್ಟಿಗೆ ಹಾಕುತ್ತದೆ; ಉಳಿಸಿ ಇಡುತ್ತದೆ.'],
   ),
   step(
     'item-moves',
@@ -394,6 +415,13 @@ export const purchasesTour = tour('purchases', ['Purchases', 'ಖರೀದಿ'],
     ['Which orders to show, and your list of suppliers.', 'ಯಾವ ಆರ್ಡರ್ ತೋರಿಸಬೇಕು, ಮತ್ತು ಸರಬರಾಜುದಾರರ ಪಟ್ಟಿ.'],
     ['Open is what has not arrived yet.', 'ತೆರೆದವು ಎಂದರೆ ಇನ್ನೂ ಬಾರದವು.'],
     ['The list below changes. Suppliers lets you add a phone and notes.', 'ಕೆಳಗಿನ ಪಟ್ಟಿ ಬದಲಾಗುತ್ತದೆ. ಸರಬರಾಜುದಾರರಲ್ಲಿ ಫೋನ್ ಮತ್ತು ಟಿಪ್ಪಣಿ ಸೇರಿಸಬಹುದು.'],
+  ),
+  step(
+    'purchases-groups',
+    ['Order these, by supplier', 'ಇವನ್ನು ಆರ್ಡರ್ ಮಾಡಿ, ಸರಬರಾಜುದಾರರ ಪ್ರಕಾರ'],
+    ['From the buy list, items are grouped by who usually supplies them.', 'ಖರೀದಿ ಪಟ್ಟಿಯಿಂದ, ಸಾಮಾನುಗಳು ಯಾವಾಗಲೂ ಕೊಡುವವರ ಪ್ರಕಾರ ಗುಂಪಾಗಿವೆ.'],
+    ['One order is one supplier; under each item its suppliers and last cost show.', 'ಒಂದು ಆರ್ಡರ್ ಒಬ್ಬ ಸರಬರಾಜುದಾರ; ಪ್ರತಿ ಸಾಮಾನಿನ ಕೆಳಗೆ ಕೊಡುವವರು ಮತ್ತು ಕೊನೆಯ ಬೆಲೆ.'],
+    ['Tapping a group fills the order with its items and that supplier.', 'ಗುಂಪು ಒತ್ತಿದರೆ ಅದರ ಸಾಮಾನು ಮತ್ತು ಸರಬರಾಜುದಾರ ಆರ್ಡರ್‌ಗೆ ಬರುತ್ತಾರೆ.'],
   ),
   step(
     'purchases-card',
