@@ -38,6 +38,7 @@ const PATHS = {
   pen: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
   chevron: 'M9 6l6 6-6 6',
   chevronDown: 'M6 9l6 6 6-6',
+  help: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9.3a2.6 2.6 0 1 1 3.6 2.4c-.7.3-1.1.9-1.1 1.6v.4M12 17h.01',
 } as const;
 
 export type IconName = keyof typeof PATHS;

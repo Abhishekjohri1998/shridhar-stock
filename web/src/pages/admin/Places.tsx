@@ -13,7 +13,7 @@ export function PlacesPage() {
     <>
       <h1 className="title">{t('places.title')}</h1>
       <div className="bar">
-        <button className="btn primary" onClick={() => setEditing('new')}>
+        <button className="btn primary" data-tour="places-new" onClick={() => setEditing('new')}>
           + {t('places.new')}
         </button>
       </div>

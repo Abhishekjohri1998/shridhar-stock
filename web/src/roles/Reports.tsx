@@ -28,7 +28,7 @@ interface Report {
 
 const day = (offset: number) => new Date(Date.now() + 5.5 * 3600_000 - offset * 86_400_000).toISOString().slice(0, 10);
 
-/** Reports for the owner and the admin. Read only; every table downloads for Excel. */
+/** Reports for the admin. Read only; every table downloads for Excel. */
 export function ReportsPage() {
   const bi = useBi();
   const { lang } = useSession();
@@ -47,19 +47,20 @@ export function ReportsPage() {
   return (
     <>
       <h1 className="title">{bi('Reports', 'ವರದಿಗಳು')}</h1>
-      <div className="bar">
+      <div className="bar" data-tour="reports-dates">
         <label className="check">
           {bi('From', 'ಇಂದ')} <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
         </label>
         <label className="check">
           {bi('To', 'ವರೆಗೆ')} <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </label>
-        <div className="chips">
+        <div className="chips" data-tour="reports-quick">
           <button className="chip" onClick={() => quick(0)}>{bi('Today', 'ಇಂದು')}</button>
           <button className="chip" onClick={() => quick(6)}>{bi('7 days', '7 ದಿನ')}</button>
           <button className="chip" onClick={() => quick(29)}>{bi('30 days', '30 ದಿನ')}</button>
         </div>
       </div>
+      <div data-tour="reports-tabs">
       <Tabs
         value={tab}
         onChange={setTab}
@@ -71,11 +72,12 @@ export function ReportsPage() {
           { key: 'trips', label: bi('Trips by vehicle', 'ವಾಹನದ ಪ್ರಕಾರ ಓಡಾಟ') },
         ]}
       />
+      </div>
       {error && <div className="msg err">{error}</div>}
       {!r && !error && <Loading />}
       {r && tab === 'sales' && (
         <>
-          <div className="tiles">
+          <div className="tiles" data-tour="reports-sales">
             <div className="tile">
               <b><Money v={r.sales.total} /></b>
               {bi('All takings', 'ಒಟ್ಟು ಮಾರಾಟ')}
@@ -105,7 +107,7 @@ export function ReportsPage() {
             </p>
           )}
           <div className="bar my-10">
-            <button className="btn small" onClick={() => csv('sales')}>⬇ {bi('Excel', 'ಎಕ್ಸೆಲ್')}</button>
+            <button className="btn small" data-tour="reports-excel" onClick={() => csv('sales')}>⬇ {bi('Excel', 'ಎಕ್ಸೆಲ್')}</button>
             <button className="btn small" onClick={() => csv('bills')}>⬇ {bi('Every bill line', 'ಎಲ್ಲ ಬಿಲ್ ಸಾಲು')}</button>
           </div>
           {r.sales.rows.length === 0 ? (

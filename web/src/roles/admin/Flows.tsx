@@ -31,16 +31,20 @@ export function BillsPage() {
   return (
     <>
       <h1 className="title">{bi('Bills from billing', 'ಬಿಲ್ಲಿಂಗ್‌ನಿಂದ ಬಂದ ಬಿಲ್‌ಗಳು')}</h1>
-      <p className="muted">{bi('Read from the billing app. Each line shows how it moved stock.', 'ಬಿಲ್ಲಿಂಗ್ ಆ್ಯಪ್‌ನಿಂದ ಓದಲಾಗಿದೆ. ಪ್ರತಿ ಸಾಲು ಸ್ಟಾಕ್ ಹೇಗೆ ಬದಲಾಯಿತು ಎಂದು ತೋರಿಸುತ್ತದೆ.')}</p>
-      {value.length === 0 && <Empty>{bi('No bills yet.', 'ಇನ್ನೂ ಬಿಲ್‌ಗಳಿಲ್ಲ.')}</Empty>}
+      <p className="muted" data-tour="bills-intro">{bi('Read from the billing app. Each line shows how it moved stock.', 'ಬಿಲ್ಲಿಂಗ್ ಆ್ಯಪ್‌ನಿಂದ ಓದಲಾಗಿದೆ. ಪ್ರತಿ ಸಾಲು ಸ್ಟಾಕ್ ಹೇಗೆ ಬದಲಾಯಿತು ಎಂದು ತೋರಿಸುತ್ತದೆ.')}</p>
+      {value.length === 0 && (
+        <Empty tour="bills-card">
+          {bi('No bills yet. Bills made in the billing app show here by themselves.', 'ಇನ್ನೂ ಬಿಲ್‌ಗಳಿಲ್ಲ. ಬಿಲ್ಲಿಂಗ್ ಆ್ಯಪ್‌ನಲ್ಲಿ ಮಾಡಿದ ಬಿಲ್‌ಗಳು ಇಲ್ಲಿ ತಾನಾಗಿ ಬರುತ್ತವೆ.')}
+        </Empty>
+      )}
       {value.map((b) => (
-        <div className="card" key={b.no}>
+        <div className="card" key={b.no} data-tour="bills-card">
           <div className="bar between">
             <span className="name">
               #{b.no} · {b.customer?.name ?? bi('walk-in', 'ಗ್ರಾಹಕ')}
             </span>
             <span className="muted">
-              {when(b.at, lang)} · <Money v={b.rounded} />
+              {when(b.at, lang)} · <span data-tour="bills-total"><Money v={b.rounded} /></span>
               {b.roundOff !== 0 && (
                 <span className="muted">
                   {' '}
@@ -49,11 +53,6 @@ export function BillsPage() {
                 </span>
               )}
               {b.balance > 0 && <span className="pill warn"> {bi('due', 'ಬಾಕಿ')} {formatRupees(b.balance)}</span>}
-              {me?.role === 'admin' && b.customer && !b.cancelled && (
-                <Link className="btn small ml-8" to={'/admin/deliveries?bill=' + b.no}>
-                  🛵 {bi('Deliver', 'ಡೆಲಿವರಿ')}
-                </Link>
-              )}
             </span>
           </div>
           <Table className="list plain">
@@ -73,7 +72,7 @@ export function BillsPage() {
                     )}
                   </td>
                   <td className="num">{formatRupees(l.amount)}</td>
-                  <td className="col-mid">
+                  <td className="col-mid" data-tour="bills-state">
                     <Status s={l.state} label={statusWord(l.state, lang, true)} />
                     {l.reading && l.state === 'read-auto' && <span className="muted"> {Math.round(l.reading.confidence * 100)}%</span>}
                   </td>
@@ -81,62 +80,6 @@ export function BillsPage() {
               ))}
             </tbody>
           </Table>
-        </div>
-      ))}
-    </>
-  );
-}
-
-// ---------------------------------------------------------------- customer requests
-
-export function RequestsPage() {
-  const bi = useBi();
-  const liveOrders = useLive('orders');
-  const { lang } = useSession();
-  const [version, setVersion] = useState(0);
-  const { items } = useCatalog(version);
-  const { value, error } = useLoad(async () => {
-    const [orders, customers] = await Promise.all([http.get<OrderRequest[]>('/admin/orders'), http.get<{ key: string; name: string }[]>('/admin/customers')]);
-    return { orders, customers };
-  }, [version, liveOrders]);
-  if (error) return <div className="msg err">{error}</div>;
-  if (!value) return <Loading />;
-  const set = async (o: OrderRequest, status: 'done' | 'declined') => {
-    await http.post('/admin/orders/' + o.id, { status });
-    setVersion((v) => v + 1);
-  };
-  return (
-    <>
-      <h1 className="title">{bi('Customer requests', 'ಗ್ರಾಹಕರ ಬೇಡಿಕೆಗಳು')}</h1>
-      <p className="muted">{bi('Make the bill in the billing app, then mark it billed here.', 'ಬಿಲ್ಲಿಂಗ್ ಆ್ಯಪ್‌ನಲ್ಲಿ ಬಿಲ್ ಮಾಡಿ, ನಂತರ ಇಲ್ಲಿ ಗುರುತಿಸಿ.')}</p>
-      {value.orders.map((o) => (
-        <div className="card" key={o.id}>
-          <div className="bar between">
-            <span className="name">{value.customers.find((c) => c.key === o.customerKey)?.name ?? o.customerKey}</span>
-            <Status s={o.status} label={statusWord(o.status, lang)} />
-          </div>
-          <div className="muted">
-            {when(o.at, lang)}
-            {o.note && ' · “' + o.note + '”'}
-          </div>
-          <ul className="lines">
-            {o.lines.map((l, i) => (
-              <li key={i}>
-                {l.ink && <InkView ink={l.ink} height={26} />} {l.itemId ? itemName(items, l.itemId, lang) : l.text}
-                {l.qty != null && ' · ' + l.qty + ' ' + (l.unit ?? '')}
-              </li>
-            ))}
-          </ul>
-          {o.status === 'new' && (
-            <div className="bar">
-              <button className="btn primary" onClick={() => set(o, 'done')}>
-                {bi('Billed', 'ಬಿಲ್ ಆಯಿತು')}
-              </button>
-              <button className="btn" onClick={() => set(o, 'declined')}>
-                {bi('Decline', 'ನಿರಾಕರಿಸಿ')}
-              </button>
-            </div>
-          )}
         </div>
       ))}
     </>
@@ -163,7 +106,6 @@ export function SettingsPage() {
     () =>
       http.get<{
         link: { ok: boolean; message?: string; lastBillNo?: number; at?: string; lastOkAt?: string } | null;
-        reader: { enabled: boolean; message?: string; monthLines: number; monthCostRupees: number; capRupees: number } | null;
       }>('/admin/summary'),
     [version],
   );
@@ -182,7 +124,7 @@ export function SettingsPage() {
   return (
     <>
       <h1 className="title">{bi('Settings', 'ಸೆಟ್ಟಿಂಗ್ಸ್')}</h1>
-      <div className="card">
+      <div className="card" data-tour="settings-link">
         <h2 className="subtitle mt-0">{bi('Link to billing', 'ಬಿಲ್ಲಿಂಗ್ ಸಂಪರ್ಕ')}</h2>
         <p>
           {bi('Bills are read from the billing server every 3 seconds while a bill is open, and every 15 seconds when the shop is quiet. Stock never writes to billing.', 'ಬಿಲ್ ತೆರೆದಿರುವಾಗ ಪ್ರತಿ 3 ಸೆಕೆಂಡಿಗೆ, ಅಂಗಡಿ ಶಾಂತವಾಗಿರುವಾಗ ಪ್ರತಿ 15 ಸೆಕೆಂಡಿಗೆ ಬಿಲ್ಲಿಂಗ್ ಸರ್ವರ್‌ನಿಂದ ಬಿಲ್‌ಗಳನ್ನು ಓದಲಾಗುತ್ತದೆ. ಸ್ಟಾಕ್ ಬಿಲ್ಲಿಂಗ್‌ಗೆ ಬರೆಯುವುದಿಲ್ಲ.')}
@@ -197,12 +139,12 @@ export function SettingsPage() {
           <p className="muted">{bi('Not set up. On the server, BILLING_URL and BILLING_PIN go in server/.env.', 'ಹೊಂದಿಸಿಲ್ಲ. ಸರ್ವರ್‌ನ server/.env ನಲ್ಲಿ BILLING_URL ಮತ್ತು BILLING_PIN.')}</p>
         )}
         {syncMsg && <div className="msg ok">{syncMsg}</div>}
-        <button className="btn" onClick={syncNow}>
+        <button className="btn" onClick={syncNow} data-tour="settings-sync">
           ↻ {bi('Read bills now', 'ಈಗಲೇ ಬಿಲ್ ಓದಿ')}
         </button>
       </div>
       <div className="card">
-        <h2 className="subtitle mt-0">{bi('Rounding off', 'ರೌಂಡ್ ಆಫ್')}</h2>
+        <h2 className="subtitle mt-0" data-tour="settings-round">{bi('Rounding off', 'ರೌಂಡ್ ಆಫ್')}</h2>
         <p>
           {bi('Bill totals on the worker’s screen, the bills list and reports are shown rounded to this, with the round-off as its own line.', 'ಕೆಲಸಗಾರರ ಪರದೆ, ಬಿಲ್ ಪಟ್ಟಿ ಮತ್ತು ವರದಿಗಳಲ್ಲಿ ಬಿಲ್ ಮೊತ್ತವನ್ನು ಇದಕ್ಕೆ ರೌಂಡ್ ಮಾಡಿ, ರೌಂಡ್ ಆಫ್ ಬೇರೆ ಸಾಲಿನಲ್ಲಿ ತೋರಿಸಲಾಗುತ್ತದೆ.')}
         </p>
@@ -213,35 +155,6 @@ export function SettingsPage() {
             </button>
           ))}
         </div>
-      </div>
-      <div className="card">
-        <h2 className="subtitle mt-0">{bi('Handwriting reader', 'ಕೈಬರಹ ಓದುವಿಕೆ')}</h2>
-        <p>
-          {bi(
-            'Handwritten bill lines are read by Claude, choosing only from your items. Only the writing is sent, never the customer or amounts. Sure readings update stock; unsure ones come to “To confirm”.',
-            'ಕೈಬರಹದ ಬಿಲ್ ಸಾಲುಗಳನ್ನು Claude ಓದುತ್ತದೆ, ನಿಮ್ಮ ಸಾಮಾನುಗಳಿಂದ ಮಾತ್ರ ಆರಿಸುತ್ತದೆ. ಬರಹ ಮಾತ್ರ ಕಳುಹಿಸಲಾಗುತ್ತದೆ, ಗ್ರಾಹಕ ಅಥವಾ ಮೊತ್ತವಲ್ಲ.',
-          )}
-        </p>
-        {value?.reader && (
-          <p>
-            {value.reader.monthLines} {bi('lines this month', 'ಸಾಲು ಈ ತಿಂಗಳು')} · ≈ {formatRupees(value.reader.monthCostRupees)} / {formatRupees(value.reader.capRupees)} {bi('limit', 'ಮಿತಿ')}
-          </p>
-        )}
-        <p className="muted">{value?.reader?.message ?? ''}</p>
-        <button
-          className="btn"
-          onClick={async () => {
-            try {
-              const r = await http.post<{ read: number; auto: number; queued: number; skipped: string | null }>('/admin/reader/run', {});
-              setSyncMsg(r.skipped === 'no-reader' ? bi('No reader key set on the server.', 'ಸರ್ವರ್‌ನಲ್ಲಿ ಕೀ ಇಲ್ಲ.') : bi('Read ', 'ಓದಿದ್ದು ') + r.read + ' · ' + bi('by themselves ', 'ತಾನಾಗಿ ') + r.auto + ' · ' + bi('to confirm ', 'ಖಚಿತಪಡಿಸಬೇಕು ') + r.queued);
-            } catch (e) {
-              setSyncMsg((e as Error).message);
-            }
-            setVersion((v) => v + 1);
-          }}
-        >
-          ✎ {bi('Read waiting handwriting now', 'ಬಾಕಿ ಕೈಬರಹ ಈಗ ಓದಿ')}
-        </button>
       </div>
     </>
   );

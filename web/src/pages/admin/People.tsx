@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { ROLES, pickName, type MsgKey, type Person, type Role } from '@stock/core';
+import { isActiveRole, ROLES, pickName, type MsgKey, type Person, type Role } from '@stock/core';
 import { api, http } from '../../lib/api';
 import { useLoad, useSession } from '../../lib/session';
 import { Select, Table, useBi } from '../../components/ui';
@@ -21,7 +21,7 @@ export function PeoplePage() {
       <h1 className="title">{t('people.title')}</h1>
       {msg && <div className="msg ok">{msg}</div>}
       <div className="bar">
-        <button className="btn primary" onClick={() => setEditing('new')}>
+        <button className="btn primary" data-tour="people-new" onClick={() => setEditing('new')}>
           + {t('people.new')}
         </button>
       </div>
@@ -37,7 +37,7 @@ export function PeoplePage() {
           }}
         />
       )}
-      <div className="scroll">
+      <div className="scroll" data-tour="people-list">
         <Table className="list">
           <tbody>
             {value.people.map((p) => (
@@ -114,18 +114,23 @@ function PersonForm({
         </label>
         <label className="field">
           <span>{t('people.role')}</span>
-          {/* Suppliers no longer sign in: the vendor role is only shown for someone who has it. */}
+          {/* Only the roles that sign in, plus a removed role for someone who still has it. */}
           <Select
             value={role}
             onChange={setRole}
             aria-label={t('people.role')}
-            options={ROLES.filter((r) => r !== 'vendor' || person?.role === 'vendor').map((r) => ({ value: r, label: t(('role.' + r) as MsgKey) }))}
+            options={ROLES.filter((r) => isActiveRole(r) || person?.role === r).map((r) => ({ value: r, label: t(('role.' + r) as MsgKey) }))}
           />
         </label>
         {role === 'vendor' && (
           <p className="muted field">
             {bi('A supplier from before. Suppliers do not sign in any more: they are kept under Purchases.', 'ಹಿಂದಿನ ಸರಬರಾಜುದಾರ. ಸರಬರಾಜುದಾರರು ಈಗ ಒಳಗೆ ಬರುವುದಿಲ್ಲ: ಅವರು ಖರೀದಿಯಲ್ಲಿ ಇದ್ದಾರೆ.')}
             {person?.linkedId && suppliers.find((x) => x.id === person.linkedId) && ' · ' + suppliers.find((x) => x.id === person.linkedId)!.name}
+          </p>
+        )}
+        {role !== 'vendor' && !isActiveRole(role) && (
+          <p className="muted field">
+            {bi('This login is no longer used, so this person cannot sign in. Choose Admin, Shop worker or Godown to let them in again.', 'ಈ ಲಾಗಿನ್ ಈಗ ಬಳಕೆಯಲ್ಲಿಲ್ಲ, ಹಾಗಾಗಿ ಇವರು ಒಳಗೆ ಬರಲಾಗದು. ಮತ್ತೆ ಒಳಗೆ ಬರಲು ಆಡ್ಮಿನ್, ಅಂಗಡಿ ಕೆಲಸಗಾರ ಅಥವಾ ಗೋದಾಮು ಆರಿಸಿ.')}
           </p>
         )}
         {role === 'godown' && (

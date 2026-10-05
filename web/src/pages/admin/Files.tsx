@@ -45,7 +45,7 @@ export function FilesPage({ readOnly = false }: { readOnly?: boolean }) {
       <p className="muted">{t('files.hint')}</p>
       {error && <div className="msg err">{error}</div>}
 
-      <div className="card">
+      <div className="card" data-tour="files-download">
         <div className="bar">
           <span className="grow name">{t('files.items')}</span>
           <button className="btn" onClick={() => guard(() => download('/export/items.csv', 'items.csv'))}>
@@ -82,7 +82,7 @@ export function FilesPage({ readOnly = false }: { readOnly?: boolean }) {
       </div>
 
       {!readOnly && (
-      <div className="card">
+      <div className="card" data-tour="files-import">
         <h2 className="subtitle mt-0">{t('files.import')}</h2>
         {done && <div className="msg ok">{done}</div>}
         <label className="field">

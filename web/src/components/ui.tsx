@@ -127,8 +127,13 @@ export function Loading() {
   return <p className="muted">{t('common.loading')}</p>;
 }
 
-export function Empty({ children }: { children: ReactNode }) {
-  return <div className="card muted">{children}</div>;
+/** An empty screen, saying what to do next. `tour` names it for the guided tour. */
+export function Empty({ children, tour }: { children: ReactNode; tour?: string }) {
+  return (
+    <div className="card muted" data-tour={tour}>
+      {children}
+    </div>
+  );
 }
 
 /**

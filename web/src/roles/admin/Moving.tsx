@@ -75,7 +75,7 @@ export function RefillPage() {
     setError2('');
     try {
       const t = await http.post<Transfer>('/admin/transfers', { from, to: shop!.id, lines });
-      setMsg(bi('Asked ', 'ಕೇಳಲಾಗಿದೆ: ') + placeName(locs, from, lang) + ' · ' + bi('transfer', 'ಸಾಗಣೆ') + ' #' + t.no + ' · ' + lines.length + bi(' items', ' ಸಾಮಾನು'));
+      setMsg(bi('Request sent to ', 'ಬೇಡಿಕೆ ಕಳುಹಿಸಲಾಗಿದೆ: ') + placeName(locs, from, lang) + ' · ' + bi('transfer', 'ಸಾಗಣೆ') + ' #' + t.no + ' · ' + lines.length + bi(' items. The godown sees it on their screen now.', ' ಸಾಮಾನು. ಗೋದಾಮಿನವರ ಪರದೆಯಲ್ಲಿ ಈಗ ಕಾಣುತ್ತದೆ.'));
       setEdits({});
       setOff({});
       setVersion((v) => v + 1);
@@ -90,8 +90,8 @@ export function RefillPage() {
 
   return (
     <>
-      <h1 className="title">{bi('Running low: plan trips', 'ಮುಗಿಯುತ್ತಿರುವುದು: ತರಿಸುವ ಯೋಜನೆ')}</h1>
-      <p className="muted">
+      <h1 className="title">{bi('Bring from godown', 'ಗೋದಾಮಿನಿಂದ ತರಿಸಿ')}</h1>
+      <p className="muted" data-tour="refill-intro">
         {bi(
           'Everything short on the shop shelf, grouped by the godown that has most of it, so one trip brings it all. Quantities top the shelf up to twice the item’s running-out level; change any of them before asking.',
           'ಅಂಗಡಿಯಲ್ಲಿ ಕಡಿಮೆ ಇರುವುದೆಲ್ಲ, ಹೆಚ್ಚು ಇರುವ ಗೋದಾಮಿನಂತೆ ಗುಂಪು: ಒಂದೇ ಬಾರಿಗೆ ಎಲ್ಲ. ಕೇಳುವ ಮೊದಲು ಪ್ರಮಾಣ ಬದಲಿಸಬಹುದು.',
@@ -104,17 +104,21 @@ export function RefillPage() {
           {pending.size} {bi('low items are already asked for or on the way, and are not shown again.', 'ಕಡಿಮೆ ಸಾಮಾನು ಈಗಾಗಲೇ ಕೇಳಲಾಗಿದೆ ಅಥವಾ ದಾರಿಯಲ್ಲಿದೆ.')}
         </p>
       )}
-      {trips.length === 0 && value.refill.buy.length === 0 && <Empty>{bi('Nothing is running low.', 'ಏನೂ ಮುಗಿಯುತ್ತಿಲ್ಲ.')}</Empty>}
+      {trips.length === 0 && value.refill.buy.length === 0 && (
+        <Empty tour="refill-trip">
+          {bi('Nothing is running low. When an item goes below its level, it shows here, ready to bring from a godown.', 'ಏನೂ ಮುಗಿಯುತ್ತಿಲ್ಲ. ಸಾಮಾನು ಮಿತಿಗಿಂತ ಕಡಿಮೆಯಾದಾಗ, ಗೋದಾಮಿನಿಂದ ತರಿಸಲು ಇಲ್ಲಿ ಕಾಣುತ್ತದೆ.')}
+        </Empty>
+      )}
       {trips.map((trip) => {
         const lines = trip.lines.filter((l) => !off[key(trip.from, l.itemId)]).map((l) => ({ itemId: l.itemId, qty: edits[key(trip.from, l.itemId)] ?? l.qty }));
         return (
-          <div className="card" key={trip.from}>
+          <div className="card" key={trip.from} data-tour="refill-trip">
             <div className="bar between">
               <span className="name">
                 🚚 {bi('From', 'ಇಂದ')} {placeName(locs, trip.from, lang)} · {lines.length} {bi('items', 'ಸಾಮಾನು')}
               </span>
-              <button className="btn primary" disabled={!lines.length || lines.some((l) => !(l.qty > 0))} onClick={() => send(trip.from, lines)}>
-                {bi('Ask the godown to send', 'ಗೋದಾಮಿಗೆ ಕಳುಹಿಸಲು ಹೇಳಿ')}
+              <button className="btn primary" data-tour="refill-send" disabled={!lines.length || lines.some((l) => !(l.qty > 0))} onClick={() => send(trip.from, lines)}>
+                {bi('Send request', 'ಬೇಡಿಕೆ ಕಳುಹಿಸಿ')}
               </button>
             </div>
             <div className="scroll">
@@ -141,9 +145,9 @@ export function RefillPage() {
                         </td>
                         <td className={'num ' + (l.shopQty < 0 ? 'qty-neg' : 'qty-low')}>{qtyText(items, l.itemId, l.shopQty, lang)}</td>
                         <td className="num">{qtyText(items, l.itemId, l.godownQty, lang)}</td>
-                        <td>{removed ? '—' : <QtyInput item={it} base={edits[k] ?? l.qty} onChange={(b) => setEdits({ ...edits, [k]: Math.min(b, l.godownQty) })} />}</td>
+                        <td data-tour="refill-qty">{removed ? '—' : <QtyInput item={it} base={edits[k] ?? l.qty} onChange={(b) => setEdits({ ...edits, [k]: Math.min(b, l.godownQty) })} />}</td>
                         <td>
-                          <button className="btn ghost small" onClick={() => setOff({ ...off, [k]: !removed })}>
+                          <button className="btn ghost small" data-tour="refill-remove" aria-label={removed ? undefined : bi('Leave this out', 'ಇದನ್ನು ಬಿಡಿ')} onClick={() => setOff({ ...off, [k]: !removed })}>
                             {removed ? bi('Add back', 'ಮತ್ತೆ ಸೇರಿಸಿ') : '✕'}
                           </button>
                         </td>
@@ -157,7 +161,7 @@ export function RefillPage() {
         );
       })}
       {value.refill.buy.filter((b) => !pending.has(b.itemId)).length > 0 && (
-        <div className="card">
+        <div className="card" data-tour="refill-buy">
           <div className="bar between">
             <span className="name">🛒 {bi('Low in all places together: buy from a supplier', 'ಎಲ್ಲಾ ಕಡೆ ಸೇರಿ ಕಡಿಮೆ: ಸರಬರಾಜುದಾರರಿಂದ ಖರೀದಿಸಿ')}</span>
             <button className="btn primary" onClick={() => nav('/admin/purchases?new=buy')}>
@@ -189,12 +193,15 @@ export function TransfersPage() {
   const [making, setMaking] = useState(false);
   const [filter, setFilter] = useState<'open' | 'all'>('open');
   const [err, setErr] = useState('');
+  const [note, setNote] = useState('');
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
-  const act = async (path: string, body: unknown = {}) => {
+  const act = async (path: string, body: unknown = {}, done = '') => {
     setErr('');
+    setNote('');
     try {
       await http.post(path, body);
+      setNote(done);
       setVersion((v) => v + 1);
     } catch (e) {
       setErr((e as Error).message);
@@ -205,10 +212,10 @@ export function TransfersPage() {
     <>
       <h1 className="title">{bi('Transfers between places', 'ಸ್ಥಳಗಳ ನಡುವೆ ಸಾಗಣೆ')}</h1>
       <div className="bar">
-        <button className="btn primary" onClick={() => setMaking(!making)}>
+        <button className="btn primary" data-tour="transfers-new" onClick={() => setMaking(!making)}>
           + {bi('New transfer', 'ಹೊಸ ಸಾಗಣೆ')}
         </button>
-        <div className="chips">
+        <div className="chips" data-tour="transfers-filter">
           <button className={'chip ' + (filter === 'open' ? 'on' : '')} onClick={() => setFilter('open')}>
             {bi('Open', 'ತೆರೆದವು')}
           </button>
@@ -218,6 +225,7 @@ export function TransfersPage() {
         </div>
       </div>
       {err && <div className="msg err">{err}</div>}
+      {note && <div className="msg ok">{note}</div>}
       {making && (
         <NewTransfer
           items={items}
@@ -228,7 +236,11 @@ export function TransfersPage() {
           }}
         />
       )}
-      {shown.length === 0 && <Empty>{bi('No open transfers.', 'ತೆರೆದ ಸಾಗಣೆ ಇಲ್ಲ.')}</Empty>}
+      {shown.length === 0 && (
+        <Empty tour="transfers-card">
+          {bi('No transfers yet. Tap “Bring from godown” when the shop runs low.', 'ಇನ್ನೂ ಸಾಗಣೆ ಇಲ್ಲ. ಅಂಗಡಿಯಲ್ಲಿ ಕಡಿಮೆಯಾದಾಗ “ಗೋದಾಮಿನಿಂದ ತರಿಸಿ” ಒತ್ತಿ.')}
+        </Empty>
+      )}
       {shown.map((t) => (
         <TransferCard key={t.id} t={t} items={items} locs={locs} act={act} bi={bi} lang={lang} />
       ))}
@@ -247,14 +259,14 @@ function TransferCard({
   t: Transfer;
   items: Map<string, Item>;
   locs: Location[];
-  act: (path: string, body?: unknown) => Promise<void>;
+  act: (path: string, body?: unknown, done?: string) => Promise<void>;
   bi: (en: string, kn: string) => string;
   lang: 'en' | 'kn';
 }) {
   const [got, setGot] = useState<Record<string, number>>({});
   const toShop = locs.find((l) => l.id === t.to)?.kind === 'shop';
   return (
-    <div className="card">
+    <div className="card" data-tour="transfers-card">
       <div className="bar between">
         <span className="name">
           #{t.no} · {placeName(locs, t.from, lang)} → {placeName(locs, t.to, lang)}
@@ -304,12 +316,22 @@ function TransferCard({
       </Table>
       <div className="bar mt-8">
         {t.status === 'sent' && toShop && (
-          <button className="btn primary" onClick={() => act('/transfers/' + t.id + '/receive', { received: Object.fromEntries(t.lines.map((l) => [l.itemId, got[l.itemId] ?? l.sent ?? l.qty])) })}>
-            {bi('Received at the shop', 'ಅಂಗಡಿಗೆ ಬಂದಿದೆ')}
+          <button
+            className="btn primary"
+            data-tour="transfers-receive"
+            onClick={() =>
+              act(
+                '/transfers/' + t.id + '/receive',
+                { received: Object.fromEntries(t.lines.map((l) => [l.itemId, got[l.itemId] ?? l.sent ?? l.qty])) },
+                placeName(locs, t.to, lang) + ': ' + t.lines.map((l) => itemName(items, l.itemId, lang) + ' +' + qtyText(items, l.itemId, got[l.itemId] ?? l.sent ?? l.qty, lang)).join(', '),
+              )
+            }
+          >
+            {bi('Mark received', 'ಬಂದಿದೆ ಎಂದು ಗುರುತಿಸಿ')}
           </button>
         )}
         {t.status === 'requested' && (
-          <button className="btn" onClick={() => act('/transfers/' + t.id + '/cancel')}>
+          <button className="btn" data-tour="transfers-cancel" onClick={() => act('/transfers/' + t.id + '/cancel', {}, bi('Request cancelled. No stock moved.', 'ಬೇಡಿಕೆ ರದ್ದಾಗಿದೆ. ಸ್ಟಾಕ್ ಬದಲಾಗಿಲ್ಲ.'))}>
             {bi('Cancel request', 'ಬೇಡಿಕೆ ರದ್ದು')}
           </button>
         )}

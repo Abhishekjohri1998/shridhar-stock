@@ -31,7 +31,7 @@ type Tab = 'details' | 'stock';
 /**
  * One item: its details (names, units, prices, racks, when it is running low) on one tab, and
  * its stock (each place, correcting a count, the last changes) on the other. A new item has only
- * the details. The owner sees both, and can change neither.
+ * the details.
  */
 export function InventoryItemPage({ readOnly = false }: { readOnly?: boolean }) {
   const { id } = useParams();
@@ -57,6 +57,7 @@ export function InventoryItemPage({ readOnly = false }: { readOnly?: boolean }) 
         {lowWords(item, lang) && ' · ' + bi('running out below', 'ಮುಗಿಯುತ್ತಿದೆ, ಇದಕ್ಕಿಂತ ಕಡಿಮೆ:') + ' ' + lowWords(item, lang)}
         {!item.active && ' · ' + bi('not sold any more', 'ಈಗ ಮಾರುವುದಿಲ್ಲ')}
       </p>
+      <div data-tour="item-tabs">
       <Tabs<Tab>
         tabs={[
           { key: 'stock', label: bi('Stock', 'ಸ್ಟಾಕ್') },
@@ -65,6 +66,7 @@ export function InventoryItemPage({ readOnly = false }: { readOnly?: boolean }) 
         value={tab}
         onChange={setTab}
       />
+      </div>
       {tab === 'details' ? <ItemDetails item={item} locs={locs} readOnly={readOnly} onSaved={reload} /> : <ItemStock item={item} locs={locs} stock={stock} readOnly={readOnly} onChanged={reload} />}
     </>
   );
@@ -291,6 +293,7 @@ function ItemStock({ item, locs, stock, readOnly, onChanged }: { item: Item; loc
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState('');
   const moves = useLoad(() => api.moves(item.id), [item.id, stock]);
   const placeName = (id?: string) => {
     const l = locs.find((x) => x.id === id);
@@ -301,8 +304,13 @@ function ItemStock({ item, locs, stock, readOnly, onChanged }: { item: Item; loc
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
     setError('');
+    setDone('');
+    const before = qtyAt(loc);
+    const after = counted ?? before;
     try {
       await fn();
+      const diff = after - before;
+      setDone(placeName(loc) + ': ' + pickName(item.nameEn, item.nameKn, lang) + ' ' + (diff === 0 ? bi('count saved, no change', 'ಎಣಿಕೆ ಉಳಿಸಲಾಗಿದೆ, ಬದಲಾವಣೆ ಇಲ್ಲ') : (diff > 0 ? '+' : '−') + describeQty(item, Math.abs(diff), lang)));
       setActual('');
       setNote('');
       onChanged();
@@ -322,7 +330,7 @@ function ItemStock({ item, locs, stock, readOnly, onChanged }: { item: Item; loc
   const isFirst = (moves.value ?? []).every((m: StockMove) => m.from !== loc && m.to !== loc);
   return (
     <>
-      <div className="scroll">
+      <div className="scroll" data-tour="item-places">
         <Table className="list">
           <thead>
             <tr>
@@ -344,8 +352,9 @@ function ItemStock({ item, locs, stock, readOnly, onChanged }: { item: Item; loc
       </div>
 
       {!readOnly && (
-        <div className="card mt-14">
+        <div className="card mt-14" data-tour="item-count">
           {error && <div className="msg err">{error}</div>}
+          {done && <div className="msg ok">{done}</div>}
           <form className="grid2" onSubmit={submit}>
             <label className="field">
               <span>{t('places.title')}</span>
@@ -354,7 +363,7 @@ function ItemStock({ item, locs, stock, readOnly, onChanged }: { item: Item; loc
             <label className="field">
               <span>{t('stock.actual')}</span>
               <div className="bar mb-0">
-                <input inputMode="decimal" className="in-qty" value={actual} onChange={(e) => setActual(e.target.value)} aria-label={t('stock.actual')} />
+                <input inputMode="decimal" className="in-qty" data-tour="item-count-box" value={actual} onChange={(e) => setActual(e.target.value)} aria-label={t('stock.actual')} />
                 {item.units.length > 1 && (
                   <Select
                     value={unitOk}
@@ -382,11 +391,11 @@ function ItemStock({ item, locs, stock, readOnly, onChanged }: { item: Item; loc
             )}
             <div className="bar">
               {isFirst ? (
-                <button type="button" className="btn primary" disabled={busy || counted === null} onClick={() => counted !== null && run(() => api.openStock(item.id, loc, counted))}>
+                <button type="button" className="btn primary" data-tour="item-save-count" disabled={busy || counted === null} onClick={() => counted !== null && run(() => api.openStock(item.id, loc, counted))}>
                   {t('stock.open')}
                 </button>
               ) : (
-                <button className="btn primary" disabled={busy || counted === null}>
+                <button className="btn primary" data-tour="item-save-count" disabled={busy || counted === null}>
                   {t('stock.adjust')}
                 </button>
               )}
@@ -395,8 +404,8 @@ function ItemStock({ item, locs, stock, readOnly, onChanged }: { item: Item; loc
         </div>
       )}
 
-      <h3 className="subtitle">{t('stock.moves')}</h3>
-      {(moves.value ?? []).length === 0 && <p className="muted">{t('common.none')}</p>}
+      <h3 className="subtitle" data-tour="item-moves">{t('stock.moves')}</h3>
+      {(moves.value ?? []).length === 0 && <p className="muted">{bi('No changes yet. Save a count above and it shows here.', 'ಇನ್ನೂ ಬದಲಾವಣೆ ಇಲ್ಲ. ಮೇಲೆ ಎಣಿಕೆ ಉಳಿಸಿದರೆ ಇಲ್ಲಿ ಕಾಣುತ್ತದೆ.')}</p>}
       {(moves.value ?? []).map((m) => (
         <div key={m.id} className="muted move-row">
           {new Date(m.at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })} · <b>{t(('stock.kind.' + m.kind) as MsgKey)}</b> ·{' '}

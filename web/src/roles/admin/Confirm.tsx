@@ -5,7 +5,6 @@ import { useLive } from '../../lib/live';
 import { itemName, useCatalog } from '../../lib/catalog';
 import { useLoad, useSession } from '../../lib/session';
 import { Empty, InkView, Loading, useBi, when, Select } from '../../components/ui';
-import { WriteToFind } from '../../components/WriteToFind';
 
 interface Pending {
   billNo: number;
@@ -39,7 +38,7 @@ function firstAnswer(line: MirrorLine, items: Map<string, Item>): Answer {
 
 /**
  * Handwritten or unmatched bill lines, grouped under their bill: the writing as it was written,
- * what the reader made of it, and one tap to say it was right, or one tap for the whole bill when
+ * any old reading kept from before, and one tap to say it was right, or one tap for the whole bill when
  * every line already has its item, unit and quantity. Every answer is remembered as a name for
  * the item, so the same writing is read on its own next time.
  */
@@ -75,14 +74,14 @@ export function ConfirmPage() {
       <h1 className="title">{bi('Bill lines to confirm', 'ಖಚಿತಪಡಿಸಬೇಕಾದ ಬಿಲ್ ಸಾಲುಗಳು')}</h1>
       <p className="muted">
         {bi(
-          'Lines the reader was not sure about, or typed names that match no item, bill by bill. Your answer moves the stock and teaches the reader.',
-          'ಓದುವಿಕೆಗೆ ಖಚಿತವಾಗದ ಸಾಲುಗಳು, ಅಥವಾ ಯಾವ ಸಾಮಾನಿಗೂ ಹೊಂದದ ಹೆಸರುಗಳು, ಬಿಲ್ ಪ್ರಕಾರ. ನಿಮ್ಮ ಉತ್ತರ ಸ್ಟಾಕ್ ಬದಲಿಸುತ್ತದೆ ಮತ್ತು ಓದುವಿಕೆಗೆ ಕಲಿಸುತ್ತದೆ.',
+          'Handwritten lines, and typed names that match no item, bill by bill. Pick the item: the stock goes down and the name is remembered for next time.',
+          'ಕೈಬರಹದ ಸಾಲುಗಳು, ಮತ್ತು ಯಾವ ಸಾಮಾನಿಗೂ ಹೊಂದದ ಹೆಸರುಗಳು, ಬಿಲ್ ಪ್ರಕಾರ. ಸಾಮಾನು ಆರಿಸಿ: ಸ್ಟಾಕ್ ಕಡಿಮೆಯಾಗುತ್ತದೆ ಮತ್ತು ಹೆಸರು ಮುಂದಿನ ಸಲಕ್ಕೆ ನೆನಪಿರುತ್ತದೆ.',
         )}
       </p>
       {groups.length > 0 && (
         <div className="bar">
-          <input className="grow" placeholder={bi('Customer or bill number: Ningappa, #75', 'ಗ್ರಾಹಕ ಅಥವಾ ಬಿಲ್ ಸಂಖ್ಯೆ: ನಿಂಗಪ್ಪ, #75')} value={q} onChange={(e) => setQ(e.target.value)} />
-          <div className="chips">
+          <input className="grow" data-tour="confirm-find" placeholder={bi('Customer or bill number: Ningappa, #75', 'ಗ್ರಾಹಕ ಅಥವಾ ಬಿಲ್ ಸಂಖ್ಯೆ: ನಿಂಗಪ್ಪ, #75')} value={q} onChange={(e) => setQ(e.target.value)} />
+          <div className="chips" data-tour="confirm-sort">
             <button className={'chip ' + (!newest ? 'on' : '')} onClick={() => setNewest(false)}>
               {bi('Oldest first', 'ಹಳೆಯದು ಮೊದಲು')}
             </button>
@@ -93,7 +92,11 @@ export function ConfirmPage() {
         </div>
       )}
       {note && <div className="msg ok">{note}</div>}
-      {value.length === 0 && <Empty>{bi('All caught up. Nothing to confirm.', 'ಎಲ್ಲಾ ಮುಗಿದಿದೆ. ಖಚಿತಪಡಿಸಲು ಏನೂ ಇಲ್ಲ.')}</Empty>}
+      {value.length === 0 && (
+        <Empty tour="confirm-bill">
+          {bi('All caught up. Handwritten or unknown bill lines will wait here for you.', 'ಎಲ್ಲಾ ಮುಗಿದಿದೆ. ಕೈಬರಹದ ಅಥವಾ ಗೊತ್ತಿಲ್ಲದ ಬಿಲ್ ಸಾಲುಗಳು ಇಲ್ಲಿ ಕಾಯುತ್ತವೆ.')}
+        </Empty>
+      )}
       {value.length > 0 && shown.length === 0 && <Empty>{bi('No bill matches.', 'ಯಾವ ಬಿಲ್ಲೂ ಹೊಂದುತ್ತಿಲ್ಲ.')}</Empty>}
       {shown.map((g) => (
         <BillCard key={g.billNo + ':' + g.lines.map((l) => l.i).join()} g={g} items={items} onDone={done} />
@@ -144,9 +147,9 @@ function BillCard({ g, items, onDone }: { g: BillGroup; items: Map<string, Item>
   };
 
   return (
-    <div className="card bill-group">
+    <div className="card bill-group" data-tour="confirm-bill">
       <div className="bar between mb-0">
-        <button type="button" className="bill-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <button type="button" className="bill-head" data-tour="confirm-open" aria-expanded={open} onClick={() => setOpen(!open)}>
           <span className="name">
             {bi('Bill', 'ಬಿಲ್')} #{g.billNo} · {g.customer || bi('walk-in', 'ಗ್ರಾಹಕ')}
           </span>
@@ -155,7 +158,7 @@ function BillCard({ g, items, onDone }: { g: BillGroup; items: Map<string, Item>
             · {when(g.at, lang)} · {g.lines.length} {g.lines.length === 1 ? bi('line to confirm', 'ಸಾಲು ಖಚಿತಪಡಿಸಬೇಕು') : bi('lines to confirm', 'ಸಾಲುಗಳು ಖಚಿತಪಡಿಸಬೇಕು')}
           </span>
         </button>
-        <button className="btn primary" disabled={busy || filled.length === 0} onClick={confirmAll}>
+        <button className="btn primary" data-tour="confirm-all" disabled={busy || filled.length === 0} onClick={confirmAll}>
           ✓ {bi('Confirm all on this bill', 'ಈ ಬಿಲ್‌ನ ಎಲ್ಲಾ ಖಚಿತಪಡಿಸಿ')}
           {blank > 0 && filled.length > 0 && ' (' + filled.length + ')'}
         </button>
@@ -185,7 +188,7 @@ function BillCard({ g, items, onDone }: { g: BillGroup; items: Map<string, Item>
 
 function why(line: MirrorLine, item: Item | undefined, bi: (en: string, kn: string) => string): string {
   if (!line.ink) return bi('Typed name matches no item', 'ಟೈಪ್ ಮಾಡಿದ ಹೆಸರು ಯಾವ ಸಾಮಾನಿಗೂ ಹೊಂದುತ್ತಿಲ್ಲ');
-  if (!line.reading) return bi('Not read yet', 'ಇನ್ನೂ ಓದಿಲ್ಲ');
+  if (!line.reading) return bi('Written by hand: pick the item', 'ಕೈಯಲ್ಲಿ ಬರೆದದ್ದು: ಸಾಮಾನು ಆರಿಸಿ');
   if (item && line.reading.unit) {
     try {
       const p = priceFor(item, line.reading.unit, line.qty);
@@ -196,7 +199,7 @@ function why(line: MirrorLine, item: Item | undefined, bi: (en: string, kn: stri
       /* unit not on item */
     }
   }
-  if (line.reading.confidence < 0.85) return bi('Reader is only ', 'ಓದುವಿಕೆ ಕೇವಲ ') + Math.round(line.reading.confidence * 100) + bi('% sure', '% ಖಚಿತ');
+  if (line.reading.confidence < 0.85) return bi('Old reading, only ', 'ಹಳೆಯ ಓದು, ಕೇವಲ ') + Math.round(line.reading.confidence * 100) + bi('% sure', '% ಖಚಿತ');
   return bi('Needs a look', 'ಒಮ್ಮೆ ನೋಡಿ');
 }
 
@@ -247,7 +250,16 @@ function ConfirmLine({
       onDone(
         notItem
           ? bi('Marked as not stock.', 'ಸ್ಟಾಕ್ ಅಲ್ಲ ಎಂದು ಗುರುತಿಸಲಾಗಿದೆ.')
-          : bi('Stock updated for bill ', 'ಬಿಲ್ ') + billNo + (out.learnt ? bi('. Learnt the name “', '. ಹೊಸ ಹೆಸರು ಕಲಿತಿದೆ “') + out.learnt + '”' : '.'),
+          : bi('Shop: ', 'ಅಂಗಡಿ: ') +
+              itemName(items, answer.itemId, lang) +
+              ' −' +
+              answer.qty +
+              ' ' +
+              answer.unit +
+              ' · ' +
+              bi('bill #', 'ಬಿಲ್ #') +
+              billNo +
+              (out.learnt ? bi('. Learnt the name “', '. ಹೊಸ ಹೆಸರು ಕಲಿತಿದೆ “') + out.learnt + '”' : ''),
       );
     } catch (e) {
       setError((e as Error).message);
@@ -263,7 +275,7 @@ function ConfirmLine({
         </span>
         <span className="pill warn">{blank ? bi('Needs you', 'ನಿಮ್ಮ ಗಮನ ಬೇಕು') : why(line, items.get(r?.itemId ?? ''), bi)}</span>
       </div>
-      <div className="confirm-ink">
+      <div className="confirm-ink" data-tour="confirm-written">
         {line.ink ? <InkView ink={line.ink} height={64} /> : <span className="typed">{line.name}</span>}
         <span className="num confirm-price">
           {line.qty} × {formatRupees(line.rate)} = <b>{formatRupees(line.amount)}</b>
@@ -285,8 +297,7 @@ function ConfirmLine({
         </div>
       )}
       <div className="bar">
-        <input className="grow" placeholder={bi('Or search another item…', 'ಅಥವಾ ಬೇರೆ ಸಾಮಾನು ಹುಡುಕಿ…')} value={q} onChange={(e) => setQ(e.target.value)} />
-        <WriteToFind onResult={(w) => w.matches[0] && pick(w.matches[0].itemId)} />
+        <input className="grow" data-tour="confirm-search" placeholder={bi('Search the item…', 'ಅಥವಾ ಬೇರೆ ಸಾಮಾನು ಹುಡುಕಿ…')} value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       {found.length > 0 && (
         <div className="chips mt-6">
@@ -311,10 +322,10 @@ function ConfirmLine({
         </div>
       )}
       <div className="bar mt-10">
-        <button className="btn" disabled={busy || blank} onClick={() => send(false)}>
+        <button className="btn" data-tour="confirm-line-ok" disabled={busy || blank} onClick={() => send(false)}>
           ✓ {bi('This line is right', 'ಈ ಸಾಲು ಸರಿ')}
         </button>
-        <button className="btn" disabled={busy} onClick={() => send(true)}>
+        <button className="btn" data-tour="confirm-not-stock" disabled={busy} onClick={() => send(true)}>
           {bi('Not stock (service, note)', 'ಸ್ಟಾಕ್ ಅಲ್ಲ (ಸೇವೆ, ಟಿಪ್ಪಣಿ)')}
         </button>
       </div>

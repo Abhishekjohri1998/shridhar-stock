@@ -4,7 +4,7 @@ import { http } from '../../lib/api';
 import { useLoad, useSession } from '../../lib/session';
 import { Empty, Loading, useBi } from '../../components/ui';
 
-/** The shop's vehicles. Transfer, dispatch and delivery forms offer these, and still take any text. */
+/** The shop's vehicles. Transfer and dispatch forms offer these, and still take any text. */
 export function VehiclesPage() {
   const bi = useBi();
   const { t } = useSession();
@@ -17,7 +17,7 @@ export function VehiclesPage() {
     <>
       <h1 className="title">{bi('Vehicles', 'ವಾಹನಗಳು')}</h1>
       <div className="bar">
-        <button className="btn primary" onClick={() => setEditing('new')}>
+        <button className="btn primary" data-tour="vehicles-new" onClick={() => setEditing('new')}>
           + {bi('New vehicle', 'ಹೊಸ ವಾಹನ')}
         </button>
       </div>
@@ -30,7 +30,7 @@ export function VehiclesPage() {
           }}
         />
       )}
-      {value.length === 0 && <Empty>{bi('No vehicles yet.', 'ಇನ್ನೂ ವಾಹನಗಳಿಲ್ಲ.')}</Empty>}
+      {value.length === 0 && <Empty>{bi('No vehicles yet. Add the shop’s tempo or auto, and transfers can pick it with its driver.', 'ಇನ್ನೂ ವಾಹನಗಳಿಲ್ಲ. ಅಂಗಡಿಯ ಟೆಂಪೋ ಅಥವಾ ಆಟೋ ಸೇರಿಸಿ, ಸಾಗಣೆಯಲ್ಲಿ ಚಾಲಕನ ಜೊತೆ ಆರಿಸಬಹುದು.')}</Empty>}
       {value.map((v) => (
         <div className="card clickable" key={v.id} onClick={() => setEditing(v)}>
           <span className="name">{v.number}</span> {v.type && <span className="pill">{v.type}</span>}

@@ -74,10 +74,10 @@ export function PurchasesPage() {
     <>
       <h1 className="title">{bi('Purchases', 'ಖರೀದಿ')}</h1>
       <div className="bar">
-        <button className="btn primary" onClick={() => setMaking(!making)}>
+        <button className="btn primary" data-tour="purchases-new" onClick={() => setMaking(!making)}>
           + {bi('New order', 'ಹೊಸ ಆರ್ಡರ್')}
         </button>
-        <div className="chips">
+        <div className="chips" data-tour="purchases-filter">
           {(['open', 'all', 'suppliers'] as const).map((k) => (
             <button
               key={k}
@@ -102,7 +102,7 @@ export function PurchasesPage() {
           onDone={(saved) => {
             setMaking(false);
             setParams({});
-            if (saved) setNote(bi('Order saved.', 'ಆರ್ಡರ್ ಉಳಿಸಲಾಗಿದೆ.'));
+            if (saved) setNote(bi('Order saved. Stock goes up when you tap “Mark received”.', 'ಆರ್ಡರ್ ಉಳಿಸಲಾಗಿದೆ. “ಬಂದಿದೆ ಎಂದು ಗುರುತಿಸಿ” ಒತ್ತಿದಾಗ ಸ್ಟಾಕ್ ಹೆಚ್ಚುತ್ತದೆ.'));
             setVersion((v) => v + 1);
           }}
         />
@@ -111,7 +111,13 @@ export function PurchasesPage() {
         <Suppliers sups={value.sups} onDone={() => setVersion((v) => v + 1)} />
       ) : (
         <>
-          {value.page.orders.length === 0 && <Empty>{tab === 'open' ? bi('No open orders.', 'ತೆರೆದ ಆರ್ಡರ್ ಇಲ್ಲ.') : bi('No orders yet.', 'ಇನ್ನೂ ಆರ್ಡರ್ ಇಲ್ಲ.')}</Empty>}
+          {value.page.orders.length === 0 && (
+            <Empty tour="purchases-card">
+              {tab === 'open'
+                ? bi('No open orders. Tap “+ New order” when you buy from a supplier.', 'ತೆರೆದ ಆರ್ಡರ್ ಇಲ್ಲ. ಸರಬರಾಜುದಾರರಿಂದ ಕೊಳ್ಳುವಾಗ “+ ಹೊಸ ಆರ್ಡರ್” ಒತ್ತಿ.')
+                : bi('No orders yet. Tap “+ New order” to make the first one.', 'ಇನ್ನೂ ಆರ್ಡರ್ ಇಲ್ಲ. ಮೊದಲನೆಯದಕ್ಕೆ “+ ಹೊಸ ಆರ್ಡರ್” ಒತ್ತಿ.')}
+            </Empty>
+          )}
           {value.page.orders.map((p) => (
             <OrderCard key={p.id + ':' + p.status} p={p} supplier={value.sups.find((s) => s.id === p.supplierId)} items={items} locs={value.locs} lang={lang} act={act} />
           ))}
@@ -158,7 +164,7 @@ function OrderCard({
     return (u && ((lang === 'kn' && u.labelKn) || u.code)) || code;
   };
   return (
-    <div className="card">
+    <div className="card" data-tour="purchases-card">
       <div className="bar between">
         <span className="name">
           #{p.no} · {supplier?.name ?? p.supplierId} → {placeOf(p.to)}
@@ -228,7 +234,7 @@ function OrderCard({
                 act(
                   '/admin/pos/' + p.id + '/receive',
                   { updateCost, to, got: Object.fromEntries(Object.entries(got).map(([k, v]) => [k, { qty: Number(v.qty) || 0, cost: Number(v.cost) || 0 }])) },
-                  bi('Received: the stock is added to ', 'ಬಂದಿದೆ: ಸ್ಟಾಕ್ ಸೇರಿಸಲಾಗಿದೆ, ') + placeOf(to) + '.',
+                  placeOf(to) + ': ' + p.lines.map((l) => briefName(items.get(l.itemId), l.itemId, lang) + ' +' + (Number(got[l.itemId]?.qty) || 0) + ' ' + unitWord(l.itemId, l.unit)).join(', '),
                 )
               }
             >
@@ -241,7 +247,7 @@ function OrderCard({
         ) : (
           stage === 'ordered' && (
             <>
-              <button className="btn primary" onClick={() => setReceiving(true)}>
+              <button className="btn primary" data-tour="purchases-receive" onClick={() => setReceiving(true)}>
                 {bi('Mark received', 'ಬಂದಿದೆ ಎಂದು ಗುರುತಿಸಿ')}
               </button>
               <button className="btn" onClick={() => act('/admin/pos/' + p.id + '/cancel', {}, bi('Order cancelled.', 'ಆರ್ಡರ್ ರದ್ದಾಗಿದೆ.'))}>

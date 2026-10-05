@@ -644,3 +644,37 @@ img, svg.ink { max-width: 100%; }
 .confirm-line { margin-top: var(--gap); padding-top: var(--gap); border-top: 1px solid var(--line); }
 /* A line "Confirm all" leaves for a person: no item, unit or quantity yet. */
 .confirm-line.blank { margin-left: calc(-1 * var(--pad)); margin-right: calc(-1 * var(--pad)); padding-left: var(--pad); padding-right: var(--pad); background: var(--gold-wash); border-top-color: var(--line-strong); }
+
+/* ---- section tabs: one menu place, its screens as tabs (links) ---------- */
+.tabs a.tab { display: inline-flex; align-items: center; text-decoration: none; }
+
+/* ---- guided tour: a spotlight and a card ------------------------------ */
+.tour { position: fixed; inset: 0; z-index: 70; }
+.tour-dim { position: fixed; inset: 0; background: rgba(20, 18, 15, 0.38); animation: fade var(--t-base) var(--ease); }
+.tour-spot {
+  position: fixed; border-radius: var(--r-sm); pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(20, 18, 15, 0.38), var(--focus);
+  transition: left var(--t-base) var(--ease), top var(--t-base) var(--ease), width var(--t-base) var(--ease), height var(--t-base) var(--ease);
+}
+.tour-card {
+  position: fixed; background: var(--paper-1); color: var(--ink-700); border: 1px solid var(--line);
+  border-radius: var(--r-md); box-shadow: var(--sh-3); padding: var(--pad); outline: none;
+  animation: pop var(--t-base) var(--ease); max-height: calc(100vh - 32px); overflow-y: auto;
+}
+.tour-card.center { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(420px, calc(100vw - 32px)); animation: fade var(--t-base) var(--ease); }
+.tour-card.bottom { left: var(--pad); right: var(--pad); bottom: var(--pad); }
+.tour-top { display: flex; align-items: center; justify-content: space-between; gap: var(--gap); margin-bottom: 6px; }
+.tour-line { margin: 8px 0; }
+.tour-tap { color: var(--ink-900); }
+.tour-dots { display: flex; gap: 6px; margin: 12px 0; }
+.tour-dots span { width: 8px; height: 8px; border-radius: var(--r-pill); background: var(--line-strong); }
+.tour-dots span.on { background: var(--brand-600); }
+
+/* ---- how it all works ---------------------------------------------------- */
+.flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin: 0 0 var(--gap); padding: 0; list-style: none; }
+.flow li { display: flex; align-items: center; gap: 8px; }
+.flow .flow-step { padding: 10px 14px; border-radius: var(--r-sm); background: var(--paper-2); color: var(--ink-900); font-weight: 600; }
+.flow .flow-step.up { background: var(--ok-wash); color: var(--ok-700); }
+.flow .flow-step.down { background: var(--gold-wash); color: var(--gold-600); }
+.flow .flow-arrow { color: var(--ink-400); }
+.help-section { scroll-margin-top: 80px; }

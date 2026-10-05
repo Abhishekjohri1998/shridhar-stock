@@ -5,35 +5,30 @@ import { api } from '../lib/api';
 import { useSession } from '../lib/session';
 import { useBi } from '../components/ui';
 
-const ROLE_WHAT: Record<Role, [string, string]> = {
-  admin: ['Runs everything: inventory, confirming handwriting, trips, purchases, people.', 'ಎಲ್ಲವನ್ನೂ ನಡೆಸುತ್ತಾರೆ: ಸಾಮಾನು, ಸ್ಟಾಕ್, ಕೈಬರಹ ಖಚಿತಪಡಿಸುವುದು, ಸಾಗಣೆ, ಆರ್ಡರ್, ಜನರು.'],
-  owner: ['Sees how the shop is doing. Changes nothing.', 'ಅಂಗಡಿ ಹೇಗೆ ನಡೆಯುತ್ತಿದೆ ಎಂದು ನೋಡುತ್ತಾರೆ. ಏನೂ ಬದಲಿಸುವುದಿಲ್ಲ.'],
-  worker: ['Sees each bill as a pick list by rack, ticks what was brought.', 'ಪ್ರತಿ ಬಿಲ್ ಅನ್ನು ರ‍್ಯಾಕ್ ಪ್ರಕಾರ ನೋಡಿ, ತಂದದ್ದನ್ನು ಗುರುತಿಸುತ್ತಾರೆ.'],
+const ROLE_WHAT: Partial<Record<Role, [string, string]>> = {
+  admin: ['Runs everything: bills, confirming written lines, inventory, bringing from the godown, purchases, setup.', 'ಎಲ್ಲವನ್ನೂ ನಡೆಸುತ್ತಾರೆ: ಬಿಲ್, ಬರೆದ ಸಾಲು ಖಚಿತಪಡಿಸುವುದು, ಸಾಮಾನು, ಗೋದಾಮಿನಿಂದ ತರಿಸುವುದು, ಖರೀದಿ, ಸೆಟಪ್.'],
+  worker: ['Sees each bill as a pick list by rack, ticks what was fetched. The TV screen shows it big.', 'ಪ್ರತಿ ಬಿಲ್ ಅನ್ನು ರ‍್ಯಾಕ್ ಪ್ರಕಾರ ನೋಡಿ, ತಂದದ್ದನ್ನು ಟಿಕ್ ಮಾಡುತ್ತಾರೆ. ಟಿವಿ ಪರದೆ ದೊಡ್ಡದಾಗಿ ತೋರಿಸುತ್ತದೆ.'],
   godown: ['Sends what the shop asks for, receives what comes in.', 'ಅಂಗಡಿ ಕೇಳಿದ್ದನ್ನು ಕಳುಹಿಸುತ್ತಾರೆ, ಬಂದದ್ದನ್ನು ಸ್ವೀಕರಿಸುತ್ತಾರೆ.'],
-  // Suppliers no longer sign in: they are contacts under Purchases. There is no demo vendor.
-  vendor: ['A supplier from before. Suppliers no longer sign in.', 'ಹಿಂದಿನ ಸರಬರಾಜುದಾರ. ಸರಬರಾಜುದಾರರು ಈಗ ಒಳಗೆ ಬರುವುದಿಲ್ಲ.'],
-  delivery: ['Today’s drops: call, map, collect, delivered.', 'ಇಂದಿನ ಡೆಲಿವರಿ: ಕರೆ, ನಕ್ಷೆ, ವಸೂಲಿ, ತಲುಪಿಸಿದೆ.'],
-  customer: ['Their own bills and balance, shop items, and order requests.', 'ತಮ್ಮ ಬಿಲ್‌ಗಳು, ಬಾಕಿ, ಅಂಗಡಿ ಸಾಮಾನು ಮತ್ತು ಆರ್ಡರ್.'],
 };
 
 const STORY: { role: Role; to: string; en: string; kn: string }[] = [
-  { role: 'admin', to: '/admin/bills', en: 'Bills arrive from the billing app. Typed lines are matched; handwritten lines are read.', kn: 'ಬಿಲ್ಲಿಂಗ್‌ನಿಂದ ಬಿಲ್‌ಗಳು ಬರುತ್ತವೆ. ಟೈಪ್ ಸಾಲುಗಳು ಹೊಂದುತ್ತವೆ, ಕೈಬರಹ ಓದಲಾಗುತ್ತದೆ.' },
-  { role: 'admin', to: '/admin/confirm', en: 'Bill #54: the reader read “shahi biriyani masala”, but ₹1000 does not fit a ₹90 pack, so it asks you. Confirm it: stock drops and the name is learnt.', kn: 'ಬಿಲ್ #54: “ಶಾಹಿ ಬಿರಿಯಾನಿ ಮಸಾಲ” ಓದಿದೆ, ಆದರೆ ₹1000 ಬೆಲೆ ₹90 ಪ್ಯಾಕ್‌ಗೆ ಹೊಂದುತ್ತಿಲ್ಲ. ಖಚಿತಪಡಿಸಿ.' },
-  { role: 'worker', to: '/worker', en: 'The shop worker sees bill #54 as a pick list grouped by rack, and ticks what was fetched.', kn: 'ಕೆಲಸಗಾರರು ಬಿಲ್ #54 ಅನ್ನು ರ‍್ಯಾಕ್ ಪ್ರಕಾರ ನೋಡಿ ತಂದದ್ದನ್ನು ಗುರುತಿಸುತ್ತಾರೆ.' },
-  { role: 'admin', to: '/admin/refill', en: 'Running low: one trip from the main godown brings everything that is low. Ask the godown to send.', kn: 'ಮುಗಿಯುತ್ತಿದೆ: ಮುಖ್ಯ ಗೋದಾಮಿನಿಂದ ಒಂದೇ ಸಾಗಣೆ. ಗೋದಾಮಿಗೆ ಕಳುಹಿಸಲು ಹೇಳಿ.' },
-  { role: 'godown', to: '/godown', en: 'The godown sees the request with its racks, fills in what it is actually sending, vehicle and driver, and taps Sent.', kn: 'ಗೋದಾಮು ಬೇಡಿಕೆ ನೋಡಿ, ಕಳುಹಿಸುವ ಪ್ರಮಾಣ, ವಾಹನ, ಚಾಲಕ ತುಂಬಿ “ಕಳುಹಿಸಿದೆ” ಒತ್ತುತ್ತದೆ.' },
-  { role: 'admin', to: '/admin/transfers', en: 'At the shop, mark it received. A shortfall shows in red. Stock moves in every place.', kn: 'ಅಂಗಡಿಯಲ್ಲಿ “ಬಂದಿದೆ” ಎಂದು ಗುರುತಿಸಿ. ಕೊರತೆ ಕೆಂಪಿನಲ್ಲಿ.' },
-  { role: 'admin', to: '/admin/inventory?low=1', en: 'Inventory: coffee and toor dal are low with the shop and godowns added up. Each item’s page has its details and its stock.', kn: 'ಸಾಮಾನು ಮತ್ತು ಸ್ಟಾಕ್: ಅಂಗಡಿ ಮತ್ತು ಗೋದಾಮು ಸೇರಿಸಿ ಕಾಫಿ, ತೊಗರಿ ಬೇಳೆ ಕಡಿಮೆ ಇವೆ.' },
-  { role: 'admin', to: '/admin/purchases', en: 'Order from a supplier in one short form. When the goods arrive, mark it received: the stock goes up where they were put.', kn: 'ಒಂದೇ ಚಿಕ್ಕ ಫಾರ್ಮ್‌ನಲ್ಲಿ ಆರ್ಡರ್ ಮಾಡಿ. ಸಾಮಾನು ಬಂದಾಗ “ಬಂದಿದೆ” ಎಂದು ಗುರುತಿಸಿ: ಸ್ಟಾಕ್ ಹೆಚ್ಚುತ್ತದೆ.' },
-  { role: 'delivery', to: '/delivery', en: 'Delivery: bill #54 to Ramesh, opposite the temple, collect the balance. Leaving now, then Delivered.', kn: 'ಡೆಲಿವರಿ: ಬಿಲ್ #54 ರಮೇಶ್‌ಗೆ, ದೇವಸ್ಥಾನದ ಎದುರು, ಬಾಕಿ ವಸೂಲಿ.' },
-  { role: 'customer', to: '/customer', en: 'Ramesh sees his bills with the shop’s own handwriting, his balance, and orders again.', kn: 'ರಮೇಶ್ ತಮ್ಮ ಬಿಲ್‌ಗಳನ್ನು ಅಂಗಡಿಯ ಕೈಬರಹದೊಂದಿಗೆ, ಬಾಕಿ ನೋಡಿ ಮತ್ತೆ ಆರ್ಡರ್ ಮಾಡುತ್ತಾರೆ.' },
-  { role: 'admin', to: '/admin/requests', en: 'The request reaches the admin, who bills it in the billing app and marks it billed.', kn: 'ಬೇಡಿಕೆ ಆಡ್ಮಿನ್‌ಗೆ ಬರುತ್ತದೆ; ಬಿಲ್ಲಿಂಗ್‌ನಲ್ಲಿ ಬಿಲ್ ಮಾಡಿ ಗುರುತಿಸುತ್ತಾರೆ.' },
-  { role: 'owner', to: '/owner', en: 'The partner sees the day: sales, money due, stock value, what is low, and how much handwriting was read by itself.', kn: 'ಪಾಲುದಾರರು ದಿನವನ್ನು ನೋಡುತ್ತಾರೆ: ಮಾರಾಟ, ಬಾಕಿ, ಸ್ಟಾಕ್ ಮೌಲ್ಯ.' },
+  { role: 'admin', to: '/admin', en: 'Home: what needs you now, today’s sales and the week. The first time each person signs in, a short tour explains the screen; “?” plays it again.', kn: 'ಮುಖಪುಟ: ಈಗ ನಿಮ್ಮ ಗಮನ ಬೇಕಾದ್ದು, ಇಂದಿನ ಮಾರಾಟ, ವಾರ. ಮೊದಲ ಸಲ ಒಳಗೆ ಬಂದಾಗ ಚಿಕ್ಕ ಪರಿಚಯ; “?” ಮತ್ತೆ ತೋರಿಸುತ್ತದೆ.' },
+  { role: 'admin', to: '/admin/bills', en: 'Bills arrive from the billing app by themselves. Typed lines are matched to items and take stock down.', kn: 'ಬಿಲ್ಲಿಂಗ್‌ನಿಂದ ಬಿಲ್‌ಗಳು ತಾನಾಗಿ ಬರುತ್ತವೆ. ಟೈಪ್ ಸಾಲುಗಳು ಸಾಮಾನಿಗೆ ಹೊಂದಿ ಸ್ಟಾಕ್ ಕಡಿಮೆ ಮಾಡುತ್ತವೆ.' },
+  { role: 'admin', to: '/admin/confirm', en: 'Bills · To confirm: bills #53 and #54 have handwritten lines. Pick the item for each, then “Confirm all on this bill”: the lines leave the list and stock goes down.', kn: 'ಬಿಲ್ · ಖಚಿತಪಡಿಸಿ: ಬಿಲ್ #53, #54 ರಲ್ಲಿ ಕೈಬರಹದ ಸಾಲುಗಳಿವೆ. ಪ್ರತಿಯೊಂದಕ್ಕೆ ಸಾಮಾನು ಆರಿಸಿ, “ಈ ಬಿಲ್‌ನ ಎಲ್ಲಾ ಖಚಿತಪಡಿಸಿ”: ಸ್ಟಾಕ್ ಕಡಿಮೆಯಾಗುತ್ತದೆ.' },
+  { role: 'worker', to: '/worker', en: 'The shop worker sees bill #54 as a pick list grouped by rack, and ticks what was fetched: billing’s tick turns on too.', kn: 'ಕೆಲಸಗಾರರು ಬಿಲ್ #54 ಅನ್ನು ರ‍್ಯಾಕ್ ಪ್ರಕಾರ ನೋಡಿ ತಂದದ್ದನ್ನು ಟಿಕ್ ಮಾಡುತ್ತಾರೆ: ಬಿಲ್ಲಿಂಗ್‌ನ ಟಿಕ್ ಕೂಡ ಬರುತ್ತದೆ.' },
+  { role: 'worker', to: '/worker/screen', en: 'The TV screen: the same bill, big, for the second monitor at the counter.', kn: 'ಟಿವಿ ಪರದೆ: ಅದೇ ಬಿಲ್, ದೊಡ್ಡದಾಗಿ, ಕೌಂಟರ್‌ನ ಎರಡನೇ ಮಾನಿಟರ್‌ಗೆ.' },
+  { role: 'admin', to: '/admin/inventory?low=1', en: 'Inventory: coffee and toor dal are low with the shop and godowns added up. An item’s page corrects its count in boxes.', kn: 'ಸಾಮಾನು: ಅಂಗಡಿ ಮತ್ತು ಗೋದಾಮು ಸೇರಿಸಿ ಕಾಫಿ, ತೊಗರಿ ಬೇಳೆ ಕಡಿಮೆ. ಸಾಮಾನಿನ ಪುಟದಲ್ಲಿ ಬಾಕ್ಸ್‌ನಲ್ಲಿ ಎಣಿಕೆ ಸರಿಪಡಿಸಬಹುದು.' },
+  { role: 'admin', to: '/admin/refill', en: 'Inventory · Bring from godown: one trip from the main godown brings everything that is low. Tap “Send request”.', kn: 'ಸಾಮಾನು · ಗೋದಾಮಿನಿಂದ ತರಿಸಿ: ಮುಖ್ಯ ಗೋದಾಮಿನಿಂದ ಒಂದೇ ಓಡಾಟ. “ಬೇಡಿಕೆ ಕಳುಹಿಸಿ” ಒತ್ತಿ.' },
+  { role: 'godown', to: '/godown', en: 'The godown sees the request with its racks, fills in what it is actually sending, vehicle and driver, and taps “Send to shop”.', kn: 'ಗೋದಾಮು ಬೇಡಿಕೆ ನೋಡಿ, ಕಳುಹಿಸುವ ಪ್ರಮಾಣ, ವಾಹನ, ಚಾಲಕ ತುಂಬಿ “ಅಂಗಡಿಗೆ ಕಳುಹಿಸಿ” ಒತ್ತುತ್ತದೆ.' },
+  { role: 'admin', to: '/admin/transfers', en: 'Buy & move · Transfers: at the shop, “Mark received”. A shortfall shows in red; stock goes up in the shop.', kn: 'ಖರೀದಿ ಮತ್ತು ಸಾಗಣೆ · ಸಾಗಣೆ: ಅಂಗಡಿಯಲ್ಲಿ “ಬಂದಿದೆ ಎಂದು ಗುರುತಿಸಿ”. ಕೊರತೆ ಕೆಂಪಿನಲ್ಲಿ; ಅಂಗಡಿಯ ಸ್ಟಾಕ್ ಹೆಚ್ಚುತ್ತದೆ.' },
+  { role: 'admin', to: '/admin/purchases', en: 'Buy & move · Purchases: order from a supplier in one short form. When the goods arrive, “Mark received”: stock goes up where they were put.', kn: 'ಖರೀದಿ: ಒಂದೇ ಚಿಕ್ಕ ಫಾರ್ಮ್‌ನಲ್ಲಿ ಆರ್ಡರ್. ಸಾಮಾನು ಬಂದಾಗ “ಬಂದಿದೆ ಎಂದು ಗುರುತಿಸಿ”: ಸ್ಟಾಕ್ ಹೆಚ್ಚುತ್ತದೆ.' },
+  { role: 'admin', to: '/admin/places', en: 'Setup: places, people (Admin, Shop worker, Godown), vehicles, Excel and settings.', kn: 'ಸೆಟಪ್: ಸ್ಥಳಗಳು, ಜನರು (ಆಡ್ಮಿನ್, ಅಂಗಡಿ ಕೆಲಸಗಾರ, ಗೋದಾಮು), ವಾಹನಗಳು, ಎಕ್ಸೆಲ್, ಸೆಟ್ಟಿಂಗ್ಸ್.' },
+  { role: 'admin', to: '/help', en: 'How it all works: one picture of the flow, and “Show me” for every screen’s tour.', kn: 'ಇದೆಲ್ಲ ಹೇಗೆ ಕೆಲಸ ಮಾಡುತ್ತದೆ: ಒಂದು ಚಿತ್ರ, ಮತ್ತು ಪ್ರತಿ ಪುಟದ ಪರಿಚಯಕ್ಕೆ “ತೋರಿಸಿ”.' },
 ];
 
 /**
  * The guided tour, only in demo mode. One button per role signs in as that role's demo person;
- * the story walks one day at the shop through every role in order.
+ * the story walks one day at the shop through the three roles in order.
  */
 export function WalkthroughPage() {
   const bi = useBi();
@@ -77,7 +72,7 @@ export function WalkthroughPage() {
             <span className="muted">
               {p.phone} · PIN 1111
             </span>
-            <span>{bi(...ROLE_WHAT[p.role])}</span>
+            {ROLE_WHAT[p.role] && <span>{bi(...ROLE_WHAT[p.role]!)}</span>}
           </button>
         ))}
       </div>

@@ -6,8 +6,6 @@ import { useLoad, useSession } from '../lib/session';
 import { statusWord } from '../lib/words';
 import { Empty, Greeting, InkView, Loading, Money, Status, Tabs, Tile, useBi, useWeekSales, VehicleOptions, WeekChart, when, Table, Select } from '../components/ui';
 import type { IconName } from '../components/Icon';
-import { WriteToFind, type WrittenResult } from '../components/WriteToFind';
-import type { Summary } from './admin/Home';
 
 /** A slow safety net under the live stream, for a phone whose stream quietly stalled. */
 function useTick(ms: number) {
@@ -19,42 +17,6 @@ function useTick(ms: number) {
   return n;
 }
 
-// ================================================================ owner / partner
-
-export function OwnerHome() {
-  const bi = useBi();
-  const live = useLive('bills', 'stock', 'transfers', 'pos', 'deliveries', 'orders');
-  const { me } = useSession();
-  const { value: s, error } = useLoad(() => http.get<Summary>('/admin/summary'), [live]);
-  const week = useWeekSales([live]);
-  if (error) return <div className="msg err">{error}</div>;
-  if (!s) return <Loading />;
-  const rate = s.handwrittenLines ? Math.round((s.autoRead / s.handwrittenLines) * 100) : 0;
-  const tile = (label: string, v: React.ReactNode, tone = '', icon?: IconName) => <Tile n={v} label={label} tone={tone} icon={icon} />;
-  return (
-    <>
-      {me && <Greeting name={me.name} />}
-      <h2 className="subtitle">{bi('How the shop is doing', 'ಅಂಗಡಿ ಹೇಗೆ ನಡೆಯುತ್ತಿದೆ')}</h2>
-      {week && <WeekChart days={week} />}
-      <div className="tiles">
-        {tile(bi('Sales today', 'ಇಂದಿನ ಮಾರಾಟ'), <Money v={s.salesToday} />, '', 'rupee')}
-        {tile(bi('Bills today', 'ಇಂದಿನ ಬಿಲ್‌ಗಳು'), s.billsToday, '', 'receipt')}
-        {tile(bi('Money still due', 'ಬರಬೇಕಾದ ಹಣ'), <Money v={s.due} />, s.due ? 'warn' : '', 'inbox')}
-        {tile(bi('Stock value at cost', 'ಖರೀದಿ ಬೆಲೆಯಲ್ಲಿ ಸ್ಟಾಕ್'), <Money v={s.stockValue} />, '', 'box')}
-        {tile(bi('Running low', 'ಮುಗಿಯುತ್ತಿದೆ'), s.low, s.low ? 'warn' : '', 'refill')}
-        {tile(bi('Below zero', 'ಸೊನ್ನೆಗಿಂತ ಕಡಿಮೆ'), s.negative, s.negative ? 'bad' : '', 'alert')}
-        {tile(bi('On the way to the shop', 'ಅಂಗಡಿಗೆ ದಾರಿಯಲ್ಲಿ'), s.inTransit, '', 'truck')}
-        {tile(bi('Open purchase orders', 'ತೆರೆದ ಖರೀದಿ ಆರ್ಡರ್'), s.openPos, '', 'cart')}
-        {tile(bi('Handwriting read by itself', 'ತಾನಾಗಿ ಓದಿದ ಕೈಬರಹ'), rate + '%', '', 'pen')}
-      </div>
-      <p className="muted mt-14">
-        {bi('Read only. Reports and Excel files are under “Excel files”.', 'ನೋಡಲು ಮಾತ್ರ. ವರದಿ ಮತ್ತು ಎಕ್ಸೆಲ್ ಫೈಲ್‌ಗಳು “ಎಕ್ಸೆಲ್ ಫೈಲ್” ನಲ್ಲಿ.')}
-      </p>
-    </>
-  );
-}
-
-// ================================================================ shop worker
 
 interface WorkerLine {
   i: number;
@@ -85,8 +47,7 @@ interface WorkerBill {
 
 /**
  * The pick list: a bill as soon as it is saved in billing, its lines grouped by where they are
- * kept, so the worker walks the shop once. Handwritten lines show the writing itself, with what
- * the reader made of it underneath. A bill still being written at the counter shows as
+ * kept, so the worker walks the shop once. Handwritten lines show the writing itself, for the worker to read. A bill still being written at the counter shows as
  * "Being written", and can be fetched and ticked before it is saved.
  */
 export function WorkerHome({ screen = false }: { screen?: boolean }) {
@@ -99,7 +60,7 @@ export function WorkerHome({ screen = false }: { screen?: boolean }) {
   const [open, setOpen] = useState<string | null>(null);
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
-  if (value.length === 0) return <Empty>{bi('No bills yet today. New bills appear here by themselves.', 'ಇಂದು ಇನ್ನೂ ಬಿಲ್ ಇಲ್ಲ. ಹೊಸ ಬಿಲ್‌ಗಳು ತಾವಾಗಿ ಇಲ್ಲಿ ಬರುತ್ತವೆ.')}</Empty>;
+  if (value.length === 0) return <Empty tour="worker-bill">{bi('No bills yet today. New bills appear here by themselves.', 'ಇಂದು ಇನ್ನೂ ಬಿಲ್ ಇಲ್ಲ. ಹೊಸ ಬಿಲ್‌ಗಳು ತಾವಾಗಿ ಇಲ್ಲಿ ಬರುತ್ತವೆ.')}</Empty>;
   const keyOf = (b: WorkerBill) => b.draftId ?? String(b.no);
   const bill = value.find((b) => keyOf(b) === open) ?? value[0]!;
   const base = bill.draftId ? '/worker/drafts/' + encodeURIComponent(bill.draftId) : '/worker/bills/' + bill.no;
@@ -118,7 +79,7 @@ export function WorkerHome({ screen = false }: { screen?: boolean }) {
   return (
     <div className={screen ? 'worker screen' : 'worker'}>
       {!screen && value.length > 1 && (
-        <div className="chips mb-10">
+        <div className="chips mb-10" data-tour="worker-bills">
           {value.map((b) => (
             <button key={keyOf(b)} className={'chip ' + (keyOf(b) === keyOf(bill) ? 'on' : '')} onClick={() => setOpen(keyOf(b))}>
               {label(b)} · {b.customer || bi('walk-in', 'ಗ್ರಾಹಕ')} · {b.lines.filter((l) => l.fetched).length}/{b.lines.length}
@@ -127,14 +88,14 @@ export function WorkerHome({ screen = false }: { screen?: boolean }) {
         </div>
       )}
       <div className="bar between">
-        <h1 className="title m-0">
+        <h1 className="title m-0" data-tour="worker-bill">
           {bill.draftId ? bi('Being written', 'ಬರೆಯಲಾಗುತ್ತಿದೆ') : bi('Bill', 'ಬಿಲ್') + ' #' + bill.no} · {bill.customer || bi('walk-in', 'ಗ್ರಾಹಕ')}
         </h1>
-        <span className={'pill ' + (done === bill.lines.length ? 'ok' : 'warn')}>
+        <span className={'pill ' + (done === bill.lines.length ? 'ok' : 'warn')} data-tour="worker-count">
           {done} {bi('of', '/')} {bill.lines.length} {bi('fetched', 'ತಂದಿದೆ')}
         </span>
       </div>
-      <p className="muted">
+      <p className="muted" data-tour="worker-total">
         {when(bill.at, lang)} · {bi('Total', 'ಒಟ್ಟು')} <b>{formatRupees(bill.rounded)}</b>
         {bill.roundOff !== 0 && ' (' + formatRupees(bill.total) + ' ' + bi('round off', 'ರೌಂಡ್ ಆಫ್') + ' ' + (bill.roundOff > 0 ? '+' : '−') + formatRupees(Math.abs(bill.roundOff)) + ')'}
       </p>
@@ -142,7 +103,7 @@ export function WorkerHome({ screen = false }: { screen?: boolean }) {
         <div className="banner warn">{bi('Not saved yet: lines may still change at the counter.', 'ಇನ್ನೂ ಉಳಿಸಿಲ್ಲ: ಕೌಂಟರ್‌ನಲ್ಲಿ ಸಾಲುಗಳು ಬದಲಾಗಬಹುದು.')}</div>
       )}
       {!screen && bill.lines.length > 1 && (
-        <div className="bar">
+        <div className="bar" data-tour="worker-select-all">
           <button className="btn small" disabled={done === bill.lines.length} onClick={() => tickAll(true)}>
             ✓ {bi('Select all', 'ಎಲ್ಲ ಆಯ್ಕೆ')}
           </button>
@@ -155,7 +116,7 @@ export function WorkerHome({ screen = false }: { screen?: boolean }) {
         <div className="banner ok">✓ {bi('Everything on this bill is fetched.', 'ಈ ಬಿಲ್‌ನ ಎಲ್ಲವನ್ನೂ ತರಲಾಗಿದೆ.')}</div>
       )}
       {groups.map(({ key, place, rack, other, lines }) => (
-        <div key={key} className="card">
+        <div key={key} className="card" data-tour="worker-rack">
           <div className="rack">📍 {other ? bi('Other place', 'ಬೇರೆ ಸ್ಥಳ') : (place ? place + ' · ' : '') + rack}</div>
           {lines.map((l) => (
             <div key={l.i} className={'pick ' + (l.fetched ? 'got' : '')}>
@@ -168,7 +129,7 @@ export function WorkerHome({ screen = false }: { screen?: boolean }) {
                 </div>
               </div>
               {!screen && (
-                <button className={'fetch ' + (l.fetched ? 'on' : '')} onClick={() => tickLine(l)} aria-pressed={l.fetched}>
+                <button className={'fetch ' + (l.fetched ? 'on' : '')} data-tour="worker-fetch" onClick={() => tickLine(l)} aria-pressed={l.fetched}>
                   {l.fetched ? '✓' : bi('Fetched', 'ತಂದೆ')}
                 </button>
               )}
@@ -203,6 +164,7 @@ export function GodownHome() {
     return { transfers, stock };
   }, [version, live]);
   const [q, setQ] = useState('');
+  const [note, setNote] = useState('');
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
   const byId = new Map(value.stock.map((s) => [s.itemId, s]));
@@ -220,8 +182,15 @@ export function GodownHome() {
   const incoming = value.transfers.filter((t) => t.to === g && t.status === 'sent');
   const history = value.transfers.filter((t) => t.status === 'received' || (t.from === g && t.status === 'sent'));
 
+  const done = (msg: string) => {
+    setNote(msg);
+    setVersion((v) => v + 1);
+  };
   return (
     <>
+      <h1 className="title">{bi('My godown', 'ನನ್ನ ಗೋದಾಮು')}</h1>
+      {note && <div className="msg ok">{note}</div>}
+      <div data-tour="godown-tabs">
       <Tabs
         value={tab}
         onChange={setTab}
@@ -231,11 +200,16 @@ export function GodownHome() {
           { key: 'stock', label: bi('My stock', 'ನನ್ನ ಸ್ಟಾಕ್') },
         ]}
       />
+      </div>
       {tab === 'requests' && (
         <>
-          {outgoing.length === 0 && <Empty>{bi('Nothing to send right now.', 'ಈಗ ಕಳುಹಿಸಲು ಏನೂ ಇಲ್ಲ.')}</Empty>}
+          {outgoing.length === 0 && (
+            <Empty tour="godown-send-card">
+              {bi('Nothing to send right now. When the shop asks for goods, the request shows here by itself.', 'ಈಗ ಕಳುಹಿಸಲು ಏನೂ ಇಲ್ಲ. ಅಂಗಡಿ ಕೇಳಿದಾಗ, ಬೇಡಿಕೆ ಇಲ್ಲಿ ತಾನಾಗಿ ಬರುತ್ತದೆ.')}
+            </Empty>
+          )}
           {outgoing.map((t) => (
-            <SendCard key={t.id} t={t} nm={nm} dq={dq} rack={(id) => byId.get(id)?.rack ?? ''} have={(id) => byId.get(id)?.qty ?? 0} onDone={() => setVersion((v) => v + 1)} />
+            <SendCard key={t.id} t={t} nm={nm} dq={dq} rack={(id) => byId.get(id)?.rack ?? ''} have={(id) => byId.get(id)?.qty ?? 0} onDone={done} />
           ))}
           {history.length > 0 && <h2 className="subtitle">{bi('Earlier', 'ಹಿಂದಿನವು')}</h2>}
           {history.map((t) => (
@@ -247,15 +221,15 @@ export function GodownHome() {
       )}
       {tab === 'incoming' && (
         <>
-          {incoming.length === 0 && <Empty>{bi('Nothing on the way to this godown.', 'ಈ ಗೋದಾಮಿಗೆ ಏನೂ ಬರುತ್ತಿಲ್ಲ.')}</Empty>}
+          {incoming.length === 0 && <Empty>{bi('Nothing on the way to this godown. Goods bought or sent here show up in this tab.', 'ಈ ಗೋದಾಮಿಗೆ ಏನೂ ಬರುತ್ತಿಲ್ಲ. ಇಲ್ಲಿಗೆ ಕಳುಹಿಸಿದ ಸಾಮಾನು ಈ ಟ್ಯಾಬ್‌ನಲ್ಲಿ ಕಾಣುತ್ತದೆ.')}</Empty>}
           {incoming.map((t) => (
-            <ReceiveCard key={t.id} t={t} nm={nm} dq={dq} onDone={() => setVersion((v) => v + 1)} />
+            <ReceiveCard key={t.id} t={t} nm={nm} dq={dq} onDone={done} />
           ))}
         </>
       )}
       {tab === 'stock' && (
         <>
-          <input placeholder={bi('Search', 'ಹುಡುಕಿ')} value={q} onChange={(e) => setQ(e.target.value)} className="mb-10" />
+          <input placeholder={bi('Search', 'ಹುಡುಕಿ')} value={q} onChange={(e) => setQ(e.target.value)} className="mb-10" data-tour="godown-stock" />
           <Table className="list">
             <tbody>
               {value.stock
@@ -276,7 +250,7 @@ export function GodownHome() {
   );
 }
 
-function SendCard({ t, nm, dq, rack, have, onDone }: { t: Transfer; nm: (id: string) => string; dq: (id: string, q: number) => string; rack: (id: string) => string; have: (id: string) => number; onDone: () => void }) {
+function SendCard({ t, nm, dq, rack, have, onDone }: { t: Transfer; nm: (id: string) => string; dq: (id: string, q: number) => string; rack: (id: string) => string; have: (id: string) => number; onDone: (msg: string) => void }) {
   const bi = useBi();
   const { lang } = useSession();
   const [sent, setSent] = useState<Record<string, string>>(() => Object.fromEntries(t.lines.map((l) => [l.itemId, String(Math.min(l.qty, Math.max(0, have(l.itemId))))])));
@@ -287,13 +261,19 @@ function SendCard({ t, nm, dq, rack, have, onDone }: { t: Transfer; nm: (id: str
     setError('');
     try {
       await http.post('/transfers/' + t.id + '/send', { vehicle, driver, sent: Object.fromEntries(Object.entries(sent).map(([k, v]) => [k, Number(v) || 0])) });
-      onDone();
+      onDone(
+        bi('Sent to the shop: ', 'ಅಂಗಡಿಗೆ ಕಳುಹಿಸಲಾಗಿದೆ: ') +
+          t.lines
+            .filter((l) => (Number(sent[l.itemId]) || 0) > 0)
+            .map((l) => nm(l.itemId) + ' −' + dq(l.itemId, Number(sent[l.itemId]) || 0))
+            .join(', '),
+      );
     } catch (e) {
       setError((e as Error).message);
     }
   };
   return (
-    <div className="card">
+    <div className="card" data-tour="godown-send-card">
       <div className="bar between">
         <span className="name">
           #{t.no} · {bi('for the shop', 'ಅಂಗಡಿಗೆ')}
@@ -316,14 +296,14 @@ function SendCard({ t, nm, dq, rack, have, onDone }: { t: Transfer; nm: (id: str
               <td className="name">{nm(l.itemId)}</td>
               <td className="muted">{rack(l.itemId)}</td>
               <td className="num">{dq(l.itemId, l.qty)}</td>
-              <td className="num">
+              <td className="num" data-tour="godown-sending">
                 <input inputMode="decimal" value={sent[l.itemId] ?? ''} onChange={(e) => setSent({ ...sent, [l.itemId]: e.target.value })} className="in-price" />
               </td>
             </tr>
           ))}
         </tbody>
       </Table>
-      <div className="grid2 mt-10">
+      <div className="grid2 mt-10" data-tour="godown-vehicle">
         <label className="field">
           <span>{bi('Vehicle', 'ವಾಹನ')}</span>
           <input list="vehicles" value={vehicle} onChange={(e) => setVehicle(e.target.value)} placeholder="KA-17 AB 1234" />
@@ -334,312 +314,15 @@ function SendCard({ t, nm, dq, rack, have, onDone }: { t: Transfer; nm: (id: str
           <input value={driver} onChange={(e) => setDriver(e.target.value)} />
         </label>
       </div>
-      <button className="btn primary" onClick={send}>
-        🚚 {bi('Sent', 'ಕಳುಹಿಸಿದೆ')}
+      <button className="btn primary" onClick={send} data-tour="godown-send">
+        🚚 {bi('Send to shop', 'ಅಂಗಡಿಗೆ ಕಳುಹಿಸಿ')}
       </button>
     </div>
   );
 }
 
-// ================================================================ delivery
-
-type Drop = Delivery & { lines: { text: string; ink?: Ink; qty: number }[] };
-
-export function DeliveryHome() {
-  const bi = useBi();
-  const { lang } = useSession();
-  const [version, setVersion] = useState(0);
-  const live = useLive('deliveries', 'bills');
-  const { value, error } = useLoad(() => http.get<Drop[]>('/delivery/mine'), [version, live]);
-  if (error) return <div className="msg err">{error}</div>;
-  if (!value) return <Loading />;
-  const setStatus = async (d: Drop, status: 'out' | 'delivered' | 'failed') => {
-    const note = status === 'failed' ? window.prompt(bi('What happened?', 'ಏನಾಯಿತು?')) ?? '' : undefined;
-    await http.post('/deliveries/' + d.id + '/status', { status, ...(note ? { note } : {}) });
-    setVersion((v) => v + 1);
-  };
-  const todo = value.filter((d) => d.status !== 'delivered');
-  const done = value.filter((d) => d.status === 'delivered');
-  return (
-    <>
-      <h1 className="title">{bi('My deliveries', 'ನನ್ನ ಡೆಲಿವರಿಗಳು')}</h1>
-      {todo.length === 0 && <Empty>{bi('All delivered.', 'ಎಲ್ಲ ತಲುಪಿಸಲಾಗಿದೆ.')}</Empty>}
-      {todo.map((d) => (
-        <div className="card" key={d.id}>
-          <div className="bar between">
-            <span className="name">{d.name}</span>
-            <Status s={d.status} label={statusWord(d.status, lang)} />
-          </div>
-          <div>{d.address}</div>
-          {d.landmark && <div className="muted">📍 {d.landmark}</div>}
-          <div className="bar my-8">
-            <a className="btn" href={'tel:' + d.phone}>
-              📞 {bi('Call', 'ಕರೆ')}
-            </a>
-            <a className="btn" target="_blank" rel="noreferrer" href={'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(d.address + (d.landmark ? ' ' + d.landmark : ''))}>
-              🗺 {bi('Map', 'ನಕ್ಷೆ')}
-            </a>
-          </div>
-          <ul className="lines">
-            {d.lines.map((l, i) => (
-              <li key={i}>
-                {l.ink && !l.text ? <InkView ink={l.ink} height={24} /> : l.text} · {l.qty}
-              </li>
-            ))}
-          </ul>
-          {d.amountDue > 0 && (
-            <div className="banner warn">
-              {bi('Collect', 'ವಸೂಲಿ ಮಾಡಿ')} <Money v={d.amountDue} />
-            </div>
-          )}
-          <div className="bar mt-10">
-            {(d.status === 'pending' || d.status === 'failed') && (
-              <button className="btn primary" onClick={() => setStatus(d, 'out')}>
-                {bi('Leaving now', 'ಹೊರಡುತ್ತಿದ್ದೇನೆ')}
-              </button>
-            )}
-            {d.status === 'out' && (
-              <>
-                <button className="btn primary" onClick={() => setStatus(d, 'delivered')}>
-                  ✓ {bi('Delivered', 'ತಲುಪಿಸಿದೆ')}
-                </button>
-                <button className="btn danger" onClick={() => setStatus(d, 'failed')}>
-                  {bi('Could not deliver', 'ತಲುಪಿಸಲಾಗಲಿಲ್ಲ')}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      ))}
-      {done.length > 0 && <h2 className="subtitle">{bi('Delivered', 'ತಲುಪಿಸಿದ್ದು')}</h2>}
-      {done.map((d) => (
-        <div className="card muted" key={d.id}>
-          {d.name} · {bi('bill', 'ಬಿಲ್')} #{d.billNo} · {d.times.delivered ? when(d.times.delivered, lang) : ''}
-        </div>
-      ))}
-    </>
-  );
-}
-
-// ================================================================ customer
-
-interface CBill {
-  no: number;
-  at: string;
-  total: number;
-  paid: number;
-  balance: number;
-  cancelled: boolean;
-  lines: { name: string; ink?: Ink; qty: number; amount: number; itemId?: string; unit?: string }[];
-}
-interface CItem {
-  id: string;
-  nameEn: string;
-  nameKn: string;
-  category: string;
-  units: { code: string; label: string; labelKn: string; price: number }[];
-  available: boolean;
-}
-
-export function CustomerHome() {
-  const bi = useBi();
-  const { lang } = useSession();
-  const [tab, setTab] = useState<'bills' | 'items' | 'order'>('bills');
-  const [version, setVersion] = useState(0);
-  const live = useLive('bills', 'orders', 'items', 'stock');
-  const bills = useLoad(() => http.get<{ name: string; balance: number; bills: CBill[] }>('/customer/bills'), [version, live]);
-  const cat = useLoad(() => http.get<CItem[]>('/customer/catalogue'), [live]);
-  const orders = useLoad(() => http.get<OrderRequest[]>('/customer/orders'), [version, live]);
-  const [q, setQ] = useState('');
-  const [cart, setCart] = useState<Record<string, { unit: string; qty: number }>>({});
-  const [note, setNote] = useState('');
-  const [sent, setSent] = useState('');
-  const [written, setWritten] = useState<WrittenResult[]>([]);
-  const [cat2, setCat2] = useState('');
-  const items = cat.value ?? [];
-  const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
-
-  const placeOrder = async () => {
-    const lines = [
-      ...Object.entries(cart).map(([itemId, v]) => ({ itemId, unit: v.unit, qty: v.qty })),
-      // A written line goes as the writing itself, what it was read as, and the item when sure.
-      ...written.map((w) => ({ ink: w.ink, ...(w.readText ? { text: w.readText } : {}), ...(w.matches[0] && w.matches[0].confidence >= 0.85 ? { itemId: w.matches[0].itemId } : {}), ...(w.qty ? { qty: w.qty } : {}), ...(w.unit ? { unit: w.unit } : {}) })),
-    ];
-    await http.post('/customer/orders', { lines, ...(note ? { note } : {}) });
-    setCart({});
-    setWritten([]);
-    setNote('');
-    setSent(bi('Sent to the shop. You will see it here when it is billed.', 'ಅಂಗಡಿಗೆ ಕಳುಹಿಸಲಾಗಿದೆ. ಬಿಲ್ ಆದಾಗ ಇಲ್ಲಿ ಕಾಣುತ್ತದೆ.'));
-    setVersion((v) => v + 1);
-  };
-
-  return (
-    <>
-      {bills.value && (
-        <div className={'banner ' + (bills.value.balance > 0 ? 'warn' : 'ok')}>
-          {bi('Namaskara', 'ನಮಸ್ಕಾರ')}, {bills.value.name} · {bi('Balance due', 'ಬಾಕಿ')}: <Money v={bills.value.balance} />
-        </div>
-      )}
-      <Tabs
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { key: 'bills', label: bi('My bills', 'ನನ್ನ ಬಿಲ್‌ಗಳು') },
-          { key: 'items', label: bi('Shop items', 'ಅಂಗಡಿ ಸಾಮಾನು') },
-          { key: 'order', label: bi('Order', 'ಆರ್ಡರ್') + (Object.keys(cart).length ? ' (' + Object.keys(cart).length + ')' : '') },
-        ]}
-      />
-      {tab === 'bills' &&
-        (bills.value ? (
-          bills.value.bills.map((b) => (
-            <div className="card slip" key={b.no}>
-              <div className="bar between">
-                <b>
-                  {bi('Bill', 'ಬಿಲ್')} #{b.no}
-                </b>
-                <span className="muted">{when(b.at, lang)}</span>
-              </div>
-              {b.lines.map((l, i) => (
-                <div className="slip-line" key={i}>
-                  <span className="muted">{i + 1}</span>
-                  <span className="grow">{l.ink ? <InkView ink={l.ink} height={30} /> : l.name}</span>
-                  <span className="num">{formatRupees(l.amount)}</span>
-                </div>
-              ))}
-              <div className="slip-total">
-                <span>{bi('Total', 'ಒಟ್ಟು')}</span>
-                <b className="num">{formatRupees(b.total)}</b>
-              </div>
-              {b.lines.some((l) => l.itemId && byId.get(l.itemId)?.available) && (
-                <button
-                  className="btn small mt-8"
-                  onClick={() => {
-                    const next = { ...cart };
-                    for (const l of b.lines) {
-                      if (l.itemId && l.unit && byId.get(l.itemId)?.available) next[l.itemId] = { unit: l.unit, qty: (next[l.itemId]?.qty ?? 0) + l.qty };
-                    }
-                    setCart(next);
-                    setTab('order');
-                  }}
-                >
-                  ↻ {bi('Order these again', 'ಇವನ್ನೇ ಮತ್ತೆ ಆರ್ಡರ್ ಮಾಡಿ')}
-                </button>
-              )}
-              {b.balance > 0 && (
-                <div className="muted">
-                  {bi('Paid', 'ಪಾವತಿ')} {formatRupees(b.paid)} · {bi('Balance', 'ಬಾಕಿ')} {formatRupees(b.balance)}
-                </div>
-              )}
-            </div>
-          ))
-        ) : (
-          <Loading />
-        ))}
-      {tab === 'items' && (
-        <>
-          <input placeholder={bi('Search in Kannada or English', 'ಕನ್ನಡ ಅಥವಾ ಇಂಗ್ಲಿಷ್‌ನಲ್ಲಿ ಹುಡುಕಿ')} value={q} onChange={(e) => setQ(e.target.value)} className="mb-10" />
-          {!q.trim() && (
-            <div className="chips mb-10">
-              {[...new Set(items.map((i) => i.category).filter(Boolean))].sort().map((c) => (
-                <button key={c} className={'chip ' + (cat2 === c ? 'on' : '')} onClick={() => setCat2(cat2 === c ? '' : c)}>
-                  {c}
-                </button>
-              ))}
-            </div>
-          )}
-          {items
-            .filter((i) => (!q.trim() || itemMatches(i, q)) && (q.trim() || !cat2 || i.category === cat2))
-            .map((i) => (
-              <div className="card item-row" key={i.id}>
-                <div className="grow">
-                  <div className="name">{pickName(i.nameEn, i.nameKn, lang)}</div>
-                  <div className="muted">
-                    {i.units.map((u) => ((lang === 'kn' && u.labelKn) || u.label) + ' ' + formatRupees(u.price)).join(' · ')}
-                  </div>
-                </div>
-                {i.available ? (
-                  <button className="btn small" onClick={() => setCart({ ...cart, [i.id]: { unit: i.units[0]!.code, qty: (cart[i.id]?.qty ?? 0) + 1 } })}>
-                    + {bi('Add', 'ಸೇರಿಸಿ')} {cart[i.id] ? '(' + cart[i.id]!.qty + ')' : ''}
-                  </button>
-                ) : (
-                  <span className="pill">{bi('Not in the shop now', 'ಈಗ ಅಂಗಡಿಯಲ್ಲಿಲ್ಲ')}</span>
-                )}
-              </div>
-            ))}
-        </>
-      )}
-      {tab === 'order' && (
-        <>
-          {sent && <div className="msg ok">{sent}</div>}
-          <div className="bar mb-10">
-            <WriteToFind label={bi('Write a line by hand', 'ಕೈಯಿಂದ ಬರೆಯಿರಿ')} onResult={(r) => setWritten((w) => [...w, r])} />
-          </div>
-          {written.map((w, i) => (
-            <div className="card bar" key={i}>
-              <InkView ink={w.ink} height={30} />
-              <span className="grow muted">{w.readText}</span>
-              <button className="btn ghost small" onClick={() => setWritten(written.filter((_, j) => j !== i))}>
-                ✕
-              </button>
-            </div>
-          ))}
-          {Object.keys(cart).length === 0 && written.length === 0 ? (
-            <Empty>{bi('Add items from “Shop items”.', '“ಅಂಗಡಿ ಸಾಮಾನು” ನಿಂದ ಸೇರಿಸಿ.')}</Empty>
-          ) : (
-            <div className="card">
-              {Object.entries(cart).map(([id, v]) => {
-                const it = byId.get(id);
-                return (
-                  <div className="bar mb-6" key={id}>
-                    <span className="grow name">{it ? pickName(it.nameEn, it.nameKn, lang) : id}</span>
-                    <Select
-                      value={v.unit}
-                      onChange={(unit) => setCart({ ...cart, [id]: { ...v, unit } })}
-                      className="w-auto"
-                      aria-label={bi('Unit', 'ಘಟಕ')}
-                      options={(it?.units ?? []).map((u) => ({ value: u.code, label: (lang === 'kn' && u.labelKn) || u.label }))}
-                    />
-                    <input inputMode="decimal" value={v.qty} onChange={(e) => setCart({ ...cart, [id]: { ...v, qty: Number(e.target.value) || 0 } })} className="in-qty" />
-                  </div>
-                );
-              })}
-              <label className="field mt-10">
-                <span>{bi('Note for the shop', 'ಅಂಗಡಿಗೆ ಟಿಪ್ಪಣಿ')}</span>
-                <input value={note} onChange={(e) => setNote(e.target.value)} />
-              </label>
-              <button className="btn primary" onClick={placeOrder}>
-                {bi('Send to the shop', 'ಅಂಗಡಿಗೆ ಕಳುಹಿಸಿ')}
-              </button>
-            </div>
-          )}
-          <h2 className="subtitle">{bi('My requests', 'ನನ್ನ ಬೇಡಿಕೆಗಳು')}</h2>
-          {(orders.value ?? []).map((o) => (
-            <div className="card" key={o.id}>
-              <div className="bar between">
-                <span className="muted">{when(o.at, lang)}</span>
-                <Status s={o.status} label={statusWord(o.status, lang)} />
-              </div>
-              <ul className="lines">
-                {o.lines.map((l, i) => {
-                  const it = l.itemId ? byId.get(l.itemId) : undefined;
-                  return (
-                    <li key={i}>
-                      {l.ink && <InkView ink={l.ink} height={24} />} {it ? pickName(it.nameEn, it.nameKn, lang) : l.text}
-                      {l.qty != null && ' · ' + l.qty + ' ' + (l.unit ?? '')}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ))}
-        </>
-      )}
-    </>
-  );
-}
-
 /** A godown receiving: what was sent, and what actually arrived, counted here. */
-function ReceiveCard({ t, nm, dq, onDone }: { t: Transfer; nm: (id: string) => string; dq: (id: string, q: number) => string; onDone: () => void }) {
+function ReceiveCard({ t, nm, dq, onDone }: { t: Transfer; nm: (id: string) => string; dq: (id: string, q: number) => string; onDone: (msg: string) => void }) {
   const bi = useBi();
   const { lang } = useSession();
   const [got, setGot] = useState<Record<string, string>>(() => Object.fromEntries(t.lines.map((l) => [l.itemId, String(l.sent ?? l.qty)])));
@@ -648,7 +331,7 @@ function ReceiveCard({ t, nm, dq, onDone }: { t: Transfer; nm: (id: string) => s
     setError('');
     try {
       await http.post('/transfers/' + t.id + '/receive', { received: Object.fromEntries(Object.entries(got).map(([k, v]) => [k, Number(v) || 0])) });
-      onDone();
+      onDone(bi('Received here: ', 'ಇಲ್ಲಿಗೆ ಬಂದಿದೆ: ') + t.lines.map((l) => nm(l.itemId) + ' +' + dq(l.itemId, Number(got[l.itemId]) || 0)).join(', '));
     } catch (e) {
       setError((e as Error).message);
     }
@@ -686,8 +369,8 @@ function ReceiveCard({ t, nm, dq, onDone }: { t: Transfer; nm: (id: string) => s
           })}
         </tbody>
       </Table>
-      <button className="btn primary" onClick={receive}>
-        {bi('Received', 'ಬಂದಿದೆ')}
+      <button className="btn primary" onClick={receive} data-tour="godown-receive">
+        {bi('Mark received', 'ಬಂದಿದೆ ಎಂದು ಗುರುತಿಸಿ')}
       </button>
     </div>
   );

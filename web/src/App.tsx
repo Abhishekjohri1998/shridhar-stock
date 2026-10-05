@@ -7,14 +7,14 @@ import { stopLive, useLiveStatus } from './lib/live';
 import { LoginPage } from './pages/Login';
 import { PinPage } from './pages/Pin';
 import { WalkthroughPage } from './pages/Walkthrough';
+import { HelpPage } from './pages/Help';
 import { AdminHome } from './roles/admin/Home';
 import { ConfirmPage } from './roles/admin/Confirm';
-import { BillsPage, RequestsPage, SettingsPage } from './roles/admin/Flows';
-import { DeliveriesPage } from './roles/admin/Deliver';
+import { BillsPage, SettingsPage } from './roles/admin/Flows';
 import { ReportsPage } from './roles/Reports';
 import { PurchasesPage } from './roles/admin/Buying';
 import { RefillPage, TransfersPage } from './roles/admin/Moving';
-import { CustomerHome, DeliveryHome, GodownHome, OwnerHome, WorkerHome } from './roles/RoleScreens';
+import { GodownHome, WorkerHome } from './roles/RoleScreens';
 import { InventoryPage } from './pages/admin/Inventory';
 import { InventoryItemPage } from './pages/admin/InventoryItem';
 import { LowToast } from './components/LowToast';
@@ -22,68 +22,61 @@ import { PlacesPage } from './pages/admin/Places';
 import { PeoplePage } from './pages/admin/People';
 import { FilesPage } from './pages/admin/Files';
 import { VehiclesPage } from './pages/admin/Vehicles';
+import { firstTourSeen, markFirstTourSeen, TourButton, TourProvider, useTour } from './components/Tour';
+import { FIRST_TOUR, tourForPath } from './tours';
 
-type NavItem = { to: string; en: string; kn: string; icon: IconName };
-type NavGroup = { en: string; kn: string; items: NavItem[] };
-const item = (to: string, en: string, kn: string, icon: IconName): NavItem => ({ to, en, kn, icon });
+/** A screen inside one menu place, shown as a tab. */
+type Tab = { to: string; en: string; kn: string };
+/** One menu place: where it opens, and the screens (tabs) that belong to it. */
+type Place = { to: string; en: string; kn: string; icon: IconName; tour: string; tabs: Tab[] };
+const tab = (to: string, en: string, kn: string): Tab => ({ to, en, kn });
 
-/** Each role's menu, grouped for the sidebar. The same routes as before, in the same order. */
-const NAV: Record<Role, NavGroup[]> = {
-  admin: [
-    {
-      en: 'Today',
-      kn: 'ಇಂದು',
-      items: [item('/admin', 'Home', 'ಮುಖಪುಟ', 'home'), item('/admin/confirm', 'To confirm', 'ಖಚಿತಪಡಿಸಿ', 'checkCircle'), item('/admin/bills', 'Bills', 'ಬಿಲ್‌ಗಳು', 'receipt')],
-    },
-    {
-      en: 'Inventory',
-      kn: 'ಸಾಮಾನು ಮತ್ತು ಸ್ಟಾಕ್',
-      items: [item('/admin/inventory', 'Inventory', 'ಸಾಮಾನು', 'box'), item('/admin/refill', 'Refill', 'ತರಿಸಿ', 'refill')],
-    },
-    {
-      en: 'Moving',
-      kn: 'ಸಾಗಣೆ',
-      items: [item('/admin/transfers', 'Transfers', 'ಸಾಗಣೆ', 'transfer'), item('/admin/deliveries', 'Deliveries', 'ಡೆಲಿವರಿ', 'truck'), item('/admin/requests', 'Requests', 'ಬೇಡಿಕೆ', 'inbox')],
-    },
-    { en: 'Buying', kn: 'ಖರೀದಿ', items: [item('/admin/purchases', 'Purchases', 'ಖರೀದಿ', 'cart'), item('/admin/reports', 'Reports', 'ವರದಿ', 'chart')] },
-    {
-      en: 'People & setup',
-      kn: 'ಜನರು ಮತ್ತು ಸೆಟಪ್',
-      items: [
-        item('/admin/places', 'Places', 'ಸ್ಥಳಗಳು', 'pin'),
-        item('/admin/people', 'People', 'ಜನರು', 'people'),
-        item('/admin/vehicles', 'Vehicles', 'ವಾಹನಗಳು', 'truck'),
-        item('/admin/files', 'Excel', 'ಎಕ್ಸೆಲ್', 'file'),
-        item('/admin/settings', 'Settings', 'ಸೆಟ್ಟಿಂಗ್ಸ್', 'settings'),
-      ],
-    },
-  ],
-  owner: [
-    { en: 'Today', kn: 'ಇಂದು', items: [item('/owner', 'Overview', 'ಸಾರಾಂಶ', 'home'), item('/owner/bills', 'Bills', 'ಬಿಲ್‌ಗಳು', 'receipt')] },
-    {
-      en: 'Stock',
-      kn: 'ಸ್ಟಾಕ್',
-      items: [item('/owner/reports', 'Reports', 'ವರದಿ', 'chart'), item('/owner/inventory', 'Inventory', 'ಸಾಮಾನು', 'box'), item('/owner/files', 'Excel', 'ಎಕ್ಸೆಲ್', 'file')],
-    },
-  ],
-  worker: [{ en: 'Today', kn: 'ಇಂದು', items: [item('/worker', 'Pick list', 'ಪಟ್ಟಿ', 'list'), item('/worker/screen', 'TV screen', 'ಟಿವಿ ಪರದೆ', 'tv')] }],
-  godown: [{ en: 'Today', kn: 'ಇಂದು', items: [item('/godown', 'My godown', 'ನನ್ನ ಗೋದಾಮು', 'warehouse')] }],
-  // Suppliers no longer sign in; the role is kept only so old records read.
-  vendor: [],
-  delivery: [{ en: 'Today', kn: 'ಇಂದು', items: [item('/delivery', 'Deliveries', 'ಡೆಲಿವರಿ', 'truck')] }],
-  customer: [{ en: 'Today', kn: 'ಇಂದು', items: [item('/customer', 'My shop', 'ನನ್ನ ಅಂಗಡಿ', 'store')] }],
-};
+/**
+ * The admin's menu: five places instead of sixteen. Each place is one screen with tabs; the tabs
+ * keep their old addresses, so every bookmark still lands.
+ */
+const ADMIN: Place[] = [
+  { to: '/admin', en: 'Home', kn: 'ಮುಖಪುಟ', icon: 'home', tour: 'nav-home', tabs: [tab('/admin', 'Today', 'ಇಂದು'), tab('/admin/reports', 'Reports', 'ವರದಿ')] },
+  { to: '/admin/bills', en: 'Bills', kn: 'ಬಿಲ್‌ಗಳು', icon: 'receipt', tour: 'nav-bills', tabs: [tab('/admin/bills', 'Bills', 'ಬಿಲ್‌ಗಳು'), tab('/admin/confirm', 'To confirm', 'ಖಚಿತಪಡಿಸಿ')] },
+  {
+    to: '/admin/inventory',
+    en: 'Inventory',
+    kn: 'ಸಾಮಾನು',
+    icon: 'box',
+    tour: 'nav-inventory',
+    tabs: [tab('/admin/inventory', 'Items & stock', 'ಸಾಮಾನು ಮತ್ತು ಸ್ಟಾಕ್'), tab('/admin/refill', 'Bring from godown', 'ಗೋದಾಮಿನಿಂದ ತರಿಸಿ')],
+  },
+  {
+    to: '/admin/purchases',
+    en: 'Buy & move',
+    kn: 'ಖರೀದಿ ಮತ್ತು ಸಾಗಣೆ',
+    icon: 'cart',
+    tour: 'nav-move',
+    tabs: [tab('/admin/purchases', 'Purchases', 'ಖರೀದಿ'), tab('/admin/transfers', 'Transfers', 'ಸಾಗಣೆ')],
+  },
+  {
+    to: '/admin/places',
+    en: 'Setup',
+    kn: 'ಸೆಟಪ್',
+    icon: 'settings',
+    tour: 'nav-setup',
+    tabs: [
+      tab('/admin/places', 'Places', 'ಸ್ಥಳಗಳು'),
+      tab('/admin/people', 'People', 'ಜನರು'),
+      tab('/admin/vehicles', 'Vehicles', 'ವಾಹನಗಳು'),
+      tab('/admin/files', 'Excel', 'ಎಕ್ಸೆಲ್'),
+      tab('/admin/settings', 'Settings', 'ಸೆಟ್ಟಿಂಗ್ಸ್'),
+    ],
+  },
+];
+/** The phone's bottom bar: these, then "More" for the rest. */
+const PRIMARY = ['/admin', '/admin/bills', '/admin/inventory'];
 
-/** The four a phone's bottom bar shows for each role; the rest go under "More". */
-const PRIMARY: Record<Role, string[]> = {
-  admin: ['/admin', '/admin/confirm', '/admin/inventory', '/admin/bills'],
-  owner: ['/owner', '/owner/bills', '/owner/reports', '/owner/inventory'],
-  worker: ['/worker', '/worker/screen'],
-  godown: ['/godown'],
-  vendor: [],
-  delivery: ['/delivery'],
-  customer: ['/customer'],
-};
+/** The worker's two views, as tabs; the godown has one screen and no tabs. */
+const WORKER_TABS: Tab[] = [tab('/worker', 'Pick list', 'ಪಟ್ಟಿ'), tab('/worker/screen', 'TV screen', 'ಟಿವಿ ಪರದೆ')];
+
+const inTab = (path: string, t: Tab) => path === t.to || (t.to === '/admin/inventory' && path.startsWith('/admin/inventory/'));
+const placeOf = (path: string) => ADMIN.find((p) => p.tabs.some((t) => inTab(path, t)));
 
 // ---- light and dark --------------------------------------------------------
 const THEME_KEY = 'stock.theme';
@@ -151,7 +144,7 @@ function UserMenu() {
   if (!me) return null;
   return (
     <div className="user-menu" ref={box}>
-      <button className="user-btn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button className="user-btn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} data-tour="user-menu">
         <span className="avatar" aria-hidden="true">
           {me.name.slice(0, 1).toUpperCase()}
         </span>
@@ -166,8 +159,11 @@ function UserMenu() {
             <b>{me.name}</b>
             <span className="muted">{t(('role.' + me.role) as MsgKey)}</span>
           </div>
+          <NavLink to="/help" role="menuitem" className="menu-item">
+            <Icon name="help" /> {lang === 'kn' ? 'ಇದೆಲ್ಲ ಹೇಗೆ ಕೆಲಸ ಮಾಡುತ್ತದೆ' : 'How it all works'}
+          </NavLink>
           <NavLink to="/walkthrough" role="menuitem" className="menu-item">
-            <Icon name="book" /> {lang === 'kn' ? 'ಪರಿಚಯ' : 'Walkthrough'}
+            <Icon name="book" /> {lang === 'kn' ? 'ಡೆಮೊ ಪರಿಚಯ' : 'Demo walkthrough'}
           </NavLink>
           <NavLink to="/pin" role="menuitem" className="menu-item">
             <Icon name="key" /> {t('login.changePin')}
@@ -184,6 +180,7 @@ function UserMenu() {
 function Top({ onMenu }: { onMenu?: () => void }) {
   const { me, t, lang, setLang } = useSession();
   const [theme, toggleTheme] = useTheme();
+  const loc = useLocation();
   return (
     <header className="top">
       {onMenu && (
@@ -194,6 +191,7 @@ function Top({ onMenu }: { onMenu?: () => void }) {
       <span className="brand">{t('app.name')}</span>
       {me && <LiveDot />}
       <span className="top-gap" />
+      {me && <TourButton tourId={tourForPath(loc.pathname)} />}
       <button className="icon-btn" onClick={() => setLang(lang === 'kn' ? 'en' : 'kn')} title={t('common.lang')}>
         <Icon name="globe" />
         <span className="lang-word">{t('common.lang')}</span>
@@ -211,56 +209,53 @@ function Top({ onMenu }: { onMenu?: () => void }) {
   );
 }
 
-function NavItemLink({ it, role, onClick }: { it: NavItem; role: Role; onClick?: () => void }) {
+/** A menu place: active on any of its tabs, not only its first screen. */
+function PlaceLink({ p, onClick }: { p: Place; onClick?: () => void }) {
   const { lang } = useSession();
-  const label = lang === 'kn' ? it.kn : it.en;
+  const loc = useLocation();
+  const label = lang === 'kn' ? p.kn : p.en;
+  const on = placeOf(loc.pathname) === p;
   return (
-    <NavLink to={it.to} end={it.to === ROLE_HOME[role]} title={label} onClick={onClick}>
-      <Icon name={it.icon} />
+    <NavLink to={p.to} end title={label} onClick={onClick} className={on ? 'active' : ''} aria-current={on ? 'page' : undefined} data-tour={p.tour}>
+      <Icon name={p.icon} />
       <span className="nav-label">{label}</span>
     </NavLink>
   );
 }
 
-function Sidebar({ role }: { role: Role }) {
+function Sidebar() {
   const { lang } = useSession();
   return (
     <nav className="side" aria-label={lang === 'kn' ? 'ಮೆನು' : 'Menu'}>
-      {NAV[role].map((g) => (
-        <div className="side-group" key={g.en}>
-          <div className="side-head">{lang === 'kn' ? g.kn : g.en}</div>
-          {g.items.map((it) => (
-            <NavItemLink key={it.to} it={it} role={role} />
-          ))}
-        </div>
-      ))}
+      <div className="side-group">
+        <div className="side-head">{lang === 'kn' ? 'ಮೆನು' : 'Menu'}</div>
+        {ADMIN.map((p) => (
+          <PlaceLink key={p.to} p={p} />
+        ))}
+      </div>
     </nav>
   );
 }
 
-function TabBar({ role, onMore, moreOpen }: { role: Role; onMore: () => void; moreOpen: boolean }) {
+function TabBar({ onMore, moreOpen }: { onMore: () => void; moreOpen: boolean }) {
   const { lang } = useSession();
-  const all = NAV[role].flatMap((g) => g.items);
-  const primary = PRIMARY[role].map((to) => all.find((i) => i.to === to)!).filter(Boolean);
-  const rest = all.filter((i) => !PRIMARY[role].includes(i.to));
   const loc = useLocation();
-  const inRest = rest.some((i) => loc.pathname === i.to || loc.pathname.startsWith(i.to + '/'));
+  const here = placeOf(loc.pathname);
+  const inRest = !!here && !PRIMARY.includes(here.to);
   return (
     <nav className="tabbar" aria-label={lang === 'kn' ? 'ಮುಖ್ಯ ಮೆನು' : 'Main menu'}>
-      {primary.map((it) => (
-        <NavItemLink key={it.to} it={it} role={role} />
+      {ADMIN.filter((p) => PRIMARY.includes(p.to)).map((p) => (
+        <PlaceLink key={p.to} p={p} />
       ))}
-      {rest.length > 0 && (
-        <button className={'tabbar-more' + (inRest || moreOpen ? ' active' : '')} onClick={onMore} aria-expanded={moreOpen}>
-          <Icon name="more" />
-          <span className="nav-label">{lang === 'kn' ? 'ಇನ್ನಷ್ಟು' : 'More'}</span>
-        </button>
-      )}
+      <button className={'tabbar-more' + (inRest || moreOpen ? ' active' : '')} onClick={onMore} aria-expanded={moreOpen} data-tour="nav-more">
+        <Icon name="more" />
+        <span className="nav-label">{lang === 'kn' ? 'ಇನ್ನಷ್ಟು' : 'More'}</span>
+      </button>
     </nav>
   );
 }
 
-function MoreSheet({ role, onClose }: { role: Role; onClose: () => void }) {
+function MoreSheet({ onClose }: { onClose: () => void }) {
   const { lang } = useSession();
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -271,23 +266,39 @@ function MoreSheet({ role, onClose }: { role: Role; onClose: () => void }) {
     <div className="sheet-wrap" onClick={onClose}>
       <div className="sheet" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-top">
-          <span className="subtitle m-0">{lang === 'kn' ? 'ಎಲ್ಲಾ ಪುಟಗಳು' : 'Everything'}</span>
+          <span className="subtitle m-0">{lang === 'kn' ? 'ಎಲ್ಲಾ ಭಾಗಗಳು' : 'Everything'}</span>
           <button className="icon-btn" onClick={onClose} aria-label={lang === 'kn' ? 'ಮುಚ್ಚಿ' : 'Close'}>
             <Icon name="close" />
           </button>
         </div>
-        {NAV[role].map((g) => (
-          <div className="sheet-group" key={g.en}>
-            <div className="side-head">{lang === 'kn' ? g.kn : g.en}</div>
-            <div className="sheet-grid">
-              {g.items.map((it) => (
-                <NavItemLink key={it.to} it={it} role={role} onClick={onClose} />
-              ))}
-            </div>
+        <div className="sheet-group">
+          <div className="sheet-grid">
+            {ADMIN.map((p) => (
+              <PlaceLink key={p.to} p={p} onClick={onClose} />
+            ))}
           </div>
-        ))}
+        </div>
       </div>
     </div>
+  );
+}
+
+/** The tabs of the place you are in: Bills · To confirm, Purchases · Transfers, and so on. */
+function SectionTabs({ tabs }: { tabs: Tab[] }) {
+  const { lang } = useSession();
+  const loc = useLocation();
+  if (tabs.length < 2) return null;
+  return (
+    <nav className="tabs" aria-label={lang === 'kn' ? 'ಈ ಭಾಗದ ಪುಟಗಳು' : 'Screens here'} data-tour="section-tabs">
+      {tabs.map((t) => {
+        const on = inTab(loc.pathname, t);
+        return (
+          <NavLink key={t.to} to={t.to} end className={on ? 'tab on' : 'tab'} aria-current={on ? 'page' : undefined}>
+            {lang === 'kn' ? t.kn : t.en}
+          </NavLink>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -298,7 +309,30 @@ function ToInventory({ base }: { base: string }) {
   return <Navigate to={base + (id ? '/' + id : '') + loc.search} replace />;
 }
 
+/** The first time a person signs in, their role's tour plays by itself, once per device. */
+function FirstTour() {
+  const { me } = useSession();
+  const { start } = useTour();
+  const loc = useLocation();
+  useEffect(() => {
+    if (!me) return;
+    const id = FIRST_TOUR[me.role];
+    if (!id || loc.pathname !== ROLE_HOME[me.role] || firstTourSeen(me.id, me.role)) return;
+    const timer = setTimeout(() => start(id, () => markFirstTourSeen(me.id, me.role)), 400);
+    return () => clearTimeout(timer);
+  }, [me, loc.pathname, start]);
+  return null;
+}
+
 export function App() {
+  return (
+    <TourProvider>
+      <Shell />
+    </TourProvider>
+  );
+}
+
+function Shell() {
   const { ready, me, t } = useSession();
   const loc = useLocation();
   const [more, setMore] = useState(false);
@@ -326,68 +360,61 @@ export function App() {
     );
   }
   const home = ROLE_HOME[me.role];
-  const r = me.role;
-  const hasNav = NAV[r].flatMap((g) => g.items).length > 1;
+  const r: Role = me.role;
+  const hasNav = r === 'admin';
+  const tabs = r === 'admin' ? (placeOf(loc.pathname)?.tabs ?? []) : r === 'worker' ? WORKER_TABS : [];
   return (
     <div className={'shell' + (hasNav ? ' has-nav' : '')}>
-      {hasNav && <Sidebar role={r} />}
+      {hasNav && <Sidebar />}
       <div className="main-col">
-      <Top onMenu={hasNav ? () => setMore(true) : undefined} />
-      <main className={'page role-' + r + (loc.pathname === '/worker/screen' ? ' tv' : '')}>
-        <Routes>
-          <Route path="/pin" element={<PinPage />} />
-          {r === 'admin' && (
-            <>
-              <Route path="/admin" element={<AdminHome />} />
-              <Route path="/admin/confirm" element={<ConfirmPage />} />
-              <Route path="/admin/bills" element={<BillsPage />} />
-              <Route path="/admin/refill" element={<RefillPage />} />
-              <Route path="/admin/transfers" element={<TransfersPage />} />
-              <Route path="/admin/purchases" element={<PurchasesPage />} />
-              <Route path="/admin/deliveries" element={<DeliveriesPage />} />
-              <Route path="/admin/requests" element={<RequestsPage />} />
-              <Route path="/admin/settings" element={<SettingsPage />} />
-              <Route path="/admin/reports" element={<ReportsPage />} />
-              <Route path="/admin/inventory" element={<InventoryPage />} />
-              <Route path="/admin/inventory/new" element={<InventoryItemPage />} />
-              <Route path="/admin/inventory/:id" element={<InventoryItemPage />} />
-              {/* Items and Stock became Inventory: old links and bookmarks still land. */}
-              <Route path="/admin/items" element={<Navigate to="/admin/inventory" replace />} />
-              <Route path="/admin/items/:id" element={<ToInventory base="/admin/inventory" />} />
-              <Route path="/admin/stock" element={<ToInventory base="/admin/inventory" />} />
-              <Route path="/admin/places" element={<PlacesPage />} />
-              <Route path="/admin/people" element={<PeoplePage />} />
-              <Route path="/admin/vehicles" element={<VehiclesPage />} />
-              <Route path="/admin/files" element={<FilesPage />} />
-            </>
-          )}
-          {r === 'owner' && (
-            <>
-              <Route path="/owner" element={<OwnerHome />} />
-              <Route path="/owner/bills" element={<BillsPage />} />
-              <Route path="/owner/reports" element={<ReportsPage />} />
-              <Route path="/owner/inventory" element={<InventoryPage readOnly />} />
-              <Route path="/owner/inventory/:id" element={<InventoryItemPage readOnly />} />
-              <Route path="/owner/stock" element={<ToInventory base="/owner/inventory" />} />
-              <Route path="/owner/files" element={<FilesPage readOnly />} />
-            </>
-          )}
-          {(r === 'worker' || r === 'admin') && (
-            <>
-              <Route path="/worker" element={<WorkerHome />} />
-              <Route path="/worker/screen" element={<WorkerHome screen />} />
-            </>
-          )}
-          {r === 'godown' && <Route path="/godown" element={<GodownHome />} />}
-          {r === 'delivery' && <Route path="/delivery" element={<DeliveryHome />} />}
-          {r === 'customer' && <Route path="/customer" element={<CustomerHome />} />}
-          <Route path="*" element={<Navigate to={home} replace />} />
-        </Routes>
-      </main>
+        <Top onMenu={hasNav ? () => setMore(true) : undefined} />
+        <main className={'page role-' + r + (loc.pathname === '/worker/screen' ? ' tv' : '')}>
+          <SectionTabs tabs={tabs} />
+          <Routes>
+            <Route path="/pin" element={<PinPage />} />
+            <Route path="/help" element={<HelpPage />} />
+            {r === 'admin' && (
+              <>
+                <Route path="/admin" element={<AdminHome />} />
+                <Route path="/admin/reports" element={<ReportsPage />} />
+                <Route path="/admin/bills" element={<BillsPage />} />
+                <Route path="/admin/confirm" element={<ConfirmPage />} />
+                <Route path="/admin/inventory" element={<InventoryPage />} />
+                <Route path="/admin/inventory/new" element={<InventoryItemPage />} />
+                <Route path="/admin/inventory/:id" element={<InventoryItemPage />} />
+                <Route path="/admin/refill" element={<RefillPage />} />
+                <Route path="/admin/purchases" element={<PurchasesPage />} />
+                <Route path="/admin/transfers" element={<TransfersPage />} />
+                <Route path="/admin/places" element={<PlacesPage />} />
+                <Route path="/admin/people" element={<PeoplePage />} />
+                <Route path="/admin/vehicles" element={<VehiclesPage />} />
+                <Route path="/admin/files" element={<FilesPage />} />
+                <Route path="/admin/settings" element={<SettingsPage />} />
+                {/* Old links and bookmarks still land somewhere sensible. */}
+                <Route path="/admin/setup" element={<Navigate to="/admin/places" replace />} />
+                <Route path="/admin/move" element={<Navigate to="/admin/purchases" replace />} />
+                <Route path="/admin/deliveries" element={<Navigate to="/admin/bills" replace />} />
+                <Route path="/admin/requests" element={<Navigate to="/admin" replace />} />
+                <Route path="/admin/items" element={<Navigate to="/admin/inventory" replace />} />
+                <Route path="/admin/items/:id" element={<ToInventory base="/admin/inventory" />} />
+                <Route path="/admin/stock" element={<ToInventory base="/admin/inventory" />} />
+              </>
+            )}
+            {(r === 'worker' || r === 'admin') && (
+              <>
+                <Route path="/worker" element={<WorkerHome />} />
+                <Route path="/worker/screen" element={<WorkerHome screen />} />
+              </>
+            )}
+            {r === 'godown' && <Route path="/godown" element={<GodownHome />} />}
+            <Route path="*" element={<Navigate to={home} replace />} />
+          </Routes>
+        </main>
       </div>
-      {hasNav && <TabBar role={r} onMore={() => setMore(!more)} moreOpen={more} />}
-      {hasNav && more && <MoreSheet role={r} onClose={closeMore} />}
+      {hasNav && <TabBar onMore={() => setMore(!more)} moreOpen={more} />}
+      {hasNav && more && <MoreSheet onClose={closeMore} />}
       {r === 'admin' && <LowToast />}
+      <FirstTour />
     </div>
   );
 }

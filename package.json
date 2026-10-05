@@ -2,7 +2,7 @@
   "name": "shridhar-stock",
   "version": "0.1.0",
   "private": true,
-  "description": "Stock for the shop: items, units, places, godowns, transfers, and the website for workers, godowns, vendors, delivery and customers. Separate from the billing app, which it only reads.",
+  "description": "Stock for the shop: items, units, places, godowns, transfers, purchases, and the website for the admin, shop workers and godowns. Separate from the billing app, which it only reads.",
   "workspaces": [
     "core",
     "server",
@@ -18,13 +18,13 @@
     "unittest": "node scripts/unittest.js",
     "schematest": "node scripts/schematest.js",
     "apitest": "node scripts/apitest.js",
-    "test": "npm run typecheck && npm run unittest && npm run schematest && npm run apitest && npm run roletest && npm run linktest && npm run billinglinktest && npm run readertest && npm run livetest",
+    "test": "npm run typecheck && npm run unittest && npm run schematest && npm run apitest && npm run roletest && npm run linktest && npm run billinglinktest && npm run livetest && npm run tourtest",
     "roletest": "node scripts/roletest.js",
     "demo": "bash scripts/demo.sh",
     "linktest": "node scripts/linktest.js",
-    "readertest": "node scripts/readertest.js",
     "livetest": "node scripts/livetest.js",
-    "billinglinktest": "node scripts/billinglinktest.js"
+    "billinglinktest": "node scripts/billinglinktest.js",
+    "tourtest": "node scripts/tourtest.js"
   },
   "devDependencies": {
     "typescript": "^5.7.2"

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { describeQty, pickName, type Item, type Lang, type Location } from '@stock/core';
 import { api } from './api';
 
-/** Items and places, for the admin and owner screens that show names next to ids. */
+/** Items and places, for the admin screens that show names next to ids. */
 export function useCatalog(version = 0) {
   const [items, setItems] = useState<Map<string, Item>>(new Map());
   const [locs, setLocs] = useState<Location[]>([]);

@@ -17,13 +17,13 @@ export function lowWords(item: Item, lang: Lang): string {
 /**
  * Items and stock in one list: what each item is, where it is kept, how much each place has,
  * the total, and whether that total is running low. Tapping an item opens its page, with its
- * details and its stock on two tabs. The owner sees the same, read only.
+ * details and its stock on two tabs.
  */
 export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
   const { t, lang } = useSession();
   const bi = useBi();
   const nav = useNavigate();
-  const base = readOnly ? '/owner/inventory' : '/admin/inventory';
+  const base = '/admin/inventory';
   const [params, setParams] = useSearchParams();
   const onlyLow = params.get('low') === '1';
   const [q, setQ] = useState('');
@@ -57,20 +57,20 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
       <h1 className="title">{bi('Inventory', 'ಸಾಮಾನು ಮತ್ತು ಸ್ಟಾಕ್')}</h1>
       {note && <div className="msg ok">{note}</div>}
       <div className="bar">
-        <input className="grow" placeholder={t('common.search')} value={q} onChange={(e) => setQ(e.target.value)} />
+        <input className="grow" data-tour="inventory-search" placeholder={t('common.search')} value={q} onChange={(e) => setQ(e.target.value)} />
         {!readOnly && (
-          <Link className="btn primary" to="/admin/inventory/new">
+          <Link className="btn primary" to="/admin/inventory/new" data-tour="inventory-new">
             + {t('items.new')}
           </Link>
         )}
         {!readOnly && (
-          <button className="btn" onClick={recount}>
+          <button className="btn" onClick={recount} data-tour="inventory-recount">
             {t('stock.recount')}
           </button>
         )}
       </div>
       <div className="bar">
-        <label className="check">
+        <label className="check" data-tour="inventory-low">
           <input type="checkbox" checked={onlyLow} onChange={(e) => setParams(e.target.checked ? { low: '1' } : {})} />
           {t('stock.onlyLow')} ({lowCount})
         </label>
@@ -79,10 +79,14 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
           {t('items.showInactive')}
         </label>
       </div>
-      {items.length === 0 && <div className="card">{t('items.empty')}</div>}
-      {items.length > 0 && shown.length === 0 && <div className="card">{t('common.none')}</div>}
+      {items.length === 0 && <div className="card" data-tour="inventory-list">{t('items.empty')}</div>}
+      {items.length > 0 && shown.length === 0 && (
+        <div className="card" data-tour="inventory-list">
+          {onlyLow ? bi('Nothing is running low. Good.', 'ಏನೂ ಮುಗಿಯುತ್ತಿಲ್ಲ. ಒಳ್ಳೆಯದು.') : bi('No item matches. Try another name, or add it with “New item”.', 'ಯಾವ ಸಾಮಾನೂ ಹೊಂದುತ್ತಿಲ್ಲ. ಬೇರೆ ಹೆಸರು ನೋಡಿ, ಅಥವಾ “ಹೊಸ ಸಾಮಾನು” ಒತ್ತಿ ಸೇರಿಸಿ.')}
+        </div>
+      )}
       {shown.length > 0 && (
-        <div className="scroll">
+        <div className="scroll" data-tour="inventory-list">
           <Table className="list">
             <thead>
               <tr>
