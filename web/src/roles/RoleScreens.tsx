@@ -4,7 +4,7 @@ import { http } from '../lib/api';
 import { useLive } from '../lib/live';
 import { useLoad, useSession } from '../lib/session';
 import { statusWord } from '../lib/words';
-import { Empty, Greeting, InkView, Loading, Money, Status, Tabs, Tile, useBi, useWeekSales, VehicleOptions, WeekChart, when, Table } from '../components/ui';
+import { Empty, Greeting, InkView, Loading, Money, Status, Tabs, Tile, useBi, useWeekSales, VehicleOptions, WeekChart, when, Table, Select } from '../components/ui';
 import type { IconName } from '../components/Icon';
 import { WriteToFind, type WrittenResult } from '../components/WriteToFind';
 import type { Summary } from './admin/Home';
@@ -341,108 +341,6 @@ function SendCard({ t, nm, dq, rack, have, onDone }: { t: Transfer; nm: (id: str
   );
 }
 
-// ================================================================ vendor
-
-interface VendorPo {
-  id: string;
-  no: number;
-  status: string;
-  at: string;
-  to: string;
-  invoiceNo?: string;
-  vehicle?: string;
-  eta?: string;
-  lines: { name: string; nameKn: string; unit: string; qty: number; cost: number }[];
-  total: number;
-}
-
-export function VendorHome() {
-  const bi = useBi();
-  const { lang } = useSession();
-  const [version, setVersion] = useState(0);
-  const live = useLive('pos');
-  const { value, error } = useLoad(() => http.get<{ supplier: { name: string } | null; orders: VendorPo[] }>('/vendor/pos'), [version, live]);
-  if (error) return <div className="msg err">{error}</div>;
-  if (!value) return <Loading />;
-  return (
-    <>
-      <h1 className="title">
-        {bi('Orders for', 'ಆರ್ಡರ್‌ಗಳು:')} {value.supplier?.name}
-      </h1>
-      {value.orders.length === 0 && <Empty>{bi('No orders yet.', 'ಇನ್ನೂ ಆರ್ಡರ್ ಇಲ್ಲ.')}</Empty>}
-      {value.orders.map((p) => (
-        <VendorCard key={p.id} p={p} onDone={() => setVersion((v) => v + 1)} lang={lang} bi={bi} />
-      ))}
-    </>
-  );
-}
-
-function VendorCard({ p, onDone, lang, bi }: { p: VendorPo; onDone: () => void; lang: 'en' | 'kn'; bi: (en: string, kn: string) => string }) {
-  const [invoiceNo, setInvoice] = useState(p.invoiceNo ?? '');
-  const [vehicle, setVehicle] = useState(p.vehicle ?? '');
-  const [eta, setEta] = useState(p.eta ?? '');
-  const act = async (path: string, body: unknown = {}) => {
-    await http.post('/pos/' + p.id + path, body);
-    onDone();
-  };
-  return (
-    <div className="card">
-      <div className="bar between">
-        <span className="name">
-          #{p.no} · {bi('deliver to', 'ತಲುಪಿಸುವುದು:')} {p.to}
-        </span>
-        <Status s={p.status} label={statusWord(p.status, lang)} />
-      </div>
-      <div className="muted">{when(p.at, lang)}</div>
-      <ul className="lines">
-        {p.lines.map((l, i) => (
-          <li key={i}>
-            {lang === 'kn' && l.nameKn ? l.nameKn : l.name} · {l.qty} {l.unit} × {formatRupees(l.cost)}
-          </li>
-        ))}
-      </ul>
-      <b>
-        <Money v={p.total} />
-      </b>
-      {p.status === 'ordered' && (
-        <div className="bar mt-10">
-          <button className="btn primary" onClick={() => act('/confirm')}>
-            {bi('Confirm order', 'ಆರ್ಡರ್ ಒಪ್ಪಿಕೊಳ್ಳಿ')}
-          </button>
-        </div>
-      )}
-      {(p.status === 'confirmed' || p.status === 'ordered') && (
-        <div className="grid2 mt-10">
-          <label className="field">
-            <span>{bi('Invoice no.', 'ಇನ್‌ವಾಯ್ಸ್ ಸಂಖ್ಯೆ')}</span>
-            <input value={invoiceNo} onChange={(e) => setInvoice(e.target.value)} />
-          </label>
-          <label className="field">
-            <span>{bi('Vehicle', 'ವಾಹನ')}</span>
-            <input list="vehicles" value={vehicle} onChange={(e) => setVehicle(e.target.value)} />
-            <VehicleOptions />
-          </label>
-          <label className="field">
-            <span>{bi('Arrives', 'ತಲುಪುವ ಸಮಯ')}</span>
-            <input value={eta} onChange={(e) => setEta(e.target.value)} placeholder={bi('Today 6 pm', 'ಇಂದು ಸಂಜೆ 6')} />
-          </label>
-          <div className="field">
-            <span>&nbsp;</span>
-            <button className="btn primary" onClick={() => act('/dispatch', { invoiceNo, vehicle, eta })}>
-              🚚 {bi('Dispatched', 'ಕಳುಹಿಸಿದೆ')}
-            </button>
-          </div>
-        </div>
-      )}
-      {p.status === 'dispatched' && (
-        <p className="muted">
-          {p.invoiceNo} · {p.vehicle} · {p.eta}
-        </p>
-      )}
-    </div>
-  );
-}
-
 // ================================================================ delivery
 
 type Drop = Delivery & { lines: { text: string; ink?: Ink; qty: number }[] };
@@ -694,13 +592,13 @@ export function CustomerHome() {
                 return (
                   <div className="bar mb-6" key={id}>
                     <span className="grow name">{it ? pickName(it.nameEn, it.nameKn, lang) : id}</span>
-                    <select value={v.unit} onChange={(e) => setCart({ ...cart, [id]: { ...v, unit: e.target.value } })} className="w-auto">
-                      {it?.units.map((u) => (
-                        <option key={u.code} value={u.code}>
-                          {(lang === 'kn' && u.labelKn) || u.label}
-                        </option>
-                      ))}
-                    </select>
+                    <Select
+                      value={v.unit}
+                      onChange={(unit) => setCart({ ...cart, [id]: { ...v, unit } })}
+                      className="w-auto"
+                      aria-label={bi('Unit', 'ಘಟಕ')}
+                      options={(it?.units ?? []).map((u) => ({ value: u.code, label: (lang === 'kn' && u.labelKn) || u.label }))}
+                    />
                     <input inputMode="decimal" value={v.qty} onChange={(e) => setCart({ ...cart, [id]: { ...v, qty: Number(e.target.value) || 0 } })} className="in-qty" />
                   </div>
                 );

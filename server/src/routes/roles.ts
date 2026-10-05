@@ -170,7 +170,12 @@ roleRoutes.get(
       total += closed.length;
       if (orders.length < limit) orders = [...orders, ...closed.slice(Math.max(0, offset - open.length), Math.max(0, offset - open.length) + limit - orders.length)];
     }
-    res.json({ orders, open: open.length, total, next: offset + orders.length < total ? offset + orders.length : null });
+    // Names and units of just the items on this page, so the screen need not read the catalogue.
+    const want = new Set(orders.flatMap((o) => o.lines.map((l) => l.itemId)));
+    const items = (await repo.listItems())
+      .filter((i) => want.has(i.id))
+      .map((i) => ({ id: i.id, nameEn: i.nameEn, nameKn: i.nameKn, units: i.units.map((u) => ({ code: u.code, label: u.label, labelKn: u.labelKn, perBase: u.perBase })) }));
+    res.json({ orders, items, open: open.length, total, next: offset + orders.length < total ? offset + orders.length : null });
   }),
 );
 
