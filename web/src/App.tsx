@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, NavLink, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { Icon, type IconName } from './components/Icon';
 import { ROLE_HOME, type MsgKey, type Role } from '@stock/core';
 import { useSession } from './lib/session';
@@ -14,10 +14,10 @@ import { DeliveriesPage } from './roles/admin/Deliver';
 import { ReportsPage } from './roles/Reports';
 import { PurchasesPage } from './roles/admin/Buying';
 import { RefillPage, TransfersPage } from './roles/admin/Moving';
-import { CustomerHome, DeliveryHome, GodownHome, OwnerHome, VendorHome, WorkerHome } from './roles/RoleScreens';
-import { ItemsPage } from './pages/admin/Items';
-import { ItemEditor } from './pages/admin/ItemEditor';
-import { StockPage } from './pages/admin/Stock';
+import { CustomerHome, DeliveryHome, GodownHome, OwnerHome, WorkerHome } from './roles/RoleScreens';
+import { InventoryPage } from './pages/admin/Inventory';
+import { InventoryItemPage } from './pages/admin/InventoryItem';
+import { LowToast } from './components/LowToast';
 import { PlacesPage } from './pages/admin/Places';
 import { PeoplePage } from './pages/admin/People';
 import { FilesPage } from './pages/admin/Files';
@@ -35,7 +35,11 @@ const NAV: Record<Role, NavGroup[]> = {
       kn: 'ಇಂದು',
       items: [item('/admin', 'Home', 'ಮುಖಪುಟ', 'home'), item('/admin/confirm', 'To confirm', 'ಖಚಿತಪಡಿಸಿ', 'checkCircle'), item('/admin/bills', 'Bills', 'ಬಿಲ್‌ಗಳು', 'receipt')],
     },
-    { en: 'Stock', kn: 'ಸ್ಟಾಕ್', items: [item('/admin/stock', 'Stock', 'ಸ್ಟಾಕ್', 'box'), item('/admin/refill', 'Refill', 'ತರಿಸಿ', 'refill')] },
+    {
+      en: 'Inventory',
+      kn: 'ಸಾಮಾನು ಮತ್ತು ಸ್ಟಾಕ್',
+      items: [item('/admin/inventory', 'Inventory', 'ಸಾಮಾನು', 'box'), item('/admin/refill', 'Refill', 'ತರಿಸಿ', 'refill')],
+    },
     {
       en: 'Moving',
       kn: 'ಸಾಗಣೆ',
@@ -46,7 +50,6 @@ const NAV: Record<Role, NavGroup[]> = {
       en: 'People & setup',
       kn: 'ಜನರು ಮತ್ತು ಸೆಟಪ್',
       items: [
-        item('/admin/items', 'Items', 'ಸಾಮಾನು', 'tag'),
         item('/admin/places', 'Places', 'ಸ್ಥಳಗಳು', 'pin'),
         item('/admin/people', 'People', 'ಜನರು', 'people'),
         item('/admin/vehicles', 'Vehicles', 'ವಾಹನಗಳು', 'truck'),
@@ -60,23 +63,24 @@ const NAV: Record<Role, NavGroup[]> = {
     {
       en: 'Stock',
       kn: 'ಸ್ಟಾಕ್',
-      items: [item('/owner/reports', 'Reports', 'ವರದಿ', 'chart'), item('/owner/stock', 'Stock', 'ಸ್ಟಾಕ್', 'box'), item('/owner/files', 'Excel', 'ಎಕ್ಸೆಲ್', 'file')],
+      items: [item('/owner/reports', 'Reports', 'ವರದಿ', 'chart'), item('/owner/inventory', 'Inventory', 'ಸಾಮಾನು', 'box'), item('/owner/files', 'Excel', 'ಎಕ್ಸೆಲ್', 'file')],
     },
   ],
   worker: [{ en: 'Today', kn: 'ಇಂದು', items: [item('/worker', 'Pick list', 'ಪಟ್ಟಿ', 'list'), item('/worker/screen', 'TV screen', 'ಟಿವಿ ಪರದೆ', 'tv')] }],
   godown: [{ en: 'Today', kn: 'ಇಂದು', items: [item('/godown', 'My godown', 'ನನ್ನ ಗೋದಾಮು', 'warehouse')] }],
-  vendor: [{ en: 'Today', kn: 'ಇಂದು', items: [item('/vendor', 'Orders', 'ಆರ್ಡರ್‌ಗಳು', 'cart')] }],
+  // Suppliers no longer sign in; the role is kept only so old records read.
+  vendor: [],
   delivery: [{ en: 'Today', kn: 'ಇಂದು', items: [item('/delivery', 'Deliveries', 'ಡೆಲಿವರಿ', 'truck')] }],
   customer: [{ en: 'Today', kn: 'ಇಂದು', items: [item('/customer', 'My shop', 'ನನ್ನ ಅಂಗಡಿ', 'store')] }],
 };
 
 /** The four a phone's bottom bar shows for each role; the rest go under "More". */
 const PRIMARY: Record<Role, string[]> = {
-  admin: ['/admin', '/admin/confirm', '/admin/stock', '/admin/bills'],
-  owner: ['/owner', '/owner/bills', '/owner/reports', '/owner/stock'],
+  admin: ['/admin', '/admin/confirm', '/admin/inventory', '/admin/bills'],
+  owner: ['/owner', '/owner/bills', '/owner/reports', '/owner/inventory'],
   worker: ['/worker', '/worker/screen'],
   godown: ['/godown'],
-  vendor: ['/vendor'],
+  vendor: [],
   delivery: ['/delivery'],
   customer: ['/customer'],
 };
@@ -287,6 +291,13 @@ function MoreSheet({ role, onClose }: { role: Role; onClose: () => void }) {
   );
 }
 
+/** An old Items or Stock link, to the same place in Inventory: an item's page, or the list with its filter. */
+function ToInventory({ base }: { base: string }) {
+  const { id } = useParams();
+  const loc = useLocation();
+  return <Navigate to={base + (id ? '/' + id : '') + loc.search} replace />;
+}
+
 export function App() {
   const { ready, me, t } = useSession();
   const loc = useLocation();
@@ -337,10 +348,13 @@ export function App() {
               <Route path="/admin/requests" element={<RequestsPage />} />
               <Route path="/admin/settings" element={<SettingsPage />} />
               <Route path="/admin/reports" element={<ReportsPage />} />
-              <Route path="/admin/items" element={<ItemsPage />} />
-              <Route path="/admin/items/new" element={<ItemEditor />} />
-              <Route path="/admin/items/:id" element={<ItemEditor />} />
-              <Route path="/admin/stock" element={<StockPage />} />
+              <Route path="/admin/inventory" element={<InventoryPage />} />
+              <Route path="/admin/inventory/new" element={<InventoryItemPage />} />
+              <Route path="/admin/inventory/:id" element={<InventoryItemPage />} />
+              {/* Items and Stock became Inventory: old links and bookmarks still land. */}
+              <Route path="/admin/items" element={<Navigate to="/admin/inventory" replace />} />
+              <Route path="/admin/items/:id" element={<ToInventory base="/admin/inventory" />} />
+              <Route path="/admin/stock" element={<ToInventory base="/admin/inventory" />} />
               <Route path="/admin/places" element={<PlacesPage />} />
               <Route path="/admin/people" element={<PeoplePage />} />
               <Route path="/admin/vehicles" element={<VehiclesPage />} />
@@ -352,7 +366,9 @@ export function App() {
               <Route path="/owner" element={<OwnerHome />} />
               <Route path="/owner/bills" element={<BillsPage />} />
               <Route path="/owner/reports" element={<ReportsPage />} />
-              <Route path="/owner/stock" element={<StockPage readOnly />} />
+              <Route path="/owner/inventory" element={<InventoryPage readOnly />} />
+              <Route path="/owner/inventory/:id" element={<InventoryItemPage readOnly />} />
+              <Route path="/owner/stock" element={<ToInventory base="/owner/inventory" />} />
               <Route path="/owner/files" element={<FilesPage readOnly />} />
             </>
           )}
@@ -363,7 +379,6 @@ export function App() {
             </>
           )}
           {r === 'godown' && <Route path="/godown" element={<GodownHome />} />}
-          {r === 'vendor' && <Route path="/vendor" element={<VendorHome />} />}
           {r === 'delivery' && <Route path="/delivery" element={<DeliveryHome />} />}
           {r === 'customer' && <Route path="/customer" element={<CustomerHome />} />}
           <Route path="*" element={<Navigate to={home} replace />} />
@@ -372,6 +387,7 @@ export function App() {
       </div>
       {hasNav && <TabBar role={r} onMore={() => setMore(!more)} moreOpen={more} />}
       {hasNav && more && <MoreSheet role={r} onClose={closeMore} />}
+      {r === 'admin' && <LowToast />}
     </div>
   );
 }

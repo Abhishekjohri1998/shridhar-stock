@@ -1,3 +1,4 @@
+import { pickName } from '@stock/core';
 import { http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
@@ -8,6 +9,8 @@ import { Icon } from '../../components/Icon';
 export interface Summary {
   toConfirm: number;
   low: number;
+  /** Items a sale or move took below their level in the last day, still low, newest first. */
+  justLow: { itemId: string; at: string; words: string; level: string; nameEn: string; nameKn: string }[];
   negative: number;
   inTransit: number;
   requested: number;
@@ -28,7 +31,7 @@ export interface Summary {
 export function AdminHome() {
   const bi = useBi();
   const { lang, me } = useSession();
-  const live = useLive('bills', 'stock', 'transfers', 'pos', 'deliveries', 'orders', 'link');
+  const live = useLive('bills', 'stock', 'transfers', 'pos', 'deliveries', 'orders', 'link', 'low');
   const { value: s, error } = useLoad(() => http.get<Summary>('/admin/summary'), [live]);
   const week = useWeekSales([live]);
   if (error) return <div className="msg err">{error}</div>;
@@ -36,8 +39,8 @@ export function AdminHome() {
   const rate = s.handwrittenLines ? Math.round((s.autoRead / s.handwrittenLines) * 100) : 0;
   const needs = [
     { n: s.toConfirm, label: bi('Bill lines to confirm', 'ಖಚಿತಪಡಿಸಬೇಕಾದ ಸಾಲುಗಳು'), to: '/admin/confirm', tone: 'warn', icon: 'checkCircle' as const },
-    { n: s.low, label: bi('Running low in the shop', 'ಅಂಗಡಿಯಲ್ಲಿ ಮುಗಿಯುತ್ತಿದೆ'), to: '/admin/refill', tone: 'warn', icon: 'refill' as const },
-    { n: s.negative, label: bi('Below zero: count these', 'ಸೊನ್ನೆಗಿಂತ ಕಡಿಮೆ: ಎಣಿಸಿ'), to: '/admin/stock', tone: 'bad', icon: 'alert' as const },
+    { n: s.low, label: bi('Running low, all places together', 'ಮುಗಿಯುತ್ತಿದೆ, ಎಲ್ಲಾ ಕಡೆ ಸೇರಿ'), to: '/admin/inventory?low=1', tone: 'warn', icon: 'refill' as const },
+    { n: s.negative, label: bi('Below zero: count these', 'ಸೊನ್ನೆಗಿಂತ ಕಡಿಮೆ: ಎಣಿಸಿ'), to: '/admin/inventory', tone: 'bad', icon: 'alert' as const },
     { n: s.newOrders, label: bi('Customer requests', 'ಗ್ರಾಹಕರ ಬೇಡಿಕೆ'), to: '/admin/requests', tone: 'warn', icon: 'inbox' as const },
   ];
   return (
@@ -64,6 +67,19 @@ export function AdminHome() {
           </Link>
         ))}
       </div>
+      {s.justLow.length > 0 && (
+        <div className="card mt-10">
+          <div className="subtitle mt-0">{bi('Just went low', 'ಈಗಷ್ಟೇ ಕಡಿಮೆಯಾಗಿದೆ')}</div>
+          {s.justLow.map((a) => (
+            <Link key={a.itemId} className="move-row low-row" to={'/admin/inventory/' + a.itemId}>
+              <b>{pickName(a.nameEn, a.nameKn, lang)}</b>{' '}
+              <span className="muted">
+                · {a.words} {bi('left in all places, below', 'ಎಲ್ಲಾ ಕಡೆ ಸೇರಿ ಉಳಿದಿದೆ, ಮಿತಿ')} {a.level} · {when(a.at, lang)}
+              </span>
+            </Link>
+          ))}
+        </div>
+      )}
 
       {week && <WeekChart days={week} />}
 

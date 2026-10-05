@@ -6,11 +6,12 @@ import { useSession } from '../lib/session';
 import { useBi } from '../components/ui';
 
 const ROLE_WHAT: Record<Role, [string, string]> = {
-  admin: ['Runs everything: items, stock, confirming handwriting, trips, orders, people.', 'ಎಲ್ಲವನ್ನೂ ನಡೆಸುತ್ತಾರೆ: ಸಾಮಾನು, ಸ್ಟಾಕ್, ಕೈಬರಹ ಖಚಿತಪಡಿಸುವುದು, ಸಾಗಣೆ, ಆರ್ಡರ್, ಜನರು.'],
+  admin: ['Runs everything: inventory, confirming handwriting, trips, purchases, people.', 'ಎಲ್ಲವನ್ನೂ ನಡೆಸುತ್ತಾರೆ: ಸಾಮಾನು, ಸ್ಟಾಕ್, ಕೈಬರಹ ಖಚಿತಪಡಿಸುವುದು, ಸಾಗಣೆ, ಆರ್ಡರ್, ಜನರು.'],
   owner: ['Sees how the shop is doing. Changes nothing.', 'ಅಂಗಡಿ ಹೇಗೆ ನಡೆಯುತ್ತಿದೆ ಎಂದು ನೋಡುತ್ತಾರೆ. ಏನೂ ಬದಲಿಸುವುದಿಲ್ಲ.'],
   worker: ['Sees each bill as a pick list by rack, ticks what was brought.', 'ಪ್ರತಿ ಬಿಲ್ ಅನ್ನು ರ‍್ಯಾಕ್ ಪ್ರಕಾರ ನೋಡಿ, ತಂದದ್ದನ್ನು ಗುರುತಿಸುತ್ತಾರೆ.'],
   godown: ['Sends what the shop asks for, receives what comes in.', 'ಅಂಗಡಿ ಕೇಳಿದ್ದನ್ನು ಕಳುಹಿಸುತ್ತಾರೆ, ಬಂದದ್ದನ್ನು ಸ್ವೀಕರಿಸುತ್ತಾರೆ.'],
-  vendor: ['Confirms and dispatches the shop’s purchase orders.', 'ಅಂಗಡಿಯ ಖರೀದಿ ಆರ್ಡರ್‌ಗಳನ್ನು ಒಪ್ಪಿ ಕಳುಹಿಸುತ್ತಾರೆ.'],
+  // Suppliers no longer sign in: they are contacts under Purchases. There is no demo vendor.
+  vendor: ['A supplier from before. Suppliers no longer sign in.', 'ಹಿಂದಿನ ಸರಬರಾಜುದಾರ. ಸರಬರಾಜುದಾರರು ಈಗ ಒಳಗೆ ಬರುವುದಿಲ್ಲ.'],
   delivery: ['Today’s drops: call, map, collect, delivered.', 'ಇಂದಿನ ಡೆಲಿವರಿ: ಕರೆ, ನಕ್ಷೆ, ವಸೂಲಿ, ತಲುಪಿಸಿದೆ.'],
   customer: ['Their own bills and balance, shop items, and order requests.', 'ತಮ್ಮ ಬಿಲ್‌ಗಳು, ಬಾಕಿ, ಅಂಗಡಿ ಸಾಮಾನು ಮತ್ತು ಆರ್ಡರ್.'],
 };
@@ -22,8 +23,8 @@ const STORY: { role: Role; to: string; en: string; kn: string }[] = [
   { role: 'admin', to: '/admin/refill', en: 'Running low: one trip from the main godown brings everything that is low. Ask the godown to send.', kn: 'ಮುಗಿಯುತ್ತಿದೆ: ಮುಖ್ಯ ಗೋದಾಮಿನಿಂದ ಒಂದೇ ಸಾಗಣೆ. ಗೋದಾಮಿಗೆ ಕಳುಹಿಸಲು ಹೇಳಿ.' },
   { role: 'godown', to: '/godown', en: 'The godown sees the request with its racks, fills in what it is actually sending, vehicle and driver, and taps Sent.', kn: 'ಗೋದಾಮು ಬೇಡಿಕೆ ನೋಡಿ, ಕಳುಹಿಸುವ ಪ್ರಮಾಣ, ವಾಹನ, ಚಾಲಕ ತುಂಬಿ “ಕಳುಹಿಸಿದೆ” ಒತ್ತುತ್ತದೆ.' },
   { role: 'admin', to: '/admin/transfers', en: 'At the shop, mark it received. A shortfall shows in red. Stock moves in every place.', kn: 'ಅಂಗಡಿಯಲ್ಲಿ “ಬಂದಿದೆ” ಎಂದು ಗುರುತಿಸಿ. ಕೊರತೆ ಕೆಂಪಿನಲ್ಲಿ.' },
-  { role: 'vendor', to: '/vendor', en: 'The vendor confirms order #3 and dispatches it with invoice number, vehicle and time.', kn: 'ಸರಬರಾಜುದಾರರು ಆರ್ಡರ್ #3 ಒಪ್ಪಿ, ಇನ್‌ವಾಯ್ಸ್, ವಾಹನ, ಸಮಯದೊಂದಿಗೆ ಕಳುಹಿಸುತ್ತಾರೆ.' },
-  { role: 'admin', to: '/admin/purchases', en: 'When the goods arrive, mark them received: the godown’s stock goes up.', kn: 'ಸಾಮಾನು ಬಂದಾಗ “ಬಂದಿದೆ” ಎಂದು ಗುರುತಿಸಿ: ಗೋದಾಮಿನ ಸ್ಟಾಕ್ ಹೆಚ್ಚುತ್ತದೆ.' },
+  { role: 'admin', to: '/admin/inventory?low=1', en: 'Inventory: coffee and toor dal are low with the shop and godowns added up. Each item’s page has its details and its stock.', kn: 'ಸಾಮಾನು ಮತ್ತು ಸ್ಟಾಕ್: ಅಂಗಡಿ ಮತ್ತು ಗೋದಾಮು ಸೇರಿಸಿ ಕಾಫಿ, ತೊಗರಿ ಬೇಳೆ ಕಡಿಮೆ ಇವೆ.' },
+  { role: 'admin', to: '/admin/purchases', en: 'Order from a supplier in one short form. When the goods arrive, mark it received: the stock goes up where they were put.', kn: 'ಒಂದೇ ಚಿಕ್ಕ ಫಾರ್ಮ್‌ನಲ್ಲಿ ಆರ್ಡರ್ ಮಾಡಿ. ಸಾಮಾನು ಬಂದಾಗ “ಬಂದಿದೆ” ಎಂದು ಗುರುತಿಸಿ: ಸ್ಟಾಕ್ ಹೆಚ್ಚುತ್ತದೆ.' },
   { role: 'delivery', to: '/delivery', en: 'Delivery: bill #54 to Ramesh, opposite the temple, collect the balance. Leaving now, then Delivered.', kn: 'ಡೆಲಿವರಿ: ಬಿಲ್ #54 ರಮೇಶ್‌ಗೆ, ದೇವಸ್ಥಾನದ ಎದುರು, ಬಾಕಿ ವಸೂಲಿ.' },
   { role: 'customer', to: '/customer', en: 'Ramesh sees his bills with the shop’s own handwriting, his balance, and orders again.', kn: 'ರಮೇಶ್ ತಮ್ಮ ಬಿಲ್‌ಗಳನ್ನು ಅಂಗಡಿಯ ಕೈಬರಹದೊಂದಿಗೆ, ಬಾಕಿ ನೋಡಿ ಮತ್ತೆ ಆರ್ಡರ್ ಮಾಡುತ್ತಾರೆ.' },
   { role: 'admin', to: '/admin/requests', en: 'The request reaches the admin, who bills it in the billing app and marks it billed.', kn: 'ಬೇಡಿಕೆ ಆಡ್ಮಿನ್‌ಗೆ ಬರುತ್ತದೆ; ಬಿಲ್ಲಿಂಗ್‌ನಲ್ಲಿ ಬಿಲ್ ಮಾಡಿ ಗುರುತಿಸುತ್ತಾರೆ.' },

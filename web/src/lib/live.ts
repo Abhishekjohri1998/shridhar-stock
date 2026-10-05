@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { hasToken, http } from './api';
 
-export type LiveKind = 'bills' | 'stock' | 'transfers' | 'pos' | 'deliveries' | 'orders' | 'items' | 'link';
+export type LiveKind = 'bills' | 'stock' | 'transfers' | 'pos' | 'deliveries' | 'orders' | 'items' | 'link' | 'low';
 
 /**
  * One live stream per tab, shared by every screen on it.
@@ -10,7 +10,7 @@ export type LiveKind = 'bills' | 'stock' | 'transfers' | 'pos' | 'deliveries' | 
  * drops (a phone going to sleep, the shop's internet blinking) it reconnects with a fresh ticket,
  * and every screen re-reads on reconnect, so nothing that happened meanwhile is missed.
  */
-type Listener = (kind: LiveKind | 'reconnect') => void;
+type Listener = (kind: LiveKind | 'reconnect', id?: string) => void;
 const listeners = new Set<Listener>();
 let source: EventSource | null = null;
 let retry: ReturnType<typeof setTimeout> | null = null;
@@ -35,8 +35,8 @@ async function connect() {
     });
     es.addEventListener('change', (e) => {
       try {
-        const { kind } = JSON.parse((e as MessageEvent).data) as { kind: LiveKind };
-        listeners.forEach((f) => f(kind));
+        const { kind, id } = JSON.parse((e as MessageEvent).data) as { kind: LiveKind; id?: string };
+        listeners.forEach((f) => f(kind, id));
       } catch {
         /* ignore a garbled event */
       }
@@ -90,6 +90,23 @@ export function useLive(...kinds: LiveKind[]): number {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
   return n;
+}
+
+/** Calls `fn` with the id of each `kind` event as it arrives, for a toast rather than a re-read. */
+export function useLiveEvent(kind: LiveKind, fn: (id: string) => void): void {
+  const ref = useRef(fn);
+  ref.current = fn;
+  useEffect(() => {
+    const f: Listener = (k, id) => {
+      if (k === kind && id) ref.current(id);
+    };
+    listeners.add(f);
+    void connect();
+    return () => {
+      listeners.delete(f);
+      if (listeners.size === 0) disconnect();
+    };
+  }, [kind]);
 }
 
 /** 'live' when updates are arriving, for a small dot in the corner. */
