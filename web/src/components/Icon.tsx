@@ -37,6 +37,7 @@ const PATHS = {
   rupee: 'M6 4h12M6 9h12M6 4h3a5 5 0 0 1 0 10H6l8 7',
   pen: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
   chevron: 'M9 6l6 6-6 6',
+  chevronDown: 'M6 9l6 6 6-6',
 } as const;
 
 export type IconName = keyof typeof PATHS;

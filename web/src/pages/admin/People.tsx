@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { ROLES, pickName, type MsgKey, type Person, type Role } from '@stock/core';
 import { api, http } from '../../lib/api';
 import { useLoad, useSession } from '../../lib/session';
-import { Table } from '../../components/ui';
+import { Select, Table, useBi } from '../../components/ui';
 
 export function PeoplePage() {
   const { t, me } = useSession();
@@ -74,6 +74,7 @@ function PersonForm({
   onDone: (msg?: string) => void;
 }) {
   const { t, lang } = useSession();
+  const bi = useBi();
   const [name, setName] = useState(person?.name ?? '');
   const [phone, setPhone] = useState(person?.phone ?? '');
   const [role, setRole] = useState<Role>(person?.role ?? 'worker');
@@ -93,7 +94,7 @@ function PersonForm({
 
   const save = (e: FormEvent) => {
     e.preventDefault();
-    const link = role === 'godown' ? { linkedId: linkedId || godowns[0]?.id } : role === 'vendor' ? { linkedId: linkedId || suppliers[0]?.id } : {};
+    const link = role === 'godown' ? { linkedId: linkedId || godowns[0]?.id } : {};
     run(() =>
       person ? api.updatePerson(person.id, { name, role, ...link }) : api.addPerson({ name, phone, role, pin, ...link }),
     );
@@ -113,36 +114,24 @@ function PersonForm({
         </label>
         <label className="field">
           <span>{t('people.role')}</span>
-          <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
-            {ROLES.map((r) => (
-              <option key={r} value={r}>
-                {t(('role.' + r) as MsgKey)}
-              </option>
-            ))}
-          </select>
+          {/* Suppliers no longer sign in: the vendor role is only shown for someone who has it. */}
+          <Select
+            value={role}
+            onChange={setRole}
+            aria-label={t('people.role')}
+            options={ROLES.filter((r) => r !== 'vendor' || person?.role === 'vendor').map((r) => ({ value: r, label: t(('role.' + r) as MsgKey) }))}
+          />
         </label>
         {role === 'vendor' && (
-          <label className="field">
-            <span>Supplier</span>
-            <select value={linkedId || suppliers[0]?.id} onChange={(e) => setLinkedId(e.target.value)}>
-              {suppliers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <p className="muted field">
+            {bi('A supplier from before. Suppliers do not sign in any more: they are kept under Purchases.', 'ಹಿಂದಿನ ಸರಬರಾಜುದಾರ. ಸರಬರಾಜುದಾರರು ಈಗ ಒಳಗೆ ಬರುವುದಿಲ್ಲ: ಅವರು ಖರೀದಿಯಲ್ಲಿ ಇದ್ದಾರೆ.')}
+            {person?.linkedId && suppliers.find((x) => x.id === person.linkedId) && ' · ' + suppliers.find((x) => x.id === person.linkedId)!.name}
+          </p>
         )}
         {role === 'godown' && (
           <label className="field">
             <span>{t('people.link')}</span>
-            <select value={linkedId || godowns[0]?.id} onChange={(e) => setLinkedId(e.target.value)}>
-              {godowns.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {pickName(g.name, g.nameKn, lang)}
-                </option>
-              ))}
-            </select>
+            <Select value={linkedId || godowns[0]?.id || ''} onChange={setLinkedId} aria-label={t('people.link')} options={godowns.map((g) => ({ value: g.id, label: pickName(g.name, g.nameKn, lang) }))} />
           </label>
         )}
         <label className="field">

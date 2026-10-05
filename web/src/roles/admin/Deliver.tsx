@@ -5,7 +5,7 @@ import { http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
 import { statusWord } from '../../lib/words';
-import { Empty, Loading, Money, Status, useBi, VehicleOptions, when } from '../../components/ui';
+import { Empty, Loading, Money, Status, useBi, VehicleOptions, when, Select } from '../../components/ui';
 
 /** Deliveries: send a bill out, see where everything is, and hand a drop to someone else. */
 export function DeliveriesPage() {
@@ -100,20 +100,14 @@ export function DeliveriesPage() {
               {d.vehicle && ' · ' + d.vehicle}
             </span>
             {d.status !== 'delivered' && (
-              <select
+              <Select
                 value=""
-                onChange={(e) => e.target.value && act('/admin/deliveries/' + d.id + '/assign', { personId: e.target.value })} className="w-auto"
+                onChange={(id) => id && act('/admin/deliveries/' + d.id + '/assign', { personId: id })}
+                className="w-auto"
                 aria-label={bi('Give to someone else', 'ಬೇರೆಯವರಿಗೆ ಕೊಡಿ')}
-              >
-                <option value="">{bi('Give to…', 'ಇವರಿಗೆ ಕೊಡಿ…')}</option>
-                {value.drivers
-                  .filter((p) => p.id !== d.personId)
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-              </select>
+                placeholder={bi('Give to…', 'ಇವರಿಗೆ ಕೊಡಿ…')}
+                options={value.drivers.filter((p) => p.id !== d.personId).map((p) => ({ value: p.id, label: p.name }))}
+              />
             )}
           </div>
         </div>
@@ -198,13 +192,7 @@ function NewDelivery({
         </label>
         <label className="field">
           <span>{bi('Who takes it', 'ಯಾರು ತೆಗೆದುಕೊಂಡು ಹೋಗುತ್ತಾರೆ')}</span>
-          <select value={personId} onChange={(e) => setPerson(e.target.value)}>
-            {drivers.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+          <Select value={personId} onChange={setPerson} aria-label={bi('Who takes it', 'ಯಾರು ತೆಗೆದುಕೊಂಡು ಹೋಗುತ್ತಾರೆ')} options={drivers.map((p) => ({ value: p.id, label: p.name }))} />
         </label>
         <label className="field">
           <span>{bi('Vehicle', 'ವಾಹನ')}</span>

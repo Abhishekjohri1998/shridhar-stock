@@ -260,3 +260,5 @@ export function WeekChart({ days }: { days: { day: string; total: number; bills:
     </div>
   );
 }
+
+export { Select, type SelectOption } from './Select';

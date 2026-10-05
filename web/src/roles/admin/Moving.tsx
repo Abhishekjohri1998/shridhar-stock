@@ -6,7 +6,7 @@ import { itemName, placeName, qtyText, useCatalog } from '../../lib/catalog';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
 import { statusWord } from '../../lib/words';
-import { Empty, InkView, Loading, Status, useBi, when, Table } from '../../components/ui';
+import { Empty, InkView, Loading, Status, useBi, when, Table, Select } from '../../components/ui';
 
 /**
  * A quantity typed in any of the item's units, held in base units: "2 pack" of Parle-G is 48.
@@ -38,13 +38,7 @@ function QtyInput({ item, base, onChange }: { item: Item | undefined; base: numb
         }} className="in-qty"
       />
       {item && item.units.length > 1 ? (
-        <select value={unit} onChange={(e) => setUnit(e.target.value)} className="w-auto">
-          {item.units.map((u) => (
-            <option key={u.code} value={u.code}>
-              {(lang === 'kn' && u.labelKn) || u.code}
-            </option>
-          ))}
-        </select>
+        <Select value={unit} onChange={setUnit} className="w-auto" aria-label="unit" options={item.units.map((u) => ({ value: u.code, label: (lang === 'kn' && u.labelKn) || u.code }))} />
       ) : (
         <span className="muted"> {item?.units[0]?.code}</span>
       )}
@@ -99,7 +93,7 @@ export function RefillPage() {
       <h1 className="title">{bi('Running low: plan trips', 'ಮುಗಿಯುತ್ತಿರುವುದು: ತರಿಸುವ ಯೋಜನೆ')}</h1>
       <p className="muted">
         {bi(
-          'Everything low in the shop, grouped by the godown that has most of it, so one trip brings it all. Quantities top the shop up to twice its running-out level; change any of them before asking.',
+          'Everything short on the shop shelf, grouped by the godown that has most of it, so one trip brings it all. Quantities top the shelf up to twice the item’s running-out level; change any of them before asking.',
           'ಅಂಗಡಿಯಲ್ಲಿ ಕಡಿಮೆ ಇರುವುದೆಲ್ಲ, ಹೆಚ್ಚು ಇರುವ ಗೋದಾಮಿನಂತೆ ಗುಂಪು: ಒಂದೇ ಬಾರಿಗೆ ಎಲ್ಲ. ಕೇಳುವ ಮೊದಲು ಪ್ರಮಾಣ ಬದಲಿಸಬಹುದು.',
         )}
       </p>
@@ -165,16 +159,16 @@ export function RefillPage() {
       {value.refill.buy.filter((b) => !pending.has(b.itemId)).length > 0 && (
         <div className="card">
           <div className="bar between">
-            <span className="name">🛒 {bi('No godown has enough: buy from a supplier', 'ಯಾವ ಗೋದಾಮಿನಲ್ಲೂ ಸಾಕಷ್ಟಿಲ್ಲ: ಸರಬರಾಜುದಾರರಿಂದ ಖರೀದಿಸಿ')}</span>
+            <span className="name">🛒 {bi('Low in all places together: buy from a supplier', 'ಎಲ್ಲಾ ಕಡೆ ಸೇರಿ ಕಡಿಮೆ: ಸರಬರಾಜುದಾರರಿಂದ ಖರೀದಿಸಿ')}</span>
             <button className="btn primary" onClick={() => nav('/admin/purchases?new=buy')}>
-              {bi('Make a purchase order', 'ಖರೀದಿ ಆರ್ಡರ್ ಮಾಡಿ')}
+              {bi('Order these', 'ಇವನ್ನು ಆರ್ಡರ್ ಮಾಡಿ')}
             </button>
           </div>
           {value.refill.buy
             .filter((b) => !pending.has(b.itemId))
             .map((b) => (
               <div key={b.itemId} className="muted">
-                {itemName(items, b.itemId, lang)} · {bi('short', 'ಕೊರತೆ')} {qtyText(items, b.itemId, b.qty, lang)}
+                {itemName(items, b.itemId, lang)} · {bi('all places', 'ಎಲ್ಲಾ ಕಡೆ')} {qtyText(items, b.itemId, b.total, lang)} · {bi('buy', 'ಖರೀದಿ')} {qtyText(items, b.itemId, b.qty, lang)}
               </div>
             ))}
         </div>
@@ -349,23 +343,11 @@ function NewTransfer({ items, locs, onDone }: { items: Map<string, Item>; locs: 
       <div className="grid2">
         <label className="field">
           <span>{bi('From', 'ಇಂದ')}</span>
-          <select value={from} onChange={(e) => setFrom(e.target.value)}>
-            {active.map((l) => (
-              <option key={l.id} value={l.id}>
-                {pickName(l.name, l.nameKn, lang)}
-              </option>
-            ))}
-          </select>
+          <Select value={from} onChange={setFrom} aria-label={bi('From', 'ಇಂದ')} options={active.map((l) => ({ value: l.id, label: pickName(l.name, l.nameKn, lang) }))} />
         </label>
         <label className="field">
           <span>{bi('To', 'ಗೆ')}</span>
-          <select value={to} onChange={(e) => setTo(e.target.value)}>
-            {active.map((l) => (
-              <option key={l.id} value={l.id}>
-                {pickName(l.name, l.nameKn, lang)}
-              </option>
-            ))}
-          </select>
+          <Select value={to} onChange={setTo} aria-label={bi('To', 'ಗೆ')} options={active.map((l) => ({ value: l.id, label: pickName(l.name, l.nameKn, lang) }))} />
         </label>
       </div>
       <input placeholder={bi('Add an item…', 'ಸಾಮಾನು ಸೇರಿಸಿ…')} value={q} onChange={(e) => setQ(e.target.value)} />
