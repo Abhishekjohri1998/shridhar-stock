@@ -132,7 +132,7 @@ function BillCard({ g, items, onDone }: { g: BillGroup; items: Map<string, Item>
           g.billNo +
           ': ' +
           r.done.length +
-          bi(' lines confirmed', ' ಸಾಲು ಖಚಿತವಾಗಿದೆ') +
+          (r.done.length === 1 ? bi(' line confirmed', ' ಸಾಲು ಖಚಿತವಾಗಿದೆ') : bi(' lines confirmed', ' ಸಾಲುಗಳು ಖಚಿತವಾಗಿವೆ')) +
           (blank ? ' · ' + blank + bi(' still need you', ' ಇನ್ನೂ ನಿಮ್ಮ ಗಮನ ಬೇಕು') : '') +
           (r.failed.length ? ' · ' + r.failed.length + bi(' could not be done', ' ಆಗಲಿಲ್ಲ') : ''),
       );
