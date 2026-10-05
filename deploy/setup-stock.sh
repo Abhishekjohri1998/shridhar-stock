@@ -104,7 +104,8 @@ UNIT
 sudo systemctl daemon-reload
 sudo systemctl enable --now shridhar-stock
 sudo systemctl restart shridhar-stock
-sleep 3
+# Up to 30 s: the first start connects to Atlas, which took longer than the 3 s once waited.
+for _ in $(seq 1 30); do curl -fsS "http://127.0.0.1:$PORT/api/health" >/dev/null && break; sleep 1; done
 curl -fsS "http://127.0.0.1:$PORT/api/health" >/dev/null || { sudo journalctl -u shridhar-stock -n 40 --no-pager; die "The stock server did not start."; }
 echo "    Running."
 
