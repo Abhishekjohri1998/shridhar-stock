@@ -12,14 +12,13 @@ import type { PersonRecord } from './store/types';
  *
  * The server is one process, so the hub is a set in memory.
  */
-export type EventKind = 'bills' | 'stock' | 'transfers' | 'pos' | 'deliveries' | 'orders' | 'items' | 'link' | 'low';
+export type EventKind = 'bills' | 'stock' | 'transfers' | 'pos' | 'items' | 'link' | 'low';
 
 /** Who an event is for. Absent fields mean "not narrowed by this". */
 export interface Audience {
   roles?: Role[];
   locationIds?: string[];
   personId?: string;
-  customerKey?: string;
 }
 
 interface Client {
@@ -30,25 +29,21 @@ interface Client {
 const clients = new Set<Client>();
 
 function wants(p: PersonRecord, a: Audience): boolean {
-  if (p.role === 'admin' || p.role === 'owner') return true;
+  if (p.role === 'admin') return true;
   if (a.roles && !a.roles.includes(p.role)) return false;
   if (p.role === 'godown' && a.locationIds && !a.locationIds.includes(p.linkedId ?? '')) return false;
-  if (p.role === 'delivery' && a.personId !== undefined && a.personId !== p.id) return false;
-  if (p.role === 'customer' && a.customerKey !== undefined && a.customerKey !== p.phone) return false;
   return true;
 }
 
 /** Who each kind of change matters to, before narrowing by place, supplier or person. */
 const DEFAULT_ROLES: Record<EventKind, Role[]> = {
-  bills: ['worker', 'customer', 'delivery'],
-  stock: ['godown', 'customer'],
+  bills: ['worker'],
+  stock: ['godown'],
   transfers: ['godown'],
   pos: [],
-  deliveries: ['delivery'],
-  orders: ['customer'],
-  items: ['worker', 'godown', 'customer'],
+  items: ['worker', 'godown'],
   link: [],
-  // An item going below its level: the admin's and owner's screens only.
+  // An item going below its level: the admin's screens only.
   low: [],
 };
 

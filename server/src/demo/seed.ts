@@ -4,12 +4,10 @@ import {
   priceFor,
   type BillMirror,
   type CustomerProfile,
-  type Delivery,
   type Ink,
   type Item,
   type ItemUnit,
   type MirrorLine,
-  type OrderRequest,
   type PurchaseOrder,
   type Role,
   type StockMove,
@@ -34,11 +32,8 @@ export const DEMO_PIN = '1111';
 
 export const DEMO_PEOPLE: { id: string; name: string; phone: string; role: Role; linkedId?: string }[] = [
   { id: 'p_admin', name: 'Shridhar (admin)', phone: '9000000001', role: 'admin' },
-  { id: 'p_owner', name: 'Partner Suresh', phone: '9000000002', role: 'owner' },
   { id: 'p_worker', name: 'Ravi (shop)', phone: '9000000003', role: 'worker' },
   { id: 'p_godown', name: 'Manju (main godown)', phone: '9000000004', role: 'godown', linkedId: 'loc_g1' },
-  { id: 'p_delivery', name: 'Kiran (delivery)', phone: '9000000006', role: 'delivery' },
-  { id: 'p_customer', name: 'Ramesh Gowda', phone: '9000000007', role: 'customer' },
 ];
 
 type U = [code: string, label: string, labelKn: string, perBase: number, price: number, cost?: number];
@@ -209,16 +204,6 @@ export async function seedDemo(repo: InvRepo): Promise<void> {
     const p = priceFor(it, unit, qty);
     return line(i, { qty, rate: p.rate, itemId, unit, baseQty: p.baseQty, state: 'typed-match', ...extra });
   };
-  const reading = (text: string, itemId: string | undefined, confidence: number, alts: [string, number][] = [], unit?: string, qty?: number) => ({
-    readText: text,
-    ...(itemId ? { itemId } : {}),
-    ...(unit ? { unit } : {}),
-    ...(qty != null ? { qty } : {}),
-    confidence,
-    alternatives: alts.map(([itemId, confidence]) => ({ itemId, confidence })),
-    by: 'reader',
-    at: iso(1),
-  });
   const cust = (c: CustomerProfile) => ({ key: c.key, name: c.name, phone: c.key });
 
   const bills: BillMirror[] = [
@@ -227,14 +212,14 @@ export async function seedDemo(repo: InvRepo): Promise<void> {
       lines: [
         matched(0, 'it_rice', 'kg', 5, { name: 'Sona masoori 5kg' }),
         matched(1, 'it_toor', 'kg', 1, { name: 'Toor dal' }),
-        { ...matched(2, 'it_sugar', 'kg', 2, { ink: ink('2 kg sugar', 3) }), name: '', state: 'read-auto', reading: reading('2 kg sugar', 'it_sugar', 0.96, [], 'kg', 2) },
+        { ...matched(2, 'it_sugar', 'kg', 2, { ink: ink('2 kg sugar', 3) }), name: '', state: 'confirmed' },
       ],
     },
     {
       id: '52', no: 52, at: iso(120), customer: cust(customers[0]!), total: 0, paid: 0, balance: 0,
       lines: [
-        { ...matched(0, 'it_parle', 'pack', 2, { ink: ink('parle pack 2', 5) }), state: 'read-auto', reading: reading('parle pack 2', 'it_parle', 0.93, [['it_goodday', 0.04]], 'pack', 2) },
-        { ...matched(1, 'it_clinic', 'line', 1, { ink: ink('clinic plus 1 line', 7) }), state: 'read-auto', reading: reading('clinic plus 1 line', 'it_clinic', 0.91, [['it_chik', 0.05]], 'line', 1) },
+        { ...matched(0, 'it_parle', 'pack', 2, { ink: ink('parle pack 2', 5) }), state: 'confirmed' },
+        { ...matched(1, 'it_clinic', 'line', 1, { ink: ink('clinic plus 1 line', 7) }), state: 'confirmed' },
         matched(2, 'it_goil', 'l', 1, { name: 'Groundnut oil 1L' }),
       ],
     },
@@ -243,30 +228,29 @@ export async function seedDemo(repo: InvRepo): Promise<void> {
       lines: [
         matched(0, 'it_onion', 'kg', 10, { name: 'Onion 10kg' }),
         matched(1, 'it_egg', 'tray', 1, { name: 'Egg tray' }),
-        line(2, { ink: ink('ghee', 9), qty: 2, rate: 330, reading: reading('ghee', 'it_ghee', 0.7, [['it_ganaoil', 0.2]], 'pc', 2) }),
+        line(2, { ink: ink('ghee', 9), qty: 2, rate: 330 }),
         line(3, { name: 'Delivery charge', qty: 1, rate: 30, state: 'not-item' }),
       ],
     },
     {
       id: '54', no: 54, at: iso(12), customer: cust(customers[0]!), total: 0, paid: 0, balance: 0,
       lines: [
-        line(0, { ink: ink('1 shahi biriyani masala', 11), qty: 1, rate: 1000, reading: reading('1 shahi biriyani masala', 'it_biryani', 0.88, [['it_chilli', 0.06]], 'pc', 1) }),
-        line(1, { ink: ink('coffee powder', 13), qty: 1, rate: 150, reading: reading('coffee powder', 'it_coffee', 0.62, [['it_tea', 0.3], ['it_bru', 0.05]], 'pc', 1) }),
+        line(0, { ink: ink('1 shahi biriyani masala', 11), qty: 1, rate: 1000 }),
+        line(1, { ink: ink('coffee powder', 13), qty: 1, rate: 150 }),
         matched(2, 'it_maggi', 'pc', 4, { name: 'Maggi' }),
         line(3, { name: 'Pooja kit', qty: 1, rate: 60 }),
       ],
     },
   ];
-  // Bill 54's biryani masala was billed at 1000: a confident reading, but the price does not fit
-  // the item (₹90 a pack), so it waits for a person. That is the rule the walkthrough shows.
+  // Written lines (bills 53 and 54) wait in To confirm, where a person picks the item.
   for (const b of bills) {
     b.total = b.lines.reduce((s, l) => s + l.amount, 0);
     b.paid = b.no === 54 ? 0 : b.total;
     b.balance = b.total - b.paid;
     await repo.putDoc('bills', b);
     const sales: StockMove[] = b.lines
-      .filter((l) => (l.state === 'typed-match' || l.state === 'read-auto' || l.state === 'confirmed') && l.itemId && l.baseQty)
-      .map((l) => ({ id: 'mv_s_' + b.no + '_' + l.i, key: 'sale:' + b.no + ':' + l.i, at: b.at, kind: 'sale', itemId: l.itemId!, from: 'loc_shop', qty: l.baseQty!, ref: 'bill ' + b.no + ' line ' + (l.i + 1), by: l.state === 'read-auto' ? 'reader' : 'billing' }));
+      .filter((l) => (l.state === 'typed-match' || l.state === 'confirmed') && l.itemId && l.baseQty)
+      .map((l) => ({ id: 'mv_s_' + b.no + '_' + l.i, key: 'sale:' + b.no + ':' + l.i, at: b.at, kind: 'sale', itemId: l.itemId!, from: 'loc_shop', qty: l.baseQty!, ref: 'bill ' + b.no + ' line ' + (l.i + 1), by: l.state === 'confirmed' ? 'p_admin' : 'billing' }));
     await post(repo, sales);
   }
 
@@ -295,14 +279,7 @@ export async function seedDemo(repo: InvRepo): Promise<void> {
   ];
   for (const p of pos) await repo.putDoc('pos', p);
 
-  const deliveries: Delivery[] = [
-    { id: 'dl_1', billNo: 53, customerKey: '9000000027', name: 'Hotel Annapoorna', phone: '9000000027', address: 'Main road', landmark: 'Next to the bank', personId: 'p_delivery', vehicle: 'KA-17 EF 5678', status: 'delivered', amountDue: 0, at: iso(70), times: { pending: iso(70), out: iso(60), delivered: iso(45) } },
-    { id: 'dl_2', billNo: 52, customerKey: '9000000007', name: 'Ramesh Gowda', phone: '9000000007', address: '3rd cross, Vinayaka nagar', landmark: 'Opposite the temple', personId: 'p_delivery', vehicle: 'KA-17 EF 5678', status: 'out', amountDue: 0, at: iso(110), times: { pending: iso(110), out: iso(15) } },
-    { id: 'dl_3', billNo: 54, customerKey: '9000000007', name: 'Ramesh Gowda', phone: '9000000007', address: '3rd cross, Vinayaka nagar', landmark: 'Opposite the temple', personId: 'p_delivery', status: 'pending', amountDue: 1000 + 150 + 56 + 60, at: iso(10), times: { pending: iso(10) } },
-  ];
-  for (const d of deliveries) await repo.putDoc('deliveries', d);
-
-  // The shop's two vehicles: the godown tempo and the delivery scooter.
+  // The shop's two vehicles: the godown tempo and the scooter.
   const vehicles: Vehicle[] = [
     { id: 'veh_1', number: 'KA-17 AB 1234', type: 'Tempo', driverName: 'Manju', driverPhone: '9000000011', active: true },
     { id: 'veh_2', number: 'KA-17 EF 5678', type: 'Scooter', driverName: 'Kiran', driverPhone: '9000000006', active: true },
@@ -311,16 +288,9 @@ export async function seedDemo(repo: InvRepo): Promise<void> {
   // Bills rounded to the nearest ₹5, so the round-off line shows on the demo bills.
   await repo.putDoc('meta', { id: 'settings', roundTo: 5 });
 
-  const orders: OrderRequest[] = [
-    { id: 'or_1', personId: 'p_customer', customerKey: '9000000007', status: 'new', at: iso(8), note: 'Please send by evening', lines: [{ itemId: 'it_rice', unit: 'kg', qty: 10, text: 'Sona masoori' }, { ink: handwrite('2 surf excel', 21), text: '2 surf excel' }, { itemId: 'it_milk', unit: 'pc', qty: 4 }] },
-    { id: 'or_2', personId: 'p_customer', customerKey: '9000000007', status: 'done', billNo: 52, at: iso(60 * 3), lines: [{ itemId: 'it_parle', unit: 'pack', qty: 2 }, { itemId: 'it_goil', unit: 'l', qty: 1 }] },
-  ];
-  for (const o of orders) await repo.putDoc('orders', o);
-
   await repo.putDoc('meta', {
     id: 'status',
     link: { ok: true, demo: true, lastBillNo: 54, at: iso(0.2), message: 'Demo: bills are sample data' },
-    reader: { enabled: false, demo: true, monthLines: 7, monthCostRupees: 4.2, capRupees: 500, message: 'Demo readings are pre-recorded. Add your key to read for real.' },
   });
   for (const series of ['transfer', 'po']) {
     while ((await repo.nextNo(series)) < (series === 'transfer' ? 3 : 4)) {

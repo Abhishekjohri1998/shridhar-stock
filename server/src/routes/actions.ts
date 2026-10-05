@@ -6,10 +6,8 @@ import {
   searchKey,
   toBase,
   type BillMirror,
-  type Delivery,
   type Ink,
   type Item,
-  type OrderRequest,
   type PurchaseOrder,
   type StockMove,
   type Supplier,
@@ -170,47 +168,6 @@ actionRoutes.post(
     const r = await syncNow();
     if (!r) throw new HttpError(502, 'Could not read from billing. See the link status.');
     res.json(r);
-  }),
-);
-
-actionRoutes.post(
-  '/admin/reader/run',
-  admin,
-  handler(async (_req, res) => {
-    const { pickReader, readPending } = await import('../reader');
-    res.json(await readPending(getRepo(), pickReader().fn));
-  }),
-);
-
-/** Writing done on this website, read into an item: "write instead of type". */
-const readsByPerson = new Map<string, number[]>();
-const READS_PER_HOUR = 60;
-
-actionRoutes.post(
-  '/read',
-  requireRole('admin', 'godown', 'customer'),
-  handler(async (req, res) => {
-    const { ink } = z.object({ ink: inkBody.unwrap() }).parse(req.body);
-    const { pickReader } = await import('../reader');
-    const reader = pickReader();
-    if (!reader.fn) throw new HttpError(503, 'Handwriting reading is not switched on. Type the name instead.');
-    const now = Date.now();
-    const recent = (readsByPerson.get(req.person!.id) ?? []).filter((t) => now - t < 3600_000);
-    if (recent.length >= READS_PER_HOUR) throw new HttpError(429, 'Too many readings this hour. Type the name instead.');
-    readsByPerson.set(req.person!.id, [...recent, now]);
-    const items = (await getRepo().listItems()).filter((i) => i.active);
-    const r = await reader.fn(ink as Ink, { items, qty: 1, rate: 0, examples: '' });
-    if (!r.reading) throw new HttpError(422, 'Could not read that. Try writing it again, larger.');
-    const known = new Set(items.map((i) => i.id));
-    res.json({
-      readText: r.reading.readText,
-      matches: [
-        ...(r.reading.itemId && known.has(r.reading.itemId) ? [{ itemId: r.reading.itemId, confidence: r.reading.confidence }] : []),
-        ...r.reading.alternatives.filter((a) => known.has(a.itemId)),
-      ].slice(0, 4),
-      unit: r.reading.unit,
-      qty: r.reading.qty,
-    });
   }),
 );
 
@@ -475,88 +432,6 @@ actionRoutes.post(
   }),
 );
 
-// ---------------------------------------------------------------- deliveries
-
-async function deliveryPerson(id: string) {
-  const p = await getRepo().getPerson(id);
-  if (!p || !p.active || p.role !== 'delivery') throw new HttpError(400, 'Choose a delivery person');
-  return p;
-}
-
-/**
- * A bill goes out for delivery. Where to and who to call come from the customer billing knows,
- * with the landmark stock keeps; what to collect is what is still due on the bill.
- */
-actionRoutes.post(
-  '/admin/deliveries',
-  admin,
-  handler(async (req, res) => {
-    const body = z
-      .object({
-        billNo: z.number().int().positive(),
-        personId: z.string(),
-        vehicle: z.string().trim().max(40).optional(),
-        note: z.string().trim().max(200).optional(),
-        address: z.string().trim().max(200).optional(),
-      })
-      .parse(req.body);
-    const repo = getRepo();
-    const bill = await repo.getDoc<BillMirror>('bills', String(body.billNo));
-    if (!bill) throw new HttpError(404, 'No such bill');
-    if (bill.cancelled) throw new HttpError(400, 'This bill was cancelled');
-    await deliveryPerson(body.personId);
-    const open = (await repo.listDocs<Delivery>('deliveries')).find((d) => d.billNo === bill.no && d.status !== 'delivered');
-    if (open) throw new HttpError(409, 'This bill is already out for delivery. Change who takes it instead.');
-    const customer = bill.customer ? (await repo.listDocs<CustomerProfile>('customers')).find((c) => c.key === bill.customer!.key) : undefined;
-    const address = body.address || customer?.address || '';
-    if (!address) throw new HttpError(400, 'Where to? This customer has no address: type one');
-    const d: Delivery = {
-      id: newId('dl'),
-      billNo: bill.no,
-      customerKey: bill.customer?.key ?? '',
-      name: customer?.name ?? bill.customer?.name ?? 'Customer',
-      phone: bill.customer?.phone ?? '',
-      address,
-      ...(customer?.landmark ? { landmark: customer.landmark } : {}),
-      personId: body.personId,
-      ...(body.vehicle ? { vehicle: body.vehicle } : {}),
-      status: 'pending',
-      amountDue: Math.max(0, bill.balance),
-      ...(body.note ? { note: body.note } : {}),
-      at: now(),
-      times: { pending: now() },
-    };
-    await repo.putDoc('deliveries', d);
-    emit('deliveries', { personId: d.personId! }, d.id);
-    res.status(201).json(d);
-  }),
-);
-
-/** Someone else takes it: both the old and the new person's screens update. */
-actionRoutes.post(
-  '/admin/deliveries/:id/assign',
-  admin,
-  handler(async (req, res) => {
-    const body = z.object({ personId: z.string(), vehicle: z.string().trim().max(40).optional() }).parse(req.body);
-    const repo = getRepo();
-    const d = await repo.getDoc<Delivery>('deliveries', String(req.params.id));
-    if (!d) throw new HttpError(404, 'No such delivery');
-    if (d.status === 'delivered') throw new HttpError(409, 'Already delivered');
-    await deliveryPerson(body.personId);
-    const before = d.personId;
-    d.personId = body.personId;
-    if (body.vehicle) d.vehicle = body.vehicle;
-    if (d.status === 'out' || d.status === 'failed') {
-      d.status = 'pending';
-      d.times.pending = now();
-    }
-    await repo.putDoc('deliveries', d);
-    emit('deliveries', { personId: body.personId }, d.id);
-    if (before && before !== body.personId) emit('deliveries', { personId: before }, d.id);
-    res.json(d);
-  }),
-);
-
 /** The landmark and a second address line: stock's own additions to billing's customer. */
 actionRoutes.post(
   '/admin/customers/:id',
@@ -573,69 +448,5 @@ actionRoutes.post(
     // A customer from billing gets the new address there too, in the background.
     if (moved && c.billingId) void pushAddress(c.billingId, c.address!);
     res.json(c);
-  }),
-);
-
-
-actionRoutes.post(
-  '/deliveries/:id/status',
-  requireRole('delivery', 'admin'),
-  handler(async (req, res) => {
-    const body = z.object({ status: z.enum(['out', 'delivered', 'failed']), note: z.string().max(200).optional() }).parse(req.body);
-    const repo = getRepo();
-    const d = await repo.getDoc<Delivery>('deliveries', String(req.params.id));
-    if (!d) throw new HttpError(404, 'No such delivery');
-    if (req.person!.role === 'delivery' && d.personId !== req.person!.id) throw new HttpError(403, 'This delivery is not yours');
-    const allowed: Record<string, string[]> = { pending: ['out'], out: ['delivered', 'failed'], failed: ['out'] };
-    if (!(allowed[d.status] ?? []).includes(body.status)) throw new HttpError(409, 'Cannot go from ' + d.status + ' to ' + body.status);
-    d.status = body.status;
-    d.times[body.status] = now();
-    if (body.note) d.note = body.note;
-    await repo.putDoc('deliveries', d);
-    emit('deliveries', { personId: d.personId ?? '' }, d.id);
-    res.json(d);
-  }),
-);
-
-// ---------------------------------------------------------------- customer order requests
-
-actionRoutes.post(
-  '/customer/orders',
-  requireRole('customer'),
-  handler(async (req, res) => {
-    const body = z
-      .object({
-        note: z.string().max(300).optional(),
-        lines: z.array(z.object({ itemId: z.string().optional(), unit: z.string().max(16).optional(), qty: z.number().positive().max(10000).optional(), text: z.string().max(80).optional(), ink: inkBody })).min(1).max(40),
-      })
-      .parse(req.body);
-    const o: OrderRequest = {
-      id: newId('or'),
-      personId: req.person!.id,
-      customerKey: req.person!.phone,
-      lines: body.lines.map((l) => ({ ...l, ...(l.ink ? { ink: l.ink as Ink } : {}) })),
-      status: 'new',
-      at: now(),
-      ...(body.note ? { note: body.note } : {}),
-    };
-    await getRepo().putDoc('orders', o);
-    emit('orders', { customerKey: o.customerKey }, o.id);
-    res.status(201).json(o);
-  }),
-);
-
-actionRoutes.post(
-  '/admin/orders/:id',
-  admin,
-  handler(async (req, res) => {
-    const body = z.object({ status: z.enum(['done', 'declined']), billNo: z.number().int().positive().optional() }).parse(req.body);
-    const repo = getRepo();
-    const o = await repo.getDoc<OrderRequest>('orders', String(req.params.id));
-    if (!o) throw new HttpError(404, 'No such request');
-    o.status = body.status;
-    if (body.billNo) o.billNo = body.billNo;
-    await repo.putDoc('orders', o);
-    emit('orders', { customerKey: o.customerKey }, o.id);
-    res.json(o);
   }),
 );

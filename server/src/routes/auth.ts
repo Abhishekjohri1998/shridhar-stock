@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { checkPin, normalisePhone } from '@stock/core';
+import { checkPin, isActiveRole, normalisePhone, retiredRoleMessage } from '@stock/core';
 import { anyone, issueToken, publicPerson } from '../auth';
 import { handler, HttpError } from '../http';
 import { hashPin, verifyPin } from '../pin';
@@ -28,8 +28,9 @@ authRoutes.post(
       throw new HttpError(401, 'Wrong phone number or PIN');
     }
     recordSuccess(ip, phone);
-    // Suppliers are contacts now and do not sign in. Said plainly, since the PIN was right.
-    if (p.role === 'vendor') throw new HttpError(403, 'Suppliers no longer sign in here. Call the shop about your orders.');
+    // Removed logins (vendor, owner, delivery, customer): kept as records, never signed in. Said
+    // plainly, since the PIN was right.
+    if (!isActiveRole(p.role)) throw new HttpError(403, retiredRoleMessage(p.role));
     res.json({ token: issueToken(p), person: publicPerson(p) });
   }),
 );

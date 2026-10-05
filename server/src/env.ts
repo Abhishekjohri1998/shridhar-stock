@@ -40,14 +40,6 @@ export const env = {
    * means that door does not exist. A secret: server/.env only, the same value as billing's.
    */
   linkKey: str('LINK_KEY', ''),
-  /**
-   * The handwriting reader. The key is the owner's own, set in server/.env only. Without it every
-   * handwritten line waits for a person. READER_FAKE is for the tests: a file of fixed readings.
-   */
-  anthropicKey: str('ANTHROPIC_API_KEY', ''),
-  readerFake: str('READER_FAKE', ''),
-  readerCapRupees: Number(str('READER_CAP_RUPEES', '500')),
-  rupeesPerDollar: Number(str('RUPEES_PER_DOLLAR', '86')),
   /** Demo mode: sample data, "log in as" any role, and the walkthrough. File store only. */
   demo: str('DEMO', '') === '1',
 };

@@ -8,9 +8,7 @@ import {
   roundOff,
   type BillMirror,
   type CustomerProfile,
-  type Delivery,
   type Item,
-  type OrderRequest,
   type PurchaseOrder,
   type Transfer,
   type Vehicle,
@@ -29,14 +27,12 @@ import type { LowAlert } from '../posting';
  * What each role reads, and the small things each may do.
  *
  * Every answer is built for its role here, never a full record with fields taken off afterwards:
- * a godown's stock is assembled without prices, a customer's catalogue without cost
- * or quantities. Which records a person may see is decided from who they are on the server, never
+ * a godown's stock is assembled without prices. Which records a person may see is decided from who they are on the server, never
  * from anything the page sends.
  */
 export const roleRoutes = Router();
 
 const admin = requireRole('admin');
-const adminOrOwner = requireRole('admin', 'owner');
 
 /** A shop day starts at midnight in India. */
 export function istToday(now = Date.now()): string {
@@ -56,18 +52,16 @@ function rounding(total: number, step: number): { rounded: number; roundOff: num
 
 roleRoutes.get(
   '/admin/summary',
-  adminOrOwner,
+  admin,
   handler(async (_req, res) => {
     const repo = getRepo();
-    const [items, stock, bills, transfers, pos, deliveries, orders, meta, alerts] = await Promise.all([
+    const [items, stock, bills, transfers, pos, meta, alerts] = await Promise.all([
       repo.listItems(),
       repo.listStock(),
       repo.listDocs<BillMirror>('bills'),
       repo.listDocs<Transfer>('transfers'),
       repo.listDocs<PurchaseOrder>('pos', { status: [...OPEN_PO] }),
-      repo.listDocs<Delivery>('deliveries'),
-      repo.listDocs<OrderRequest>('orders'),
-      repo.getDoc<{ id: string; link?: unknown; reader?: unknown }>('meta', 'status'),
+      repo.getDoc<{ id: string; link?: unknown }>('meta', 'status'),
       repo.getDoc<{ id: string; list: LowAlert[] }>('meta', 'lowAlerts'),
     ]);
     // Running low is all places together, the same rule as Inventory and the buy list.
@@ -94,9 +88,6 @@ roleRoutes.get(
       inTransit: transfers.filter((t) => t.status === 'sent').length,
       requested: transfers.filter((t) => t.status === 'requested').length,
       openPos: pos.length,
-      deliveriesToday: deliveries.filter((d) => d.at >= today).length,
-      deliveriesPending: deliveries.filter((d) => d.status === 'pending' || d.status === 'out').length,
-      newOrders: orders.filter((o) => o.status === 'new').length,
       salesToday: todays.reduce((s, b) => s + b.total, 0),
       billsToday: todays.length,
       due: bills.filter((b) => !b.cancelled).reduce((s, b) => s + Math.max(0, b.balance), 0),
@@ -105,16 +96,14 @@ roleRoutes.get(
         return sum + cost * stock.filter((s) => s.itemId === i.id).reduce((a, s) => a + Math.max(0, s.qty), 0);
       }, 0),
       handwrittenLines: written.length,
-      autoRead: written.filter((l) => l.state === 'read-auto').length,
       link: meta?.link ?? null,
-      reader: meta?.reader ?? null,
     });
   }),
 );
 
 roleRoutes.get(
   '/admin/bills',
-  adminOrOwner,
+  admin,
   handler(async (req, res) => {
     const limit = Math.min(500, Number(req.query.limit) || 100);
     const repo = getRepo();
@@ -157,7 +146,7 @@ roleRoutes.get(
  */
 roleRoutes.get(
   '/admin/pos',
-  adminOrOwner,
+  admin,
   handler(async (req, res) => {
     const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
     const offset = Math.max(0, Number(req.query.offset) || 0);
@@ -182,13 +171,11 @@ roleRoutes.get(
 for (const [path, col] of [
   ['/admin/transfers', 'transfers'],
   ['/admin/suppliers', 'suppliers'],
-  ['/admin/deliveries', 'deliveries'],
-  ['/admin/orders', 'orders'],
   ['/admin/customers', 'customers'],
 ] as const) {
   roleRoutes.get(
     path,
-    adminOrOwner,
+    admin,
     handler(async (_req, res) => {
       const docs = await getRepo().listDocs<{ id: string; no?: number; at?: string }>(col);
       docs.sort((a, b) => (b.no ?? 0) - (a.no ?? 0) || String(b.at ?? '').localeCompare(String(a.at ?? '')));
@@ -205,7 +192,7 @@ for (const [path, col] of [
  */
 roleRoutes.get(
   '/worker/bills',
-  requireRole('worker', 'admin', 'owner'),
+  requireRole('worker', 'admin'),
   handler(async (_req, res) => {
     const repo = getRepo();
     const [bills, items, locs, settings] = await Promise.all([repo.listDocs<BillMirror>('bills'), repo.listItems(), repo.listLocations(), settingsOf(repo)]);
@@ -258,7 +245,7 @@ roleRoutes.get(
           total: b.total,
           ...rounding(b.total, settings.roundTo),
           lines: b.lines.map((l) => {
-            // Until a person confirms it, the reader's best guess says which rack to walk to.
+            // Until a person confirms it, the best match says which rack to walk to.
             const guess = l.itemId ?? l.reading?.itemId;
             const item = guess ? byId.get(guess) : undefined;
             return {
@@ -342,12 +329,12 @@ roleRoutes.post(
 // ---------------------------------------------------------------- vehicles
 
 /**
- * The shop's vehicles, for the pick list on the transfer, dispatch and delivery forms. Number,
+ * The shop's vehicles, for the pick list on the transfer and dispatch forms. Number,
  * type and driver's name only: the driver's phone stays with the admin.
  */
 roleRoutes.get(
   '/vehicles',
-  requireRole('admin', 'godown', 'delivery'),
+  requireRole('admin', 'godown'),
   handler(async (_req, res) => {
     const all = await getRepo().listDocs<Vehicle>('vehicles');
     res.json(all.filter((v) => v.active).sort((a, b) => a.number.localeCompare(b.number)).map((v) => ({ number: v.number, type: v.type, driverName: v.driverName })));
@@ -396,101 +383,5 @@ roleRoutes.get(
     const g = myGodown(req);
     const items = await getRepo().listItems();
     res.json(items.map((i) => ({ id: i.id, nameEn: i.nameEn, nameKn: i.nameKn, units: i.units.map((u) => ({ code: u.code, label: u.label, labelKn: u.labelKn, perBase: u.perBase, price: 0 })), rack: i.racks[g] ?? '' })));
-  }),
-);
-
-// ---------------------------------------------------------------- delivery
-
-roleRoutes.get(
-  '/delivery/mine',
-  requireRole('delivery'),
-  handler(async (req, res) => {
-    const repo = getRepo();
-    const [all, bills, items] = await Promise.all([repo.listDocs<Delivery>('deliveries'), repo.listDocs<BillMirror>('bills'), repo.listItems()]);
-    const byId = new Map(items.map((i) => [i.id, i]));
-    const mine = all.filter((d) => d.personId === req.person!.id).sort((a, b) => a.at.localeCompare(b.at));
-    res.json(
-      mine.map((d) => {
-        const bill = bills.find((b) => b.no === d.billNo);
-        return {
-          ...d,
-          lines: (bill?.lines ?? []).map((l) => {
-            const it = l.itemId ? byId.get(l.itemId) : undefined;
-            return { text: l.name || l.reading?.readText || (it ? it.nameKn || it.nameEn : ''), ink: l.name ? undefined : l.ink, qty: l.qty };
-          }),
-        };
-      }),
-    );
-  }),
-);
-
-// ---------------------------------------------------------------- customer
-
-function myKey(req: import('express').Request): string {
-  return req.person!.phone;
-}
-
-roleRoutes.get(
-  '/customer/bills',
-  requireRole('customer'),
-  handler(async (req, res) => {
-    const key = myKey(req);
-    const [bills, profile] = await Promise.all([
-      getRepo().listDocs<BillMirror>('bills'),
-      getRepo().listDocs<CustomerProfile>('customers').then((c) => c.find((x) => x.key === key)),
-    ]);
-    const mine = bills.filter((b) => b.customer?.key === key).sort(byNoDesc);
-    res.json({
-      name: profile?.name ?? req.person!.name,
-      balance: profile?.balance ?? mine.filter((b) => !b.cancelled).reduce((s, b) => s + b.balance, 0),
-      bills: mine.map((b) => ({
-        no: b.no,
-        at: b.at,
-        total: b.total,
-        paid: b.paid,
-        balance: b.balance,
-        cancelled: !!b.cancelled,
-        lines: b.lines.map((l) => ({
-          name: l.name,
-          ink: l.ink,
-          qty: l.qty,
-          amount: l.amount,
-          ...(l.itemId && l.state !== 'to-confirm' && l.state !== 'not-item' ? { itemId: l.itemId, unit: l.unit } : {}),
-        })),
-      })),
-    });
-  }),
-);
-
-/** What the shop sells: names, units, prices, and whether it is in the shop. No costs, no counts. */
-roleRoutes.get(
-  '/customer/catalogue',
-  requireRole('customer'),
-  handler(async (_req, res) => {
-    const repo = getRepo();
-    const [items, stock, locs] = await Promise.all([repo.listItems(), repo.listStock(), repo.listLocations()]);
-    const shop = locs.find((l) => l.kind === 'shop');
-    const inShop = new Map(stock.filter((s) => s.locationId === shop?.id).map((s) => [s.itemId, s.qty]));
-    res.json(
-      items
-        .filter((i: Item) => i.active)
-        .map((i) => ({
-          id: i.id,
-          nameEn: i.nameEn,
-          nameKn: i.nameKn,
-          category: i.category ?? '',
-          units: i.units.map((u) => ({ code: u.code, label: u.label, labelKn: u.labelKn, price: u.price })),
-          available: (inShop.get(i.id) ?? 0) > 0,
-        })),
-    );
-  }),
-);
-
-roleRoutes.get(
-  '/customer/orders',
-  requireRole('customer'),
-  handler(async (req, res) => {
-    const all = await getRepo().listDocs<OrderRequest>('orders');
-    res.json(all.filter((o) => o.personId === req.person!.id).sort((a, b) => b.at.localeCompare(a.at)));
   }),
 );

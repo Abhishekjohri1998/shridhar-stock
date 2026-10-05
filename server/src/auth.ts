@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import type { Person, Role } from '@stock/core';
+import { isActiveRole, retiredRoleMessage, type Person, type Role } from '@stock/core';
 import { env } from './env';
 import { HttpError } from './http';
 import { getRepo } from './store';
@@ -62,8 +62,9 @@ export function requireRole(...roles: Role[]) {
     getRepo()
       .getPerson(body.pid)
       .then((p) => {
-        // A vendor's old session ends too: suppliers no longer sign in.
-        if (!p || !p.active || p.tv !== body.tv || p.role === 'vendor') throw new HttpError(401, 'Sign in again');
+        if (!p || !p.active || p.tv !== body.tv) throw new HttpError(401, 'Sign in again');
+        // An old session of a removed login ends too, with the same plain message as the login.
+        if (!isActiveRole(p.role)) throw new HttpError(401, retiredRoleMessage(p.role));
         if (roles.length && !roles.includes(p.role)) throw new HttpError(403, 'This is not open to your role');
         req.person = p;
         next();

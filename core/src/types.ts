@@ -9,6 +9,9 @@
 export type Lang = 'en' | 'kn';
 
 export const ROLES = ['admin', 'owner', 'worker', 'godown', 'vendor', 'delivery', 'customer'] as const;
+/** The roles that still sign in. The others are kept only so old records read. */
+export const ACTIVE_ROLES = ['admin', 'worker', 'godown'] as const satisfies readonly Role[];
+export type ActiveRole = (typeof ACTIVE_ROLES)[number];
 export type Role = (typeof ROLES)[number];
 
 /**
@@ -300,7 +303,7 @@ export interface PurchaseOrder {
   times: Partial<Record<POStatus, string>>;
 }
 
-// ------------------------------------------------------------------ deliveries and orders
+// ------------------------------------------------------------------ deliveries and orders (old records only: these features were removed)
 
 export type DeliveryStatus = 'pending' | 'out' | 'delivered' | 'failed';
 

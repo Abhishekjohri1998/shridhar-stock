@@ -7,7 +7,7 @@ import { settingsOf } from '../setup';
 import { vehicleKey } from './admin';
 
 /**
- * Reports for the owner and the admin, worked out from the bills stock has read and the ledger.
+ * Reports for the admin, worked out from the bills stock has read and the ledger.
  *
  * Honest about what they cannot see: a handwritten line nobody has confirmed yet has no item, so
  * "sales by item" says how much of the takings is still unlinked rather than quietly leaving it
@@ -15,7 +15,7 @@ import { vehicleKey } from './admin';
  */
 export const reportRoutes = Router();
 
-const readers = requireRole('admin', 'owner');
+const readers = requireRole('admin');
 
 function istDay(day: string, end = false): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new HttpError(400, 'Dates are YYYY-MM-DD');

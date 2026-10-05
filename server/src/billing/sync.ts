@@ -95,7 +95,7 @@ function unitForRate(item: Item, qty: number, rate: number, named?: string): str
   return best;
 }
 
-/** One billing line as stock sees it. Existing lines keep what a person or the reader decided. */
+/** One billing line as stock sees it. Existing lines keep what a person decided. */
 function toMirrorLine(items: Item[], raw: BillingBill['lines'][number], i: number, before?: MirrorLine, drafted?: Draft['lines'][number]): MirrorLine {
   const line = matchLine(items, raw, i, before);
   /*
@@ -151,7 +151,7 @@ function matchLine(items: Item[], raw: BillingBill['lines'][number], i: number, 
       return { ...base, state: 'typed-match', itemId: m.item.id, unit, baseQty: priceFor(m.item, unit, raw.qty).baseQty };
     }
   }
-  return base; // handwritten, or a typed name no item has: waits for the reader or a person
+  return base; // handwritten, or a typed name no item has: waits for a person in To confirm
 }
 
 export interface SyncResult {
@@ -258,7 +258,7 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limit = 10
 
 /** The link's health, for the admin's screens. */
 export async function recordLink(repo: InvRepo, ok: boolean, detail: { lastBillNo?: number; message: string }): Promise<void> {
-  const meta = (await repo.getDoc<{ id: string; link?: unknown; reader?: unknown }>('meta', 'status')) ?? { id: 'status' };
+  const meta = (await repo.getDoc<{ id: string; link?: unknown }>('meta', 'status')) ?? { id: 'status' };
   const prev = (meta.link ?? {}) as { lastOkAt?: string };
   await repo.putDoc('meta', {
     ...meta,

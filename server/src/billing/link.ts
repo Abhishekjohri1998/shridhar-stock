@@ -2,12 +2,8 @@ import { env } from '../env';
 import { getRepo } from '../store';
 import { billingClient, type BillingClient } from './client';
 import { emit } from '../events';
-import { pickReader, readPending } from '../reader';
 import { pushGiven } from './push';
 import { pollDelay, recordLink, syncOnce, POLL_ACTIVE_WINDOW_MS, type SyncResult } from './sync';
-
-const reader = pickReader();
-console.log('[reader] handwriting reader: ' + reader.kind);
 
 let running: Promise<SyncResult | null> | null = null;
 let last: SyncResult | null = null;
@@ -32,13 +28,7 @@ export function syncNow(): Promise<SyncResult | null> {
     .then(async (r) => {
       last = r;
       for (const g of r.sendGiven) void pushGiven(g.no, g.i, g.given);
-      // New handwritten lines are read straight after they arrive.
-      const read = await readPending(repo, reader.fn).catch((err: Error) => {
-        console.error('[reader] failed:', err.message);
-        return null;
-      });
-      if (read) Object.assign(r, { read: read.read, autoRead: read.auto });
-      if (r.newBills || r.posted || r.reversed || read?.read) {
+      if (r.newBills || r.posted || r.reversed) {
         lastChangeAt = Date.now();
         emit('bills');
       }

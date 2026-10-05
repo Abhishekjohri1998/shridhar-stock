@@ -12,6 +12,7 @@ import {
   lowAtOf,
   normalisePhone,
   parseCsv,
+  isActiveRole,
   ROLES,
   ROUND_STEPS,
   toCsv,
@@ -36,7 +37,6 @@ import { dropPerson, emit } from '../events';
 export const adminRoutes = Router();
 
 const admin = requireRole('admin');
-const adminOrOwner = requireRole('admin', 'owner');
 
 // ---------------------------------------------------------------- people
 
@@ -77,6 +77,7 @@ adminRoutes.post(
   handler(async (req, res) => {
     const body = personBody.parse(req.body);
     if (body.role === 'vendor') throw new HttpError(400, NO_VENDORS);
+    if (!isActiveRole(body.role)) throw new HttpError(400, RETIRED_ROLE);
     const phone = normalisePhone(body.phone);
     if (phone.length !== 10) throw new HttpError(400, 'The phone number should be 10 digits');
     const bad = checkPin(body.pin);
@@ -99,6 +100,7 @@ adminRoutes.post(
 );
 
 const NO_VENDORS = 'Suppliers do not sign in any more. Add them under Purchases, Suppliers.';
+const RETIRED_ROLE = 'That login is no longer used. Choose Admin, Shop worker or Godown.';
 
 const personPatch = z.object({
   name: z.string().trim().min(1).max(60).optional(),
@@ -118,6 +120,7 @@ adminRoutes.put(
     const role = patch.role ?? p.role;
     const active = patch.active ?? p.active;
     if (role === 'vendor' && p.role !== 'vendor') throw new HttpError(400, NO_VENDORS);
+    if (role !== p.role && !isActiveRole(role)) throw new HttpError(400, RETIRED_ROLE);
     // The shop must never be left with nobody able to run it.
     if (p.role === 'admin' && (role !== 'admin' || !active)) {
       const admins = (await repo.listPeople()).filter((x) => x.role === 'admin' && x.active);
@@ -214,7 +217,7 @@ adminRoutes.put(
 
 adminRoutes.get(
   '/items',
-  adminOrOwner,
+  admin,
   handler(async (req, res) => {
     let items = await getRepo().listItems();
     if (req.query.all !== '1') items = items.filter((i) => i.active);
@@ -227,7 +230,7 @@ adminRoutes.get(
 
 adminRoutes.get(
   '/items/:id',
-  adminOrOwner,
+  admin,
   handler(async (req, res) => {
     const item = await getRepo().getItem(String(req.params.id));
     if (!item) throw new HttpError(404, 'No such item');
@@ -288,7 +291,7 @@ adminRoutes.put(
 
 adminRoutes.get(
   '/stock',
-  adminOrOwner,
+  admin,
   handler(async (_req, res) => {
     res.json(await getRepo().listStock());
   }),
@@ -296,7 +299,7 @@ adminRoutes.get(
 
 adminRoutes.get(
   '/items/:id/moves',
-  adminOrOwner,
+  admin,
   handler(async (req, res) => {
     const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 30));
     res.json(await getRepo().listMoves({ itemId: String(req.params.id), limit }));
@@ -400,7 +403,7 @@ adminRoutes.post(
 
 adminRoutes.get(
   '/admin/settings',
-  adminOrOwner,
+  admin,
   handler(async (_req, res) => {
     res.json(await settingsOf(getRepo()));
   }),
@@ -508,7 +511,7 @@ function sendCsv(res: import('express').Response, name: string, body: string): v
 
 adminRoutes.get(
   '/export/items.csv',
-  adminOrOwner,
+  admin,
   handler(async (_req, res) => {
     const repo = getRepo();
     const [items, shop] = await Promise.all([repo.listItems(), shopOf(repo)]);
@@ -526,7 +529,7 @@ function sendXlsx(res: import('express').Response, name: string, body: Uint8Arra
 /** The items file as an Excel workbook: the same columns as items.csv. */
 adminRoutes.get(
   '/export/items.xlsx',
-  adminOrOwner,
+  admin,
   handler(async (_req, res) => {
     const repo = getRepo();
     const [items, shop] = await Promise.all([repo.listItems(), shopOf(repo)]);
@@ -552,7 +555,7 @@ function stockStatus(it: Item, q: number, total: number): string {
 /** Stock as a workbook: one sheet per place, the shop first, the same columns as stock.csv. */
 adminRoutes.get(
   '/export/stock.xlsx',
-  adminOrOwner,
+  admin,
   handler(async (_req, res) => {
     const repo = getRepo();
     const [items, locs, stock] = await Promise.all([repo.listItems(), repo.listLocations(), repo.listStock()]);
@@ -575,7 +578,7 @@ adminRoutes.get(
 
 adminRoutes.get(
   '/export/stock.csv',
-  adminOrOwner,
+  admin,
   handler(async (_req, res) => {
     const repo = getRepo();
     const [items, locs, stock] = await Promise.all([repo.listItems(), repo.listLocations(), repo.listStock()]);
@@ -611,7 +614,7 @@ adminRoutes.get(
 
 adminRoutes.get(
   '/export/ledger.csv',
-  adminOrOwner,
+  admin,
   handler(async (req, res) => {
     const repo = getRepo();
     const from = req.query.from ? istDayStart(String(req.query.from)) : undefined;
