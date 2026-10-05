@@ -28,8 +28,6 @@ die() { printf '\n\033[1;31mxx\033[0m %s\n\n' "$1" >&2; exit 1; }
 [ "$(id -u)" -ne 0 ] || die "Run this as the ubuntu user, not root. It uses sudo where it needs to."
 [ -f "$SRC/server/src/index.ts" ] || die "Run this from the unpacked stock code."
 command -v node >/dev/null || die "Node is not installed. The billing setup installs it; run that first."
-# The handwriting reader draws its PNGs with zlib.crc32, which Node has from 22.2.
-node -e "process.exit(require('zlib').crc32 ? 0 : 1)" || die "Node $(node -v) is too old: 22.2 or newer is needed (the billing box has 22)."
 [ "$APP_DIR" != "/opt/shridhar" ] || die "That is the billing app's folder."
 [ "$PORT" != "4000" ] || die "Port 4000 is the billing app's."
 
@@ -58,7 +56,6 @@ if [ ! -f "$APP_DIR/server/.env" ]; then
   read -r -s -p "First admin's PIN (4 to 6 digits): " ADMIN_PIN; echo
   echo "    The link to billing reads bills from the billing server on this same box."
   read -r -s -p "The shop's billing PIN (the one the counter types; empty to leave the link off for now): " BILLING_PIN_IN; echo
-  read -r -s -p "Anthropic API key for reading handwriting (empty to leave it off for now): " KEY_IN; echo
   umask 077
   cat > "$APP_DIR/server/.env" <<ENV
 MONGO_URI=$MONGO_IN
@@ -73,8 +70,6 @@ SEED_ADMIN_NAME=Admin
 BILLING_URL=${BILLING_PIN_IN:+http://127.0.0.1:4000}
 BILLING_PIN=$BILLING_PIN_IN
 BILLING_EVERY_MS=15000
-ANTHROPIC_API_KEY=$KEY_IN
-READER_CAP_RUPEES=500
 ENV
   echo "    Written. The first admin is made on first start; this script removes the seed after."
 else

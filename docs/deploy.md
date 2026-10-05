@@ -61,7 +61,7 @@ Then, on the server:
 rm -rf ~/stock-src && mkdir -p ~/stock-src && tar -xzf ~/shridhar-stock.tar.gz -C ~/stock-src && bash ~/stock-src/deploy/setup-stock.sh
 ```
 
-The script asks for five things. It echoes none of them and writes them only to
+The script asks for four things. It echoes none of them and writes them only to
 `/opt/shridhar-stock/server/.env`, readable by nobody but the service:
 
 1. **The MongoDB connection string.** Use the same one as billing. `MONGO_DB=inventory` keeps
@@ -71,8 +71,8 @@ The script asks for five things. It echoes none of them and writes them only to
    deletes it from `.env` once the admin exists.
 4. **The shop's billing PIN**, the one the counter types. Stock uses it only to read bills. Leave
    it empty to switch the billing link on later.
-5. **Your Anthropic API key**, for reading handwriting. Leave it empty to switch reading on
-   later. Until then, handwritten lines wait in "To confirm".
+
+Handwritten bill lines wait in **Bills → To confirm**, where a person picks the item.
 
 When the script finishes:
 - `shridhar-stock` is running on port 4200.
@@ -83,15 +83,14 @@ When the script finishes:
 ## 4. Check it
 
 - Open https://stock.3.111.82.220.sslip.io and sign in with the admin phone and PIN.
-- **Admin → Settings:**
-  - "Link to billing" should say Working, with billing's last bill number.
-  - "Handwriting reader" shows whether the key is set.
-- **Admin → Places:** add your godowns.
-- **Admin → Items:** add items, or bring them in from Excel.
-- **Admin → People:** add workers, godown staff, vendors, delivery people and customers. Each one
-  signs in at the same address with their phone and the PIN you give them.
+- **Setup → Settings:** "Link to billing" should say Working, with billing's last bill number.
+- **Setup → Places:** add your godowns.
+- **Inventory:** add items, or bring them in from Setup → Excel.
+- **Setup → People:** add shop workers and godown staff. Each one signs in at the same address
+  with their phone and the PIN you give them. The roles are Admin, Shop worker and Godown; old
+  owner, delivery and customer logins are kept as records but can no longer sign in.
 
-## Switching the link or the reader on later
+## Switching the link on later
 
 On the server:
 
@@ -99,13 +98,14 @@ On the server:
 nano /opt/shridhar-stock/server/.env
 ```
 
-Set these three lines:
+Set these two lines:
 
 ```
 BILLING_URL=http://127.0.0.1:4000
 BILLING_PIN=<the shop's PIN>
-ANTHROPIC_API_KEY=<your key>
 ```
+
+An old `ANTHROPIC_API_KEY` or `READER_*` line from before is simply ignored.
 
 Then restart:
 

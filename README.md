@@ -9,7 +9,7 @@ billing server.
 core/     rules shared by the server, the website and the admin app: types, pricing, units,
           CSV, item checks, Kannada search, every string in English and Kannada
 server/   Express + MongoDB (its own database, "inventory") or a JSON file for tests
-web/      the website: /admin for the admin, and one screen per role for everyone else
+web/      the website: /admin for the admin, a pick list for shop workers, a screen for godowns
 deploy/   putting it on the server beside billing (docs/deploy.md)
 scripts/  tests
 ```
@@ -67,5 +67,7 @@ Built:
 - **Phase 2:** places, the stock ledger, corrections and recount.
 - **Phase 3:** the admin APK. It has the same admin screens as the website, apart from bringing in an items file, which is done on the website.
 
-The full plan for the later phases (admin APK, billing link, worker screen, godowns, vendors,
-deliveries, customers) is in `docs/PLAN.md`.
+The roles are Admin, Shop worker and Godown. The customer, delivery and owner logins, deliveries,
+customer requests and the handwriting reader were removed; their old records are kept, and those
+logins are refused with a clear message. Every screen has a guided tour (the "?" button), and
+/help explains how it all fits together. The earlier full plan is in `docs/PLAN.md`.

@@ -85,10 +85,8 @@ async function main() {
     const admin = await listen('admin');
     const worker = await listen('worker');
     const godown = await listen('godown'); // main godown
-    const delivery = await listen('delivery');
-    const customer = await listen('customer');
     await wait(300);
-    check('every stream opens', [admin, worker, godown, delivery, customer].every((s) => s.hello));
+    check('every stream opens', [admin, worker, godown].every((s) => s.hello));
     const reset = () => streams.forEach((s) => (s.heard.length = 0));
 
     eq('a used ticket cannot open a second stream', (await fetch(base + '/api/events?ticket=' + admin.ticket)).status, 401);
@@ -102,14 +100,13 @@ async function main() {
     check('the worker hears it', worker.heard.includes('bills'));
     check('a godown does not', !godown.heard.includes('bills'));
 
-    // A transfer from the main godown: that godown hears it, the delivery person does not.
+    // A transfer from the main godown: that godown hears it, the worker does not.
     reset();
     await call('/transfers/tr_3/send', godown.token, { vehicle: 'KA' });
     await wait(300);
     check('the godown hears its transfer', godown.heard.includes('transfers'));
     check('and its stock changing', godown.heard.includes('stock'));
     check('the admin hears it', admin.heard.includes('transfers'));
-    check('the delivery person does not', delivery.heard.length === 0, delivery.heard.join());
     check('the worker does not hear transfers', !worker.heard.includes('transfers'));
 
     // A transfer to another godown's stock: the main godown hears nothing.
@@ -123,29 +120,13 @@ async function main() {
     await call('/admin/pos/po_4/cancel', admin.token, {});
     await wait(300);
     check('the admin hears an order change', admin.heard.includes('pos'));
-    check('nobody else does', [worker, godown, delivery, customer].every((x) => !x.heard.includes('pos')));
-
-    // Deliveries: only the person it is assigned to.
-    reset();
-    await call('/deliveries/dl_3/status', delivery.token, { status: 'out' });
-    await wait(300);
-    check('the delivery person hears their drop', delivery.heard.includes('deliveries'));
-    check('the customer does not hear deliveries', !customer.heard.includes('deliveries'));
-
-    // A customer's request: that customer and the admin.
-    reset();
-    await call('/customer/orders', customer.token, { lines: [{ itemId: 'it_sugar', unit: 'kg', qty: 1 }] });
-    await wait(300);
-    check('the customer hears their request', customer.heard.includes('orders'));
-    check('the admin hears it', admin.heard.includes('orders'));
-    check('the worker does not', !worker.heard.includes('orders'));
+    check('nobody else does', [worker, godown].every((x) => !x.heard.includes('pos')));
 
     // Confirming a handwritten line reaches the worker's pick list.
     reset();
     await call('/admin/confirm', admin.token, { billNo: 54, i: 1, itemId: 'it_coffee', unit: 'pc', qty: 1 });
     await wait(300);
     check('a confirmed line reaches the worker', worker.heard.includes('bills'));
-    check('and teaches an item name, which the worker hears', worker.heard.includes('items'));
 
     // Switching someone off ends their stream at once.
     const workerId = (await call('/me', worker.token)).body.id;

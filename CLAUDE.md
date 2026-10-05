@@ -49,13 +49,13 @@ waits for the client's explicit yes. That covers:
 - **W1 done:** every role's screens working on demo data. Run `bash scripts/demo.sh` and open
   http://localhost:4200/walkthrough (demo PIN 1111; file store only, refuses a database).
 - **W2 done:** the read-only billing link (`server/src/billing/`), `npm run linktest`; `scripts/demo.sh` runs a scratch billing server beside the demo.
-- **W3 done:** the handwriting reader (`server/src/reader/`, `npm run readertest`). Real reading needs the
-  owner's `ANTHROPIC_API_KEY` in `server/.env`; without it lines wait for a person.
+- **W3 (handwriting reader): removed** at the owner's request. Written bill lines wait in Bills → To confirm for a person; old readings in the data are kept.
 - **W4 done:** live updates (`server/src/events.ts`, `web/src/lib/live.ts`, `npm run livetest`).
 - **W5 done:** refill with editable trips, transfers between any places, cancel, received-vs-sent (`web/src/roles/admin/Moving.tsx`).
 - **W6 done:** suppliers, purchase orders from the buy list, receive with actual quantity and cost (`web/src/roles/admin/Buying.tsx`).
-- **W7 done:** deliveries from bills, reassign, landmarks kept on the stock side (`web/src/roles/admin/Deliver.tsx`).
-- **W8 done:** reports (`server/src/routes/reports.ts`, `web/src/roles/Reports.tsx`), customer order-again and categories.
-- **Next:** W9 (billing-side link, only on the owner's go) and W10 deploy; the paid reader eval on real shop handwriting when the owner says.
+- **W7 (deliveries): removed**, with the customer, delivery and owner logins. Their records are kept; those logins are refused with a clear message. Vehicles stay under Setup.
+- **W8 done:** reports (`server/src/routes/reports.ts`, `web/src/roles/Reports.tsx`), under Home → Reports.
+- **Simpler layout:** roles are Admin, Shop worker, Godown. Admin menu is 5 places with tabs (`web/src/App.tsx`). Guided tours: `web/src/components/Tour.tsx`, `web/src/tours/*.ts` (`npm run tourtest` checks every `data-tour` target exists), and `/help`.
+- **Next:** W9 (billing-side link, only on the owner's go) and W10 deploy; 
 - **Real handwriting for the demo:** export a billing backup to Downloads, then extract strokes
   only into the gitignored `scripts/demo-ink.json`.

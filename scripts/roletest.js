@@ -30,6 +30,10 @@ async function main() {
     const { hashPin } = require(path.join(out, 'pin.js'));
     const repo = await require(path.join(out, 'store', 'file.js')).createFileRepo(dir);
     await require(path.join(out, 'demo', 'seed.js')).seedDemo(repo);
+    // And the logins that were removed (owner, delivery, customer): kept as records, never signed in.
+    for (const [id, role, phone] of [['p_oldowner', 'owner', '9111100011'], ['p_olddelivery', 'delivery', '9111100012'], ['p_oldcustomer', 'customer', '9111100013']]) {
+      await repo.createPerson({ id, name: 'Old ' + role + ' login', phone, role, active: true, pinHash: hashPin('2468'), tv: 1, createdAt: new Date().toISOString() });
+    }
     await repo.createPerson({ id: 'p_oldvendor', name: 'Old vendor login', phone: '9111100009', role: 'vendor', linkedId: 'sup_1', active: true, pinHash: hashPin('2468'), tv: 1, createdAt: new Date().toISOString() });
     await repo.close();
   }
@@ -65,9 +69,13 @@ async function main() {
       }
       return { status: r.status, body: json };
     };
+    const send = async (method, p, token, body) => {
+      const r = await fetch(base + '/api' + p, { method, headers: { ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+      return { status: r.status, body: await r.json().catch(() => null) };
+    };
     const as = async (role) => (await call('/demo/login-as', null, { role })).body.token;
     const T = {};
-    for (const r of ['admin', 'owner', 'worker', 'godown', 'delivery', 'customer']) T[r] = await as(r);
+    for (const r of ['admin', 'worker', 'godown']) T[r] = await as(r);
     check('every role that signs in has a demo person', Object.values(T).every(Boolean));
     eq('suppliers have no demo login', (await call('/demo/login-as', null, { role: 'vendor' })).status, 404);
     eq('a vendor from before cannot sign in', (await call('/auth/login', null, { phone: '9111100009', pin: '2468' })).status, 403);
@@ -75,39 +83,43 @@ async function main() {
     eq('the vendor screen is gone', (await call('/vendor/pos', T.admin)).status, 404);
     eq('and so are the vendor\'s steps', (await call('/pos/po_3/confirm', T.admin, {})).status, 404);
     eq('a new vendor login is refused', (await call('/people', T.admin, { name: 'V', phone: '9111100001', role: 'vendor', pin: '2222', linkedId: 'sup_1' })).status, 400);
+    // ---- removed roles: the data stays, the login is refused with a clear message
+    for (const [role, phone] of [['owner', '9111100011'], ['delivery', '9111100012'], ['customer', '9111100013']]) {
+      const r = await call('/auth/login', null, { phone, pin: '2468' });
+      eq('an old ' + role + ' login is refused', r.status, 403);
+      check('with a clear message in English', /no longer used/.test(r.body && r.body.error), JSON.stringify(r.body));
+      check('and in Kannada', /ಈ ಲಾಗಿನ್ ಈಗ ಬಳಕೆಯಲ್ಲಿಲ್ಲ/.test(r.body && r.body.error), JSON.stringify(r.body));
+      eq('there is no demo ' + role + ' login', (await call('/demo/login-as', null, { role })).status, 404);
+    }
+    check('the old logins are kept, for the admin to move', (await call('/people', T.admin)).body.filter((p) => /^p_old/.test(p.id)).length === 4);
+    eq('a new delivery login is refused', (await call('/people', T.admin, { name: 'D', phone: '9111100021', role: 'delivery', pin: '2222' })).status, 400);
+    eq('a new customer login is refused', (await call('/people', T.admin, { name: 'C', phone: '9111100022', role: 'customer', pin: '2222' })).status, 400);
+    eq('a new owner login is refused', (await call('/people', T.admin, { name: 'O', phone: '9111100023', role: 'owner', pin: '2222' })).status, 400);
+    eq('an old delivery login is moved to shop worker', (await send('PUT', '/people/p_olddelivery', T.admin, { role: 'worker' })).status, 200);
+    eq('and then signs in', (await call('/auth/login', null, { phone: '9111100012', pin: '2468' })).status, 200);
+    eq('nobody can be moved to a removed role', (await send('PUT', '/people/p_worker', T.admin, { role: 'customer' })).status, 400);
+    for (const p of ['/delivery/mine', '/customer/bills', '/customer/catalogue', '/customer/orders', '/admin/deliveries', '/admin/orders']) {
+      eq(p + ' is gone', (await call(p, T.admin)).status, 404);
+    }
     eq('demo PIN works like a real login', (await call('/auth/login', null, { phone: '9000000004', pin: '1111' })).status, 200);
 
     // ---- who sees what
     const summary = (await call('/admin/summary', T.admin)).body;
     check('the admin sees lines to confirm', summary.toConfirm >= 3, JSON.stringify(summary));
-    for (const r of ['worker', 'godown', 'delivery', 'customer']) {
+    for (const r of ['worker', 'godown']) {
       eq(r + ' cannot read the admin summary', (await call('/admin/summary', T[r])).status, 403);
     }
-    eq('the owner can read it', (await call('/admin/summary', T.owner)).status, 200);
-    eq('the owner cannot change items', (await call('/items', T.owner, {})).status, 403);
-    eq('the owner cannot confirm lines', (await call('/admin/confirm', T.owner, { billNo: 54, i: 0 })).status, 403);
 
 
-    const cat = (await call('/customer/catalogue', T.customer)).body;
-    check('the customer catalogue has prices', cat.length > 30 && cat[0].units[0].price > 0);
-    check('but no costs and no counts', !/"cost"|"qty"/.test(JSON.stringify(cat)));
-    const cb = (await call('/customer/bills', T.customer)).body;
-    check('a customer sees only their own bills', cb.bills.length === 2 && cb.bills.every((b) => b.no === 52 || b.no === 54), cb.bills.map((b) => b.no).join());
-    check('handwriting reaches the customer\'s slip', cb.bills.some((b) => b.lines.some((l) => l.ink && l.ink.strokes.length)));
-
-    const mine = (await call('/delivery/mine', T.delivery)).body;
-    eq('the delivery person sees their drops', mine.length, 3);
-    eq('a godown cannot see deliveries', (await call('/delivery/mine', T.godown)).status, 403);
 
     const worker = (await call('/worker/bills', T.worker)).body;
     check('the worker sees today\'s bills, newest first', worker.length === 4 && worker[0].no === 54);
-    check('lines carry their rack', worker[0].lines.some((l) => l.rack === 'Rack 5'));
+    check('lines carry their rack', worker.some((b) => b.lines.some((l) => l.rack === 'Rack 1')), JSON.stringify(worker.map((b) => b.lines.map((l) => l.rack))));
 
     // ---- reports
-    const rep = await call('/reports', T.owner);
-    eq('the owner reads reports', rep.status, 200);
+    const rep = await call('/reports', T.admin);
+    eq('the admin reads reports', rep.status, 200);
     eq('a worker cannot', (await call('/reports', T.worker)).status, 403);
-    eq('a customer cannot', (await call('/reports', T.customer)).status, 403);
     const S = rep.body.sales;
     const billsNow = (await call('/admin/bills', T.admin)).body;
     const takings = Math.round(billsNow.filter((b) => !b.cancelled).reduce((a, b) => a + b.total, 0) * 100) / 100;
@@ -120,13 +132,10 @@ async function main() {
     check('best sellers first', S.rows.every((r, i) => i === 0 || S.rows[i - 1].amount >= r.amount));
     check('stock value adds up across places', Math.abs(rep.body.value.places.reduce((a, p) => a + p.value, 0) - rep.body.value.total) < 0.01);
     check('fast movers have sold something', rep.body.movers.fast.every((x) => x.sold > 0));
-    check('a quiet day is a bad date range', (await call('/reports?from=2026-01-10&to=2026-01-01', T.owner)).status === 400);
-    const csvRes = await fetch(base + '/api/reports/sales.csv', { headers: { Authorization: 'Bearer ' + T.owner } });
+    check('a quiet day is a bad date range', (await call('/reports?from=2026-01-10&to=2026-01-01', T.admin)).status === 400);
+    const csvRes = await fetch(base + '/api/reports/sales.csv', { headers: { Authorization: 'Bearer ' + T.admin } });
     const csvText = new TextDecoder('utf-8', { ignoreBOM: true }).decode(await csvRes.arrayBuffer());
     check('the sales report downloads for Excel', csvRes.status === 200 && csvText.charCodeAt(0) === 0xfeff && csvText.includes('Not yet linked'));
-    const cbill = (await call('/customer/bills', T.customer)).body.bills.find((b) => b.no === 52);
-    check('a customer\'s bill says which item each line was, for ordering again', cbill.lines.some((l) => l.itemId === 'it_goil' && l.unit === 'l'));
-    check('but never a cost', !JSON.stringify(cbill).includes('cost'));
 
     // ---- confirming a handwritten line moves stock once and learns the name
     const shopQty = async (itemId) => ((await call('/stock', T.admin)).body.find((s) => s.itemId === itemId && s.locationId === 'loc_shop') ?? { qty: 0 }).qty;
@@ -134,7 +143,7 @@ async function main() {
     const c1 = await call('/admin/confirm', T.admin, { billNo: 54, i: 1, itemId: 'it_coffee', unit: 'pc', qty: 1 });
     eq('confirming a line works', c1.status, 200);
     eq('stock drops by one pack', await shopQty('it_coffee'), coffee0 - 1);
-    eq('and the handwriting becomes a name for the item', c1.body.learnt, 'coffee powder');
+    eq('a handwritten line with no reading teaches no name', c1.body.learnt || '', '');
     eq('confirming again is refused', (await call('/admin/confirm', T.admin, { billNo: 54, i: 1, itemId: 'it_coffee', unit: 'pc', qty: 1 })).status, 409);
     eq('stock did not move twice', await shopQty('it_coffee'), coffee0 - 1);
     eq('"not stock" leaves stock alone', (await call('/admin/confirm', T.admin, { billNo: 54, i: 3, notItem: true })).status, 200);
@@ -152,7 +161,6 @@ async function main() {
     eq('again changes nothing', (await call('/admin/confirm/bill', T.admin, { billNo: 53, lines: [{ i: 2, itemId: 'it_ghee', unit: 'pc', qty: 2 }] })).body.done.length, 0);
     eq('and stock stays put', await shopQty('it_ghee'), ghee0 - 2);
     eq('a bill that does not exist', (await call('/admin/confirm/bill', T.admin, { billNo: 999, lines: [{ i: 0, notItem: true }] })).status, 404);
-    eq('the owner cannot', (await call('/admin/confirm/bill', T.owner, { billNo: 54, lines: [{ i: 0, notItem: true }] })).status, 403);
     check('bill 53 has nothing left to confirm', !(await call('/admin/confirm', T.admin)).body.some((p) => p.billNo === 53));
 
     // ---- running low: one level, all places together
@@ -221,18 +229,12 @@ async function main() {
     eq('a request can be cancelled before it leaves', (await call('/transfers/' + c.body.id + '/cancel', T.admin, {})).status, 200);
     eq('and then cannot be sent', (await call('/transfers/' + c.body.id + '/send', T.godown, {})).status, 409);
 
-    // ---- purchase, delivery, customer order
+    // ---- purchase
     const cof = async () => ((await call('/stock', T.admin)).body.find((s) => s.itemId === 'it_coffee' && s.locationId === 'loc_g2') ?? { qty: 0 }).qty;
     const c0 = await cof();
     eq('the admin receives it', (await call('/admin/pos/po_3/receive', T.admin, {})).status, 200);
     eq('the godown\'s coffee goes up by 40', await cof(), c0 + 40);
     eq('receiving twice is refused', (await call('/admin/pos/po_3/receive', T.admin, {})).status, 409);
-    eq('a delivery goes out', (await call('/deliveries/dl_3/status', T.delivery, { status: 'out' })).status, 200);
-    eq('it cannot jump back to pending', (await call('/deliveries/dl_3/status', T.delivery, { status: 'out' })).status, 409);
-    eq('and is delivered', (await call('/deliveries/dl_3/status', T.delivery, { status: 'delivered' })).status, 200);
-    const order = await call('/customer/orders', T.customer, { lines: [{ itemId: 'it_sugar', unit: 'kg', qty: 2 }, { text: '2 surf excel', ink: { w: 100, h: 50, strokes: [[1, 2, 3, 4]] } }] });
-    eq('a customer places a request, typed and written', order.status, 201);
-    check('the admin sees it', (await call('/admin/orders', T.admin)).body.some((o) => o.id === order.body.id));
 
     // ---- suppliers and purchase orders
     const sup = await call('/admin/suppliers', T.admin, { name: 'Ganesh Oils', phone: '9000000099' });
@@ -262,7 +264,6 @@ async function main() {
     const oilMove = (await call('/items/it_goil/moves', T.admin)).body.find((m) => m.ref === 'order ' + recd.no);
     eq('and the short tin in the ledger', oilMove && oilMove.note, '1 tin short');
     const po2 = await call('/admin/pos', T.admin, { supplierId: sup.body.id, to: 'loc_g1', lines: [{ itemId: 'it_goil', unit: 'tin', qty: 1, cost: 2500 }] });
-    eq('the owner cannot cancel', (await call('/admin/pos/' + po2.body.id + '/cancel', T.owner, {})).status, 403);
     eq('an order can be cancelled', (await call('/admin/pos/' + po2.body.id + '/cancel', T.admin, {})).status, 200);
     eq('but not received after', (await call('/admin/pos/' + po2.body.id + '/receive', T.admin, {})).status, 409);
     const mus0 = await gq('it_mustard', 'loc_shop');
@@ -270,64 +271,27 @@ async function main() {
     eq('and its goods arrive there', await gq('it_mustard', 'loc_shop'), mus0 + 60);
     eq('a confirmed one can still be cancelled', (await call('/admin/pos/po_4/cancel', T.admin, {})).status, 200);
 
-    // ---- deliveries from bills
+    // ---- customer addresses: the landmark is kept on the stock side
     const lak = (await call('/admin/customers', T.admin)).body.find((c) => c.key === '9000000017');
     eq('a landmark is kept on the stock side', (await call('/admin/customers/' + lak.id, T.admin, { landmark: 'Blue gate, next to the well' })).status, 200);
-    const dl = await call('/admin/deliveries', T.admin, { billNo: 51, personId: 'p_delivery', vehicle: 'Scooter' });
-    eq('bill 51 goes out for delivery', dl.status, 201);
-    check('with the customer\'s address from billing and the landmark from here', dl.body.address === 'Near water tank, 5th ward' && dl.body.landmark === 'Blue gate, next to the well', JSON.stringify(dl.body));
-    eq('the amount to collect is the bill\'s balance (paid)', dl.body.amountDue, 0);
-    eq('the same bill twice is refused', (await call('/admin/deliveries', T.admin, { billNo: 51, personId: 'p_delivery' })).status, 409);
-    eq('only a delivery person can take it', (await call('/admin/deliveries', T.admin, { billNo: 52, personId: 'p_worker' })).status, 400);
-    eq('a bill that does not exist is refused', (await call('/admin/deliveries', T.admin, { billNo: 999, personId: 'p_delivery' })).status, 404);
-    eq('a delivery person cannot hand out deliveries', (await call('/admin/deliveries', T.delivery, { billNo: 52, personId: 'p_delivery' })).status, 403);
-    check('Kiran sees the new drop', (await call('/delivery/mine', T.delivery)).body.some((d) => d.id === dl.body.id));
-    const second = await call('/people', T.admin, { name: 'Suma (delivery)', phone: '9111100002', role: 'delivery', pin: '3333' });
-    eq('a second delivery person', second.status, 201);
-    eq('the drop is given to Suma', (await call('/admin/deliveries/' + dl.body.id + '/assign', T.admin, { personId: second.body.id })).status, 200);
-    check('Kiran no longer has it', !(await call('/delivery/mine', T.delivery)).body.some((d) => d.id === dl.body.id));
-    const suma = (await call('/auth/login', null, { phone: '9111100002', pin: '3333' })).body.token;
-    check('Suma does', (await call('/delivery/mine', suma)).body.some((d) => d.id === dl.body.id));
-    eq('Kiran cannot mark it any more', (await call('/deliveries/' + dl.body.id + '/status', T.delivery, { status: 'out' })).status, 403);
-    eq('Suma delivers it', (await call('/deliveries/' + dl.body.id + '/status', suma, { status: 'out' })).status, 200);
-    eq('', (await call('/deliveries/' + dl.body.id + '/status', suma, { status: 'delivered' })).status, 200);
-    eq('a delivered drop cannot be reassigned', (await call('/admin/deliveries/' + dl.body.id + '/assign', T.admin, { personId: 'p_delivery' })).status, 409);
-    eq('once delivered, the bill can go out again (a second trip)', (await call('/admin/deliveries', T.admin, { billNo: 51, personId: 'p_delivery' })).status, 201);
 
     // ---- rounding off, the worker's walk, select all
-    const send = async (method, p, token, body) => {
-      const r = await fetch(base + '/api' + p, {
-        method,
-        headers: { ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
-        ...(body ? { body: JSON.stringify(body) } : {}),
-      });
-      let json = null;
-      try {
-        json = await r.json();
-      } catch {
-        /* none */
-      }
-      return { status: r.status, body: json };
-    };
     eq('the demo rounds bills to ₹5', (await call('/admin/settings', T.admin)).body.roundTo, 5);
-    eq('the owner can read the setting', (await call('/admin/settings', T.owner)).status, 200);
-    eq('but not change it', (await send('PUT', '/admin/settings', T.owner, { roundTo: 1 })).status, 403);
     eq('a worker cannot change it', (await send('PUT', '/admin/settings', T.worker, { roundTo: 1 })).status, 403);
     eq('only none, 1, 5 or 10', (await send('PUT', '/admin/settings', T.admin, { roundTo: 3 })).status, 400);
     const wb = (await call('/worker/bills', T.worker)).body;
     check('every worker bill has its rounded total and round-off line', wb.every((b) => b.rounded % 5 === 0 && Math.abs(b.rounded - b.total - b.roundOff) < 0.001), JSON.stringify(wb.map((b) => [b.total, b.rounded, b.roundOff])));
-    const ab = (await call('/admin/bills', T.owner)).body;
+    const ab = (await call('/admin/bills', T.admin)).body;
     check('so does the bills list', ab.every((b) => b.rounded % 5 === 0 && Math.abs(b.rounded - b.total - b.roundOff) < 0.001));
     eq('the admin switches to the rupee', (await send('PUT', '/admin/settings', T.admin, { roundTo: 1 })).status, 200);
     check('and totals follow', (await call('/worker/bills', T.worker)).body.every((b) => Number.isInteger(b.rounded)));
-    const rp = (await call('/reports', T.owner)).body;
+    const rp = (await call('/reports', T.admin)).body;
     check('reports carry the round-off for the period', rp.sales.roundTo === 1 && typeof rp.sales.roundOff === 'number');
     const shopLine = wb[0].lines.find((l) => l.rack);
     check('a line on a shop rack says it is in the shop', shopLine && shopLine.place === 'Shop' && shopLine.placeOrder === 0, JSON.stringify(shopLine));
 
     const b54 = wb.find((b) => b.no === 54);
     eq('a godown cannot tick a bill', (await call('/worker/bills/54/fetched', T.godown, { fetched: true })).status, 403);
-    eq('nor the owner', (await call('/worker/bills/54/fetched', T.owner, { fetched: true })).status, 403);
     eq('the worker selects all', (await call('/worker/bills/54/fetched', T.worker, { fetched: true })).body.lines, b54.lines.length);
     check('every line is ticked', (await call('/worker/bills', T.worker)).body.find((b) => b.no === 54).lines.every((l) => l.fetched));
     eq('and selects none', (await call('/worker/bills/54/fetched', T.worker, { fetched: false })).status, 200);
@@ -337,14 +301,13 @@ async function main() {
     // ---- vehicles
     const vlist = (await call('/admin/vehicles', T.admin)).body;
     eq('the demo has two vehicles', vlist.length, 2);
-    for (const r of ['owner', 'worker', 'godown', 'delivery', 'customer']) {
+    for (const r of ['worker', 'godown']) {
       eq(r + ' cannot manage vehicles', (await call('/admin/vehicles', T[r])).status, 403);
     }
     eq('a godown cannot add one', (await call('/admin/vehicles', T.godown, { number: 'KA-01 X 1' })).status, 403);
     const pick = await call('/vehicles', T.godown);
     check('the godown gets the pick list', pick.status === 200 && pick.body.length === 2);
     check('without drivers\' phones', !JSON.stringify(pick.body).includes('9000000011'));
-    eq('a customer does not', (await call('/vehicles', T.customer)).status, 403);
     eq('a worker does not', (await call('/vehicles', T.worker)).status, 403);
     const nv = await call('/admin/vehicles', T.admin, { number: 'KA-17 Z 99', type: 'Auto', driverName: 'Raju', driverPhone: '98450 12345' });
     check('the admin adds a vehicle', nv.status === 201 && nv.body.driverPhone === '9845012345', JSON.stringify(nv.body));
@@ -354,21 +317,18 @@ async function main() {
     const ed = await send('PUT', '/admin/vehicles/' + nv.body.id, T.admin, { number: 'KA-17 Z 99', type: 'Auto', driverName: 'Raju', active: false });
     check('the admin switches it off', ed.status === 200 && ed.body.active === false);
     check('and it leaves the pick list', !(await call('/vehicles', T.godown)).body.some((v) => v.number === 'KA-17 Z 99'));
-    eq('the owner cannot remove one', (await send('DELETE', '/admin/vehicles/' + nv.body.id, T.owner)).status, 403);
     eq('the admin removes it', (await send('DELETE', '/admin/vehicles/' + nv.body.id, T.admin)).status, 200);
     eq('it is gone', (await call('/admin/vehicles', T.admin)).body.length, 2);
     eq('removing it twice', (await send('DELETE', '/admin/vehicles/' + nv.body.id, T.admin)).status, 404);
-    const trips = (await call('/reports', T.owner)).body.trips;
+    const trips = (await call('/reports', T.admin)).body.trips;
     const tempo = trips.find((t) => t.vehicle === 'KA-17 AB 1234');
     check('trips by vehicle counts the tempo\'s transfers, however its number was typed', tempo && tempo.transfers >= 1, JSON.stringify(trips));
-    const scooter = trips.find((t) => t.vehicle === 'KA-17 EF 5678');
-    check('and the scooter\'s deliveries', scooter && scooter.deliveries >= 2, JSON.stringify(trips));
-    const tripsCsv = await fetch(base + '/api/reports/trips.csv', { headers: { Authorization: 'Bearer ' + T.owner } });
+    const tripsCsv = await fetch(base + '/api/reports/trips.csv', { headers: { Authorization: 'Bearer ' + T.admin } });
     check('trips download for Excel', tripsCsv.status === 200 && (await tripsCsv.text()).includes('KA-17 AB 1234'));
 
     // ---- Excel files
     for (const [p, sheets] of [['/export/items.xlsx', 1], ['/export/stock.xlsx', 3]]) {
-      const x = await fetch(base + '/api' + p, { headers: { Authorization: 'Bearer ' + T.owner } });
+      const x = await fetch(base + '/api' + p, { headers: { Authorization: 'Bearer ' + T.admin } });
       const buf = Buffer.from(await x.arrayBuffer());
       check(p + ' downloads as a ZIP', x.status === 200 && buf.readUInt32LE(0) === 0x04034b50 && /spreadsheetml/.test(x.headers.get('content-type') || ''));
       eq(p + ' has a sheet per ' + (sheets > 1 ? 'place' : 'file'), buf.readUInt16LE(buf.length - 12), 4 + sheets);
