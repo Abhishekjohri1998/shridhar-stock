@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ComponentType } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { Icon, type IconName } from './components/Icon';
 import { ROLE_HOME, type MsgKey, type Role } from '@stock/core';
@@ -7,25 +7,33 @@ import { stopLive, useLiveStatus } from './lib/live';
 import { LoginPage } from './pages/Login';
 import { PinPage } from './pages/Pin';
 import { WalkthroughPage } from './pages/Walkthrough';
-import { HelpPage } from './pages/Help';
 import { AdminHome } from './roles/admin/Home';
 import { ConfirmPage } from './roles/admin/Confirm';
 import { BillsPage, SettingsPage } from './roles/admin/Flows';
-import { ReportsPage } from './roles/Reports';
-import { PurchasesPage } from './roles/admin/Buying';
 import { RefillPage, TransfersPage } from './roles/admin/Moving';
 import { GodownHome, WorkerHome } from './roles/RoleScreens';
 import { InventoryPage } from './pages/admin/Inventory';
 import { InventoryItemPage } from './pages/admin/InventoryItem';
 import { LowToast } from './components/LowToast';
-import { PlacesPage } from './pages/admin/Places';
-import { PeoplePage } from './pages/admin/People';
-import { FilesPage } from './pages/admin/Files';
-import { VehiclesPage } from './pages/admin/Vehicles';
 import { firstTourSeen, markFirstTourSeen, TourButton, TourProvider, useTour } from './components/Tour';
 import { FIRST_TOUR, tourForPath } from './tours';
-import { ExplainerModal, explainerOffered, markExplainerOffered } from './explainer/Player';
-import { RecordPage } from './explainer/Record';
+import { ExplainerModal, explainerOffered, markExplainerOffered } from './explainer/entry';
+import { Loading } from './components/ui';
+
+/*
+ * Screens opened now and then load when first opened, so the first screen downloads much less:
+ * Setup (places, people, vehicles, Excel), Purchases, Reports, Help and the explainer's recorder.
+ */
+const named = <K extends string>(load: () => Promise<Record<K, ComponentType>>, name: K) =>
+  lazy(() => load().then((m) => ({ default: m[name] })));
+const HelpPage = named(() => import('./pages/Help'), 'HelpPage');
+const ReportsPage = named(() => import('./roles/Reports'), 'ReportsPage');
+const PurchasesPage = named(() => import('./roles/admin/Buying'), 'PurchasesPage');
+const PlacesPage = named(() => import('./pages/admin/Places'), 'PlacesPage');
+const PeoplePage = named(() => import('./pages/admin/People'), 'PeoplePage');
+const FilesPage = named(() => import('./pages/admin/Files'), 'FilesPage');
+const VehiclesPage = named(() => import('./pages/admin/Vehicles'), 'VehiclesPage');
+const RecordPage = named(() => import('./explainer/Record'), 'RecordPage');
 
 /** A screen inside one menu place, shown as a tab. */
 type Tab = { to: string; en: string; kn: string };
@@ -379,7 +387,12 @@ function Shell() {
     );
   }
   // The explainer's recording page: the bare canvas, for the admin only.
-  if (loc.pathname === '/explainer/record' && me.role === 'admin') return <RecordPage />;
+  if (loc.pathname === '/explainer/record' && me.role === 'admin')
+    return (
+      <Suspense fallback={<Loading />}>
+        <RecordPage />
+      </Suspense>
+    );
   const home = ROLE_HOME[me.role];
   const r: Role = me.role;
   const hasNav = r === 'admin';
@@ -391,6 +404,7 @@ function Shell() {
         <Top onMenu={hasNav ? () => setMore(true) : undefined} />
         <main className={'page role-' + r + (loc.pathname === '/worker/screen' ? ' tv' : '')}>
           <SectionTabs tabs={tabs} />
+          <Suspense fallback={<Loading />}>
           <Routes>
             <Route path="/pin" element={<PinPage />} />
             <Route path="/help" element={<HelpPage />} />
@@ -431,6 +445,7 @@ function Shell() {
             {r === 'godown' && <Route path="/godown" element={<GodownHome />} />}
             <Route path="*" element={<Navigate to={home} replace />} />
           </Routes>
+          </Suspense>
         </main>
       </div>
       {hasNav && <TabBar onMore={() => setMore(!more)} moreOpen={more} />}

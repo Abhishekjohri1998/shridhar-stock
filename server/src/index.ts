@@ -1,6 +1,7 @@
 import path from 'node:path';
 import cors from 'cors';
 import express, { Router } from 'express';
+import { gzip } from './compress';
 import { env, warnAboutDefaults } from './env';
 import { errorMiddleware, handler } from './http';
 import { reconcile } from './posting';
@@ -36,6 +37,8 @@ async function main(): Promise<void> {
   // Behind Caddy on the server, so the client address comes from X-Forwarded-For. The login
   // limit needs the real address, not Caddy's.
   app.set('trust proxy', 'loopback');
+  // Before everything else, so answers and the website go out gzipped (never the live stream).
+  app.use(gzip());
   app.use(express.json({ limit: '3mb' }));
   app.use(cors({ origin: env.corsOrigins.length ? env.corsOrigins : true }));
 
@@ -61,8 +64,18 @@ async function main(): Promise<void> {
   app.use('/api', api);
 
   const webDist = path.join(__dirname, '..', '..', 'web', 'dist');
-  app.use(express.static(webDist));
+  // Built files carry a hash in their name, so they never change: kept for a year. The page
+  // itself is checked every time, so a new build is picked up at once.
+  app.use(
+    express.static(webDist, {
+      setHeaders: (res, file) => {
+        if (/[\\/]assets[\\/]/.test(file)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        else if (path.basename(file) === 'index.html') res.setHeader('Cache-Control', 'no-cache');
+      },
+    }),
+  );
   app.get(/^(?!\/api).*/, (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(path.join(webDist, 'index.html'), (err) => {
       if (err) res.status(404).send('Website build not found. Run npm run build first.');
     });

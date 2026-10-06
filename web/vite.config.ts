@@ -8,5 +8,6 @@ export default defineConfig({
     port: 5174,
     proxy: { '/api': { target: 'http://localhost:4200', changeOrigin: true } },
   },
-  build: { outDir: 'dist', sourcemap: true },
+  // No sourcemap in the build: it was 2 MB shipped beside the app for nobody.
+  build: { outDir: 'dist', sourcemap: false },
 });
