@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { withLowAt, type Item, type Location, type StockLevel, type StockMove } from '@stock/core';
-import { levelsFromMoves, matchesFilter, type DocCollection, type DocFilter, type InvRepo, type MoveQuery, type PersonRecord } from './types';
+import { asQuery, levelsFromMoves, matchesFilter, shapeDocs, type DocCollection, type DocFilter, type DocQuery, type InvRepo, type MoveQuery, type PersonRecord } from './types';
 
 interface Db {
   people: PersonRecord[];
@@ -132,8 +132,13 @@ export async function createFileRepo(dir: string): Promise<InvRepo> {
         stockRow(itemId, locationId).qty = qty;
       }),
 
-    listDocs: <T>(col: DocCollection, filter?: DocFilter) =>
-      serial(() => clone(Object.values(db.docs[col] ?? {}).filter((d) => !filter || matchesFilter(d as Record<string, unknown>, filter))) as T[]),
+    listDocs: <T>(col: DocCollection, f?: DocFilter | DocQuery) =>
+      serial(() => {
+        const q = asQuery(f);
+        const all = Object.values(db.docs[col] ?? {}) as Record<string, unknown>[];
+        const hits = q.filter ? all.filter((d) => matchesFilter(d, q.filter!)) : all;
+        return clone(shapeDocs<T>(hits, q));
+      }),
     getDoc: <T>(col: DocCollection, id: string) => serial(() => clone((db.docs[col]?.[id] ?? null) as T | null)),
     putDoc: (col, doc) =>
       write(() => {

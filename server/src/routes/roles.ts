@@ -16,7 +16,8 @@ import {
 import { requireRole } from '../auth';
 import { handler, HttpError } from '../http';
 import { emit } from '../events';
-import { getRepo } from '../store';
+import { dataVersion, getRepo } from '../store';
+import { onEmit } from '../events';
 import { placeOrder, settingsOf } from '../setup';
 import { listDrafts, tickDraft } from '../billing/drafts';
 import { matchTyped } from '../billing/sync';
@@ -50,6 +51,104 @@ function rounding(total: number, step: number): { rounded: number; roundOff: num
 
 // ---------------------------------------------------------------- admin
 
+/** Stock value at cost: each item's base cost times what all places hold, in one pass. */
+export function stockValueOf(items: Pick<Item, 'id' | 'units'>[], stock: { itemId: string; qty: number }[]): number {
+  const held = new Map<string, number>();
+  for (const s of stock) if (s.qty > 0) held.set(s.itemId, (held.get(s.itemId) ?? 0) + s.qty);
+  let sum = 0;
+  for (const i of items) sum += (i.units[0]?.cost ?? 0) * (held.get(i.id) ?? 0);
+  return sum;
+}
+
+const istDay = (iso: string) => new Date(Date.parse(iso) + 5.5 * 3600_000).toISOString().slice(0, 10);
+
+/**
+ * Everything Home shows, in one light call. Only recent bills are read (the last seven days, for
+ * the cards and the chart); waiting lines and money due are found by query, not by reading every
+ * bill. The answer is kept in memory until something changes: any write through the store or any
+ * live event clears it, and it is never kept past a minute, since "today" and "the last day" move.
+ */
+let homeCache: { version: number; at: number; body: unknown } | null = null;
+onEmit(() => {
+  homeCache = null;
+});
+const HOME_TTL_MS = 60_000;
+
+export async function buildHome() {
+  const repo = getRepo();
+  const today = istToday();
+  // Seven shop days, today last.
+  const weekStart = istToday(Date.now() - 6 * 86_400_000);
+  const live = { cancelled: { ne: true } };
+  const [items, stock, week, waiting, owing, handwritten, transfers, pos, meta, alerts] = await Promise.all([
+    repo.listItems(),
+    repo.listStock(),
+    repo.listDocs<Pick<BillMirror, 'id' | 'at' | 'total' | 'cancelled'>>('bills', { filter: { at: { gte: weekStart } }, fields: ['at', 'total', 'cancelled'] }),
+    repo.listDocs<Pick<BillMirror, 'id' | 'lines'>>('bills', { filter: { ...live, 'lines.state': 'to-confirm' }, fields: ['lines'] }),
+    repo.listDocs<Pick<BillMirror, 'id' | 'balance'>>('bills', { filter: { ...live, balance: { gt: 0 } }, fields: ['balance'] }),
+    repo.listDocs<Pick<BillMirror, 'id' | 'lines'>>('bills', { filter: { ...live, 'lines.ink': { exists: true } }, fields: ['lines'] }),
+    repo.listDocs<Pick<Transfer, 'id' | 'status'>>('transfers', { filter: { status: ['sent', 'requested'] }, fields: ['status'] }),
+    repo.listDocs<Pick<PurchaseOrder, 'id'>>('pos', { filter: { status: [...OPEN_PO] }, fields: ['status'] }),
+    repo.getDoc<{ id: string; link?: unknown }>('meta', 'status'),
+    repo.getDoc<{ id: string; list: LowAlert[] }>('meta', 'lowAlerts'),
+  ]);
+  const totals = totalsByItem(stock);
+  const lowItems = items.filter((i) => i.active && isLow(i, totals.get(i.id) ?? 0));
+  const stillLow = new Set(lowItems.map((i) => i.id));
+  const names = new Map(items.map((i) => [i.id, i]));
+  const since = new Date(Date.now() - 86_400_000).toISOString();
+  const justLow = (alerts?.list ?? [])
+    .filter((a) => a.at >= since && stillLow.has(a.itemId))
+    .slice(0, 8)
+    .map((a) => ({ ...a, nameEn: names.get(a.itemId)?.nameEn ?? '', nameKn: names.get(a.itemId)?.nameKn ?? '' }));
+  const todays = week.filter((b) => b.at >= today && !b.cancelled);
+  const days: { day: string; total: number; bills: number }[] = [];
+  for (let i = 6; i >= 0; i--) days.push({ day: istDay(new Date(Date.now() - i * 86_400_000).toISOString()), total: 0, bills: 0 });
+  const slot = new Map(days.map((d) => [d.day, d]));
+  for (const b of week) {
+    if (b.cancelled) continue;
+    const d = slot.get(istDay(b.at));
+    if (d) {
+      d.total += b.total;
+      d.bills += 1;
+    }
+  }
+  return {
+    toConfirm: waiting.reduce((n, b) => n + b.lines.filter((l) => l.state === 'to-confirm').length, 0),
+    low: lowItems.length,
+    justLow,
+    negative: new Set(stock.filter((s) => s.qty < 0).map((s) => s.itemId)).size,
+    inTransit: transfers.filter((t) => t.status === 'sent').length,
+    requested: transfers.filter((t) => t.status === 'requested').length,
+    openPos: pos.length,
+    salesToday: todays.reduce((s, b) => s + b.total, 0),
+    billsToday: todays.length,
+    due: owing.reduce((s, b) => s + Math.max(0, b.balance), 0),
+    stockValue: stockValueOf(items, stock),
+    handwrittenLines: handwritten.reduce((n, b) => n + b.lines.filter((l) => l.ink).length, 0),
+    link: meta?.link ?? null,
+    week: days,
+  };
+}
+
+roleRoutes.get(
+  '/admin/home',
+  admin,
+  handler(async (_req, res) => {
+    const now = Date.now();
+    const v = dataVersion();
+    if (!homeCache || homeCache.version !== v || now - homeCache.at > HOME_TTL_MS) {
+      const body = await buildHome();
+      // Only kept if nothing was written while it was being read.
+      homeCache = dataVersion() === v ? { version: v, at: now, body } : null;
+      res.json(body);
+      return;
+    }
+    res.json(homeCache.body);
+  }),
+);
+
+/** The older, fuller summary. Home reads /admin/home; this stays for anything else that asks. */
 roleRoutes.get(
   '/admin/summary',
   admin,
@@ -91,10 +190,7 @@ roleRoutes.get(
       salesToday: todays.reduce((s, b) => s + b.total, 0),
       billsToday: todays.length,
       due: bills.filter((b) => !b.cancelled).reduce((s, b) => s + Math.max(0, b.balance), 0),
-      stockValue: items.reduce((sum, i) => {
-        const cost = i.units[0]?.cost ?? 0;
-        return sum + cost * stock.filter((s) => s.itemId === i.id).reduce((a, s) => a + Math.max(0, s.qty), 0);
-      }, 0),
+      stockValue: stockValueOf(items, stock),
       handwrittenLines: written.length,
       link: meta?.link ?? null,
     });
@@ -107,8 +203,7 @@ roleRoutes.get(
   handler(async (req, res) => {
     const limit = Math.min(500, Number(req.query.limit) || 100);
     const repo = getRepo();
-    const [all, settings] = await Promise.all([repo.listDocs<BillMirror>('bills'), settingsOf(repo)]);
-    const bills = all.sort(byNoDesc).slice(0, limit);
+    const [bills, settings] = await Promise.all([repo.listDocs<BillMirror>('bills', { sort: { no: -1 }, limit }), settingsOf(repo)]);
     // The total as the counter collects it, with the round-off line that gets there.
     res.json(bills.map((b) => ({ ...b, ...rounding(b.total, settings.roundTo) })));
   }),
@@ -119,7 +214,7 @@ roleRoutes.get(
   '/admin/confirm',
   admin,
   handler(async (_req, res) => {
-    const bills = (await getRepo().listDocs<BillMirror>('bills')).filter((b) => !b.cancelled).sort((a, b) => a.no - b.no);
+    const bills = await getRepo().listDocs<BillMirror>('bills', { filter: { cancelled: { ne: true }, 'lines.state': 'to-confirm' }, sort: { no: 1 } });
     res.json(
       bills.flatMap((b) =>
         b.lines
@@ -195,10 +290,15 @@ roleRoutes.get(
   requireRole('worker', 'admin'),
   handler(async (_req, res) => {
     const repo = getRepo();
-    const [bills, items, locs, settings] = await Promise.all([repo.listDocs<BillMirror>('bills'), repo.listItems(), repo.listLocations(), settingsOf(repo)]);
+    const today = istToday();
+    const [bills, items, locs, settings] = await Promise.all([
+      repo.listDocs<BillMirror>('bills', { filter: { at: { gte: today }, cancelled: { ne: true } } }),
+      repo.listItems(),
+      repo.listLocations(),
+      settingsOf(repo),
+    ]);
     const places = placeOrder(locs.filter((l) => l.active));
     const byId = new Map(items.map((i) => [i.id, i]));
-    const today = istToday();
     /** Where to fetch it from: the shop's rack if it has one, else the first godown that does. */
     const keptAt = (item: Item | undefined) => {
       const i = item ? places.findIndex((p) => (item.racks[p.id] ?? '').trim()) : -1;

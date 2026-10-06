@@ -1,12 +1,12 @@
 import { pickName } from '@stock/core';
 import { http } from '../../lib/api';
-import { useLive } from '../../lib/live';
+import { useLive, useSettled } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
 import { Link } from 'react-router-dom';
-import { Greeting, Loading, Money, Tile, useBi, useWeekSales, WeekChart, when } from '../../components/ui';
+import { Greeting, Loading, Money, Tile, useBi, WeekChart, when, type WeekDay } from '../../components/ui';
 import { Icon } from '../../components/Icon';
 import { useState } from 'react';
-import { ExplainerCard, ExplainerModal } from '../../explainer/Player';
+import { ExplainerCard, ExplainerModal } from '../../explainer/entry';
 
 export interface Summary {
   toConfirm: number;
@@ -25,12 +25,18 @@ export interface Summary {
   link: { ok: boolean; demo?: boolean; lastBillNo?: number; at?: string; message?: string } | null;
 }
 
+/** /admin/home: the summary and the week's sales, in one call. */
+export interface HomeData extends Summary {
+  week: WeekDay[];
+}
+
 export function AdminHome() {
   const bi = useBi();
   const { lang, me } = useSession();
-  const live = useLive('bills', 'stock', 'transfers', 'pos', 'link', 'low');
-  const { value: s, error } = useLoad(() => http.get<Summary>('/admin/summary'), [live]);
-  const week = useWeekSales([live]);
+  // Re-read on a change, but not more than once every 2 s while the counter is busy.
+  const live = useSettled(useLive('bills', 'stock', 'transfers', 'pos', 'link', 'low'), 2000);
+  const { value: s, error } = useLoad(() => http.get<HomeData>('/admin/home'), [live]);
+  const week = s?.week;
   const [watch, setWatch] = useState(false);
   if (error) return <div className="msg err">{error}</div>;
   if (!s) return <Loading />;

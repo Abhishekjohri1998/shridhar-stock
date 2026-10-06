@@ -4,11 +4,11 @@ import { pickName } from '@stock/core';
 import { http } from '../lib/api';
 import { useLiveEvent } from '../lib/live';
 import { useSession } from '../lib/session';
-import type { Summary } from '../roles/admin/Home';
+import type { HomeData } from '../roles/admin/Home';
 import { useBi } from './ui';
 import { Icon } from './Icon';
 
-type Alert = Summary['justLow'][number];
+type Alert = HomeData['justLow'][number];
 
 /**
  * The admin's live note when a sale or a move takes an item below its running-out level, in all
@@ -21,7 +21,7 @@ export function LowToast() {
   const [shown, setShown] = useState<Alert | null>(null);
   useLiveEvent('low', (id) => {
     http
-      .get<Summary>('/admin/summary')
+      .get<HomeData>('/admin/home')
       .then((s) => {
         const a = s.justLow.find((x) => x.itemId === id);
         if (a) setShown(a);

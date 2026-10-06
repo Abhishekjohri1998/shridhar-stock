@@ -106,7 +106,7 @@ export function SettingsPage() {
     () =>
       http.get<{
         link: { ok: boolean; message?: string; lastBillNo?: number; at?: string; lastOkAt?: string } | null;
-      }>('/admin/summary'),
+      }>('/admin/home'),
     [version],
   );
   const syncNow = async () => {

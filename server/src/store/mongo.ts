@@ -1,7 +1,7 @@
 import mongoose, { Schema } from 'mongoose';
 import type { Item, Location, StockLevel, StockMove } from '@stock/core';
 import { MOVE_KINDS, ROLES, withLowAt } from '@stock/core';
-import { DOC_COLLECTIONS, type DocCollection, type DocFilter, type InvRepo, type MoveQuery, type PersonRecord } from './types';
+import { asQuery, DOC_COLLECTIONS, type DocCollection, type DocCond, type DocFilter, type DocQuery, type InvRepo, type MoveQuery, type PersonRecord } from './types';
 
 /*
  * Schema style, as in the billing app: no __v, no _id on subdocuments, and an optional field is
@@ -117,6 +117,20 @@ stockSchema.index({ itemId: 1, locationId: 1 }, { unique: true });
  * routes with zod before they are written, so the schema only insists on the id.
  */
 const docSchema = new Schema({ id: { type: String, required: true, unique: true } }, { versionKey: false, strict: false, minimize: false });
+/**
+ * The indexes each document collection is read by: bills by time, number and cancelled; transfers
+ * and orders by status and time. Built on start by syncIndexes; building one changes no data.
+ */
+export const DOC_INDEXES: Partial<Record<DocCollection, Record<string, 1 | -1>[]>> = {
+  bills: [{ at: -1 }, { no: -1 }, { cancelled: 1, at: -1 }],
+  transfers: [{ status: 1, at: -1 }, { at: -1 }],
+  pos: [{ status: 1, at: -1 }, { at: -1 }],
+};
+function docSchemaFor(col: DocCollection): Schema {
+  const s = docSchema.clone();
+  for (const idx of DOC_INDEXES[col] ?? []) s.index(idx);
+  return s;
+}
 const counterSchema = new Schema({ series: { type: String, required: true, unique: true }, value: { type: Number, required: false, default: 0 } }, { versionKey: false });
 
 export const schemas = {
@@ -129,10 +143,20 @@ export const schemas = {
   Stock: stockSchema,
 };
 
-/** A DocFilter as a Mongo query: equality, or one of a list. */
-function mongoFilter(filter?: DocFilter): Record<string, unknown> {
+function mongoCond(c: DocCond): unknown {
+  if (Array.isArray(c)) return { $in: c };
+  if (c === null || typeof c !== 'object') return c;
+  const out: Record<string, unknown> = {};
+  for (const op of ['gt', 'gte', 'lt', 'lte', 'ne'] as const) if (op in c) out['$' + op] = c[op];
+  if (c.exists === true) Object.assign(out, { $exists: true, $ne: null });
+  if (c.exists === false) out.$in = [null];
+  return out;
+}
+
+/** A DocFilter as a Mongo query: equality, one of a list, or a range. */
+export function mongoFilter(filter?: DocFilter): Record<string, unknown> {
   if (!filter) return {};
-  return Object.fromEntries(Object.entries(filter).map(([k, v]) => [k, Array.isArray(v) ? { $in: v } : v]));
+  return Object.fromEntries(Object.entries(filter).map(([k, v]) => [k, mongoCond(v)]));
 }
 
 /** Drops Mongo's own fields so what comes out is exactly the shared type. */
@@ -153,7 +177,7 @@ export async function createMongoRepo(uri: string, dbName: string): Promise<InvR
   const Moves = conn.model('StockMoves', moveSchema, 'stockmoves');
   const Stock = conn.model('Stock', stockSchema, 'stock');
   const Counters = conn.model('Counters', counterSchema, 'counters');
-  const Docs = Object.fromEntries(DOC_COLLECTIONS.map((c) => [c, conn.model("Doc_" + c, docSchema, c)])) as unknown as Record<DocCollection, mongoose.Model<{ id: string }>>;
+  const Docs = Object.fromEntries(DOC_COLLECTIONS.map((c) => [c, conn.model('Doc_' + c, docSchemaFor(c), c)])) as unknown as Record<DocCollection, mongoose.Model<{ id: string }>>;
   await Promise.all([
     People.syncIndexes(),
     Locations.syncIndexes(),
@@ -258,7 +282,13 @@ export async function createMongoRepo(uri: string, dbName: string): Promise<InvR
       await Stock.updateOne({ itemId, locationId }, { $set: { qty } }, { upsert: true });
     },
 
-    listDocs: async <T>(col: DocCollection, filter?: DocFilter) => (await Docs[col].find(mongoFilter(filter)).lean()).map((d) => strip<T>(d)),
+    listDocs: async <T>(col: DocCollection, f?: DocFilter | DocQuery) => {
+      const q = asQuery(f);
+      let query = Docs[col].find(mongoFilter(q.filter), q.fields ? Object.fromEntries(['id', ...q.fields].map((k) => [k, 1])) : undefined);
+      if (q.sort) query = query.sort(q.sort);
+      if (q.limit) query = query.limit(q.limit);
+      return (await query.lean()).map((d) => strip<T>(d));
+    },
     getDoc: async <T>(col: DocCollection, id: string) => {
       const d = await Docs[col].findOne({ id }).lean();
       return d ? strip<T>(d) : null;

@@ -171,6 +171,11 @@ async function main() {
     const summary = (await call('/admin/summary')).body;
     check('the link shows as working', summary.link && summary.link.ok === true && summary.link.lastBillNo === 3, JSON.stringify(summary.link));
     eq('nothing else was ever written to billing', billing.writes, 0);
+    const home = (await call('/admin/home')).body;
+    const { week, ...homeRest } = home;
+    eq('Home\'s one call says the same as the full summary', JSON.stringify(homeRest), JSON.stringify(summary));
+    check('and carries seven days for the chart, today last', week.length === 7 && week[6].bills >= 1, JSON.stringify(week));
+    eq('a second Home read is the kept answer', JSON.stringify((await call('/admin/home')).body), JSON.stringify(home));
 
     const waitFor = async (fn) => {
       for (let i = 0; i < 40 && !fn(); i++) await new Promise((r) => setTimeout(r, 100));

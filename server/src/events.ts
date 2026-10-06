@@ -47,7 +47,15 @@ const DEFAULT_ROLES: Record<EventKind, Role[]> = {
   low: [],
 };
 
+const emitHooks = new Set<(kind: EventKind) => void>();
+/** Runs on every event, before it goes out: what server-side caches use to drop stale answers. */
+export function onEmit(fn: (kind: EventKind) => void): () => void {
+  emitHooks.add(fn);
+  return () => emitHooks.delete(fn);
+}
+
 export function emit(kind: EventKind, audience: Audience = {}, id?: string): void {
+  for (const fn of emitHooks) fn(kind);
   const a = { roles: DEFAULT_ROLES[kind], ...audience };
   const line = 'event: change\ndata: ' + JSON.stringify({ kind, ...(id ? { id } : {}) }) + '\n\n';
   for (const c of clients) {

@@ -424,6 +424,47 @@ check('every role has a home screen', C.ROLES.every((r) => typeof C.ROLE_HOME[r]
   check('a sheet name Excel would refuse is cleaned', (files['xl/workbook.xml'] || '').includes('name="Main godown"'));
 }
 
+/** listDocs with a filter, order, limit and fields; the Mongo translation; the items cache. */
+async function queries(out) {
+  const { matchesFilter, shapeDocs, asQuery } = require(path.join(out, 'store', 'types.js'));
+  const { mongoFilter, DOC_INDEXES } = require(path.join(out, 'store', 'mongo.js'));
+  const { withCache, dataVersion } = require(path.join(out, 'store', 'index.js'));
+  const { stockValueOf } = require(path.join(out, 'routes', 'roles.js'));
+  const bill = { id: '1', no: 1, at: '2026-10-03T05:00:00Z', balance: 20, lines: [{ state: 'matched' }, { state: 'to-confirm', ink: { s: 1 } }] };
+  const cancelled = { ...bill, id: '2', no: 2, cancelled: true };
+  check('equality still works', matchesFilter(bill, { no: 1 }) && !matchesFilter(bill, { no: 2 }));
+  check('one of a list still works', matchesFilter(bill, { no: [1, 3] }) && !matchesFilter(bill, { no: [2] }));
+  check('a range on time', matchesFilter(bill, { at: { gte: '2026-10-03T00:00:00Z' } }) && !matchesFilter(bill, { at: { gte: '2026-10-04T00:00:00Z' } }));
+  check('not-equal matches a missing field', matchesFilter(bill, { cancelled: { ne: true } }) && !matchesFilter(cancelled, { cancelled: { ne: true } }));
+  check('a dotted path looks into the lines', matchesFilter(bill, { 'lines.state': 'to-confirm' }) && !matchesFilter(bill, { 'lines.state': 'none' }));
+  check('exists into the lines', matchesFilter(bill, { 'lines.ink': { exists: true } }) && !matchesFilter({ ...bill, lines: [{}] }, { 'lines.ink': { exists: true } }));
+  check('greater than', matchesFilter(bill, { balance: { gt: 0 } }) && !matchesFilter({ ...bill, balance: 0 }, { balance: { gt: 0 } }));
+  const docs = [{ id: 'a', no: 2, at: 'b' }, { id: 'b', no: 3, at: 'a' }, { id: 'c', no: 1, at: 'c' }];
+  check('sorted newest number first, limited', shapeDocs(docs, { sort: { no: -1 }, limit: 2 }).map((d) => d.id).join() === 'b,a');
+  check('only the fields asked for, and the id', JSON.stringify(shapeDocs(docs, { fields: ['no'] })[0]) === '{"id":"a","no":2}');
+  check('a bare filter is still a filter', asQuery({ status: 'sent' }).filter.status === 'sent' && asQuery({ limit: 3 }).limit === 3);
+  check('to Mongo: ranges, not-equal, lists, exists', JSON.stringify(mongoFilter({ at: { gte: 'x' }, cancelled: { ne: true }, no: [1], 'lines.ink': { exists: true } })) === JSON.stringify({ at: { $gte: 'x' }, cancelled: { $ne: true }, no: { $in: [1] }, 'lines.ink': { $exists: true, $ne: null } }));
+  check('bills are indexed by time, number and cancelled', JSON.stringify(DOC_INDEXES.bills) === JSON.stringify([{ at: -1 }, { no: -1 }, { cancelled: 1, at: -1 }]));
+  check('transfers and orders by status and time', DOC_INDEXES.transfers.some((i) => i.status === 1 && i.at === -1) && DOC_INDEXES.pos.some((i) => i.status === 1 && i.at === -1));
+  check('stock value counts only what is held, at base cost', stockValueOf([{ id: 'x', units: [{ cost: 2 }] }, { id: 'y', units: [{}] }], [{ itemId: 'x', qty: 3 }, { itemId: 'x', qty: -5 }, { itemId: 'x', qty: 4 }, { itemId: 'y', qty: 9 }]) === 14);
+
+  let reads = 0;
+  let saved = { id: 'i1', nameEn: 'Sugar', units: [] };
+  const inner = { kind: 'file', listItems: async () => (reads++, [JSON.parse(JSON.stringify(saved))]), listLocations: async () => [], saveItem: async (it) => void (saved = it), putDoc: async () => undefined };
+  const cached = withCache(inner);
+  const v0 = dataVersion();
+  const a = await cached.listItems();
+  a[0].nameEn = 'changed in hand';
+  const b = await cached.listItems();
+  check('items are read once and then kept', reads === 1);
+  check('each reader gets its own copy', b[0].nameEn === 'Sugar');
+  check('getItem comes from the kept list', (await cached.getItem('i1')).nameEn === 'Sugar' && reads === 1);
+  await cached.saveItem({ ...saved, nameEn: 'Jaggery' });
+  check('an item save drops the list', (await cached.listItems())[0].nameEn === 'Jaggery' && reads === 2);
+  await cached.putDoc('bills', { id: '1' });
+  check('every write moves the version on', dataVersion() > v0);
+}
+
 async function ledger() {
   const out = path.join(__dirname, '..', '.test-build');
   execSync('npx tsc -p server/tsconfig.json --outDir ' + JSON.stringify(out), { cwd: path.join(__dirname, '..'), stdio: 'inherit' });
@@ -439,6 +480,7 @@ async function ledger() {
     check('a read that brought something new keeps it busy', pollDelay([], now - 60_000, now) === POLL_BUSY_MS);
     check('no bills at all is quiet', pollDelay([], 0, now) === POLL_IDLE_MS);
   }
+  await queries(out);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-unit-'));
   try {
     const repo = await createFileRepo(dir);

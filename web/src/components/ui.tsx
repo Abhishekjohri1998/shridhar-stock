@@ -122,9 +122,23 @@ export function VehicleOptions({ id = 'vehicles' }: { id?: string }) {
   );
 }
 
+/** A light outline of a screen while it loads, so it never looks frozen. Read out as "Loading…". */
 export function Loading() {
   const { t } = useSession();
-  return <p className="muted">{t('common.loading')}</p>;
+  return (
+    <div className="skeleton" role="status" aria-live="polite" aria-busy="true">
+      <span className="sr-only">{t('common.loading')}</span>
+      <div className="sk sk-title" />
+      <div className="sk-row">
+        <div className="sk sk-tile" />
+        <div className="sk sk-tile" />
+        <div className="sk sk-tile" />
+      </div>
+      <div className="sk sk-card" />
+      <div className="sk sk-line" />
+      <div className="sk sk-line short" />
+    </div>
+  );
 }
 
 /** An empty screen, saying what to do next. `tour` names it for the guided tour. */
@@ -196,28 +210,20 @@ export function Greeting({ name }: { name: string }) {
   );
 }
 
-const istDay = (d: Date) => new Date(d.getTime() + 5.5 * 3600_000).toISOString().slice(0, 10);
+export interface WeekDay {
+  day: string;
+  total: number;
+  bills: number;
+}
 
-/** Sales for each of the last seven days, from the bills the bill list already reads. */
+/** Sales for each of the last seven days, as the server adds them up for Home. */
 export function useWeekSales(deps: unknown[] = []) {
-  const [days, setDays] = useState<{ day: string; total: number; bills: number }[] | null>(null);
+  const [days, setDays] = useState<WeekDay[] | null>(null);
   useEffect(() => {
     let live = true;
     http
-      .get<{ at: string; total: number; cancelled?: boolean }[]>('/admin/bills?limit=500')
-      .then((bills) => {
-        const out: { day: string; total: number; bills: number }[] = [];
-        for (let i = 6; i >= 0; i--) out.push({ day: istDay(new Date(Date.now() - i * 86_400_000)), total: 0, bills: 0 });
-        for (const b of bills) {
-          if (b.cancelled) continue;
-          const slot = out.find((d) => d.day === istDay(new Date(b.at)));
-          if (slot) {
-            slot.total += b.total;
-            slot.bills += 1;
-          }
-        }
-        if (live) setDays(out);
-      })
+      .get<{ week: WeekDay[] }>('/admin/home')
+      .then((h) => live && setDays(h.week))
       .catch(() => live && setDays(null));
     return () => {
       live = false;
@@ -228,7 +234,7 @@ export function useWeekSales(deps: unknown[] = []) {
 }
 
 /** Seven bars, today darkest. Drawn as plain SVG; the totals are in the title of each bar. */
-export function WeekChart({ days }: { days: { day: string; total: number; bills: number }[] }) {
+export function WeekChart({ days }: { days: WeekDay[] }) {
   const { lang } = useSession();
   const bi = useBi();
   const max = Math.max(1, ...days.map((d) => d.total));

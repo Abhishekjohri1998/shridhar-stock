@@ -92,6 +92,28 @@ export function useLive(...kinds: LiveKind[]): number {
   return n;
 }
 
+/**
+ * `n` (a useLive number), passed on at most once every `ms`: a burst of events at a busy counter
+ * becomes one re-read now and one when it settles, never one per event.
+ */
+export function useSettled(n: number, ms = 2000): number {
+  const [out, setOut] = useState(n);
+  const last = useRef(0);
+  useEffect(() => {
+    if (n === out) return;
+    const go = () => {
+      last.current = Date.now();
+      setOut(n);
+    };
+    const wait = last.current + ms - Date.now();
+    if (wait <= 0) return go();
+    const t = setTimeout(go, wait);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [n]);
+  return out;
+}
+
 /** Calls `fn` with the id of each `kind` event as it arrives, for a toast rather than a re-read. */
 export function useLiveEvent(kind: LiveKind, fn: (id: string) => void): void {
   const ref = useRef(fn);

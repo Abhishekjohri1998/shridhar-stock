@@ -33,9 +33,9 @@ export function syncNow(): Promise<SyncResult | null> {
         emit('bills');
       }
       emit('link', { roles: [] });
-      const bills = await repo.listDocs<{ id: string; no: number }>('bills');
+      const [newest] = await repo.listDocs<{ id: string; no: number }>('bills', { sort: { no: -1 }, limit: 1, fields: ['no'] });
       await recordLink(repo, true, {
-        lastBillNo: bills.reduce((m, b) => Math.max(m, b.no), 0),
+        lastBillNo: newest?.no ?? 0,
         message: r.newBills ? r.newBills + ' new bills read' : 'Up to date',
       });
       return r;
@@ -67,7 +67,11 @@ export function startLink(): void {
   const loop = async () => {
     await syncNow();
     const bills = await getRepo()
-      .listDocs<{ id: string; at: string; cancelled?: boolean }>('bills')
+      // Only bills inside the busy window can make it busy.
+      .listDocs<{ id: string; at: string; cancelled?: boolean }>('bills', {
+        filter: { at: { gte: new Date(Date.now() - POLL_ACTIVE_WINDOW_MS).toISOString() } },
+        fields: ['at', 'cancelled'],
+      })
       .catch(() => []);
     setTimeout(() => void loop(), pollDelay(bills, lastChangeAt, Date.now(), { busy, idle, window: POLL_ACTIVE_WINDOW_MS })).unref();
   };
