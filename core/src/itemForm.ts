@@ -1,4 +1,4 @@
-import { lowAtOf } from './stockTotals';
+import { lowAtOf, lowAtPlaceOf } from './stockTotals';
 import { defaultUnitOf } from './units';
 import type { Item, ItemInput } from './types';
 
@@ -30,6 +30,8 @@ export interface ItemForm {
   /** Running out below this many, in all places together, of the unit `lowUnit`. */
   lowQty: string;
   lowUnit: string;
+  /** Running out at one place, keyed by place id: the number as typed and its unit. */
+  lowPlace: Record<string, { qty: string; unit: string }>;
   /** The unit shown and offered first; empty means the first unit. */
   defaultUnit: string;
   /** Supplier ids the shop added by hand. */
@@ -51,7 +53,7 @@ export function blankUnit(base: boolean): UnitForm {
 }
 
 export function blankItemForm(): ItemForm {
-  return { nameEn: '', nameKn: '', category: '', units: [blankUnit(true)], aliases: '', racks: {}, lowQty: '', lowUnit: 'pc', defaultUnit: '', suppliers: [] };
+  return { nameEn: '', nameKn: '', category: '', units: [blankUnit(true)], aliases: '', racks: {}, lowQty: '', lowUnit: 'pc', lowPlace: {}, defaultUnit: '', suppliers: [] };
 }
 
 const text = (n: number | undefined) => (n == null ? '' : String(n));
@@ -77,6 +79,7 @@ export function itemToForm(item: Item): ItemForm {
     racks: { ...item.racks },
     lowQty: text(lowAtOf(item)?.qty),
     lowUnit: lowAtOf(item)?.unit ?? defaultUnitOf(item).code,
+    lowPlace: Object.fromEntries(Object.entries(lowAtPlaceOf(item)).map(([loc, l]) => [loc, { qty: String(l.qty), unit: l.unit }])),
     defaultUnit: defaultUnitOf(item).code,
     suppliers: [...(item.suppliers ?? [])],
   };
@@ -114,6 +117,15 @@ export function formToInput(f: ItemForm, active?: boolean): ItemInput {
     // A unit that was removed from the item falls back to the base unit.
     ...(f.lowQty.trim() !== ''
       ? { lowAt: { qty: Number(f.lowQty), unit: f.units.some((u) => u.code === f.lowUnit) ? f.lowUnit : f.units[0]?.code ?? '' } }
+      : {}),
+    ...(Object.values(f.lowPlace).some((l) => l.qty.trim() !== '')
+      ? {
+          lowAtPlace: Object.fromEntries(
+            Object.entries(f.lowPlace)
+              .filter(([, l]) => l.qty.trim() !== '')
+              .map(([loc, l]) => [loc, { qty: Number(l.qty), unit: f.units.some((u) => u.code === l.unit) ? l.unit : f.units[0]?.code ?? '' }]),
+          ),
+        }
       : {}),
     ...(active != null ? { active } : {}),
   };

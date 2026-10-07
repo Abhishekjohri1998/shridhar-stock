@@ -292,7 +292,7 @@ export const itemTour = tour('item', ['An item', 'ಒಂದು ಸಾಮಾನ�
   step(
     'item-places',
     ['Stock in each place', 'ಪ್ರತಿ ಸ್ಥಳದ ಸ್ಟಾಕ್'],
-    ['The shop and each godown, with the rack it sits on.', 'ಅಂಗಡಿ ಮತ್ತು ಪ್ರತಿ ಗೋದಾಮು, ಅದು ಇರುವ ರ‍್ಯಾಕ್ ಜೊತೆ.'],
+    ['The shop and each godown, with the rack it sits on. A number below that place’s running-out level is marked.', 'ಅಂಗಡಿ ಮತ್ತು ಪ್ರತಿ ಗೋದಾಮು, ಅದು ಇರುವ ರ‍್ಯಾಕ್ ಜೊತೆ. ಆ ಜಾಗದ ಮಟ್ಟಕ್ಕಿಂತ ಕಡಿಮೆ ಇದ್ದರೆ ಗುರುತಿಸಲಾಗುತ್ತದೆ.'],
     ['These numbers go down with bills and up with goods received.', 'ಬಿಲ್‌ನಿಂದ ಕಡಿಮೆ, ಸಾಮಾನು ಬಂದಾಗ ಹೆಚ್ಚು.'],
     ['Nothing: correct a number with the count box below.', 'ಏನೂ ಇಲ್ಲ: ಕೆಳಗಿನ ಎಣಿಕೆ ಡಬ್ಬಿಯಲ್ಲಿ ಸರಿಪಡಿಸಿ.'],
   ),

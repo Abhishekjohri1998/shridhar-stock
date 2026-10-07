@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { describeQty, isLow, itemMatches, lowAtOf, pickName, totalsByItem, type Item, type Lang, type Location, type StockLevel } from '@stock/core';
+import { describeQty, isLow, isLowAt, itemMatches, lowAtOf, pickName, totalsByItem, type Item, type Lang, type Location, type StockLevel } from '@stock/core';
 import { api } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
@@ -115,7 +115,7 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
                     {locs.map((l) => {
                       const v = qtyOf(i, l);
                       return (
-                        <td key={l.id} className={'num ' + (v < 0 ? 'qty-neg' : '')}>
+                        <td key={l.id} className={'num ' + (v < 0 ? 'qty-neg' : isLowAt(i, l.id, v) ? 'qty-low' : '')}>
                           {describeQty(i, v, lang)}
                           {l.kind === 'godown' && i.racks[l.id] && <div className="muted">{i.racks[l.id]}</div>}
                         </td>

@@ -512,6 +512,66 @@ async function ledger() {
   }
 }
 
+// ---------------------------------------------------------------- running out at one place
+{
+  const units = [
+    { code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 1 },
+    { code: 'box', label: 'Box', labelKn: '', perBase: 12, price: 10 },
+  ];
+  const legacy = { units, reorderAt: { shop: 24, g1: 6 } };
+  const m = C.lowAtPlaceOf(legacy);
+  check('old per-place levels read as per-place levels in pieces', m.shop.qty === 24 && m.shop.unit === 'pc' && m.g1.qty === 6, JSON.stringify(m));
+  check('and nothing is rewritten on the item', !('lowAtPlace' in legacy) && legacy.reorderAt.shop === 24);
+  check('the total from old levels is unchanged', C.lowAtOf(legacy).qty === 30);
+  check('an item saved under the new rule does not read old levels', Object.keys(C.lowAtPlaceOf({ ...legacy, lowAt: null })).length === 0);
+  const set = { units, lowAt: { qty: 10, unit: 'box' }, lowAtPlace: { shop: { qty: 2, unit: 'box' }, g1: { qty: 1, unit: 'crate' } }, reorderAt: { shop: 99 } };
+  check('a saved per-place level wins and keeps its unit', C.lowAtPlaceOf(set).shop.unit === 'box' && C.placeLowBase(set, 'shop') === 24);
+  check('a per-place level in a unit the item lost is ignored', !C.lowAtPlaceOf(set).g1);
+  check('below a place level is low there', C.isLowAt(set, 'shop', 23) && !C.isLowAt(set, 'shop', 24) && !C.isLowAt(set, 'g2', 0));
+
+  const base = { nameEn: 'Tea', nameKn: '', units, aliases: [], racks: {} };
+  const ok = C.checkItem({ ...base, lowAtPlace: { shop: { qty: '2', unit: 'BOX' }, g1: { qty: '', unit: 'pc' } } });
+  check('checkItem keeps a place level spelt as the item spells it, blanks dropped', ok.ok && ok.value.lowAtPlace.shop.unit === 'box' && ok.value.lowAtPlace.shop.qty === 2 && !('g1' in ok.value.lowAtPlace), ok.ok ? JSON.stringify(ok.value.lowAtPlace) : ok.error);
+  check('no place levels, no lowAtPlace', C.checkItem(base).ok && !('lowAtPlace' in C.checkItem(base).value));
+  check('a negative place level is refused', !C.checkItem({ ...base, lowAtPlace: { shop: { qty: -1, unit: 'pc' } } }).ok);
+  check('a place level in a unit the item does not have is refused', !C.checkItem({ ...base, lowAtPlace: { shop: { qty: 1, unit: 'crate' } } }).ok);
+
+  const item = { id: 't', ...base, lowAt: { qty: 1, unit: 'box' }, lowAtPlace: { shop: { qty: 2, unit: 'box' } }, active: true, updatedAt: '' };
+  const form = C.itemToForm(item);
+  check('the form holds the place level', form.lowPlace.shop.qty === '2' && form.lowPlace.shop.unit === 'box');
+  const back = C.formToInput({ ...form, lowPlace: { ...form.lowPlace, g1: { qty: ' ', unit: 'pc' } } });
+  check('and sends it back, empty places left out', back.lowAtPlace.shop.qty === 2 && !('g1' in back.lowAtPlace));
+  check('an empty form sends no place levels', !('lowAtPlace' in C.formToInput(C.blankItemForm())));
+
+  // Refill: the shop's own level decides the shelf, brought up to twice it; the total still decides buying.
+  const L = (id, kind) => ({ id, name: id, nameKn: '', kind, active: true });
+  const locs = [L('shop', 'shop'), L('g1', 'godown')];
+  const st = (itemId, locationId, qty) => ({ itemId, locationId, qty });
+  const mk = (id, extra) => ({ id, nameEn: id, nameKn: '', units, aliases: [], racks: {}, active: true, updatedAt: '', ...extra });
+  const r = C.proposeRefill(
+    [mk('p', { lowAt: { qty: 100, unit: 'pc' }, lowAtPlace: { shop: { qty: 1, unit: 'box' } } }), mk('q', { lowAt: { qty: 10, unit: 'pc' } }), mk('s', { lowAtPlace: { shop: { qty: 5, unit: 'pc' } } })],
+    [st('p', 'shop', 4), st('p', 'g1', 500), st('q', 'shop', 4), st('q', 'g1', 50), st('s', 'shop', 1), st('s', 'g1', 50)],
+    locs,
+  );
+  const line = (id) => r.trips[0] && r.trips[0].lines.find((l) => l.itemId === id);
+  check('the shop level decides the shelf, brought up to twice it', line('p') && line('p').qty === 20 && line('p').level === 12, JSON.stringify(r.trips));
+  check('without a shop level the total level is used, as before', line('q') && line('q').qty === 16 && line('q').level === 10);
+  check('a shop level alone still fills the shelf, and nothing is bought', line('s') && line('s').qty === 9 && !r.buy.some((b) => b.itemId === 's'));
+  check('the buy list still reads the total level', !r.buy.some((b) => b.itemId === 'p'));
+
+  // The items file: a low_<place> column per place, and old files without it.
+  const places = [{ id: 'loc_shop', name: 'Shop' }, { id: 'g9', name: 'Main Godown' }];
+  check('a place column is named from the place', C.placeLowColumn('Main Godown') === 'low_main_godown');
+  const csv = C.itemsToCsv([{ ...item, lowAtPlace: { loc_shop: { qty: 2, unit: 'box' } } }], 'loc_shop', places);
+  check('the file carries low_shop', csv.split(String.fromCharCode(10))[0].includes('low_shop,low_main_godown'), csv.split(String.fromCharCode(10))[0]);
+  const read = C.itemsFromCsv(csv, 'loc_shop', places);
+  const ci = C.checkItem(read.items[0]);
+  check('low_shop reads back', read.errors.length === 0 && ci.ok && ci.value.lowAtPlace.loc_shop.qty === 2 && ci.value.lowAtPlace.loc_shop.unit === 'box' && !ci.value.lowAtPlace.g9, JSON.stringify(read.items[0].lowAtPlace));
+  const old = C.itemsFromCsv('name_en,unit_code,price,low_at' + String.fromCharCode(10) + 'Tea,pc,10,7', 'loc_shop', places).items[0];
+  check('an old file without place columns reads as before', !('lowAtPlace' in old) && C.checkItem(old).ok);
+  check('with no places given the file is as it was', !C.itemsToCsv([item], 'loc_shop').includes('low_shop'));
+}
+
 // ---------------------------------------------------------------- rack suggestions
 {
   const its = [

@@ -1,7 +1,7 @@
 import { parseCsv, toCsv, unguard } from './csv';
-import { lowAtOf } from './stockTotals';
+import { lowAtOf, lowAtPlaceOf } from './stockTotals';
 import { unitKey } from './units';
-import type { Alias, Item, ItemInput, ItemUnit, Slab } from './types';
+import type { Alias, Item, ItemInput, ItemUnit, LowAt, Slab } from './types';
 
 /**
  * The items spreadsheet: one row per unit, so an item sold three ways is three rows sharing an
@@ -10,6 +10,9 @@ import type { Alias, Item, ItemInput, ItemUnit, Slab } from './types';
  * The first row of an item is its base unit. The shop's rack and the running-out level are read
  * from that first row. low_at is for all places together, with its unit: "5 box", or a bare
  * number in the base unit. The old reorder_shop column is still read, as base units.
+ *
+ * Given the places, one more column per place, low_<place> ("low_shop", "low_main_godown"): the
+ * running-out level at that place, written the same way as low_at. Files without them still read.
  */
 export const ITEM_COLUMNS = [
   'item_id',
@@ -46,7 +49,18 @@ export function slabsFromText(text: string): Slab[] | string {
   return out;
 }
 
-export function itemsToCsv(items: Item[], shopId: string): string {
+/** A place as the spreadsheet names it. */
+export interface CsvPlace {
+  id: string;
+  name: string;
+}
+
+/** The column for a place's running-out level: "Main Godown" is low_main_godown. */
+export function placeLowColumn(name: string): string {
+  return 'low_' + (String(name).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'place');
+}
+
+export function itemsToCsv(items: Item[], shopId: string, places: CsvPlace[] = []): string {
   const rows: (string | number | undefined)[][] = [];
   for (const it of items) {
     it.units.forEach((u, i) => {
@@ -72,10 +86,14 @@ export function itemsToCsv(items: Item[], shopId: string): string {
         i === 0 ? it.racks[shopId] ?? '' : '',
         i === 0 ? lowText(it) : '',
         i === 0 ? (it.active ? 'yes' : 'no') : '',
+        ...places.map((p) => {
+          const l = i === 0 ? lowAtPlaceOf(it)[p.id] : undefined;
+          return l ? l.qty + ' ' + l.unit : '';
+        }),
       ]);
     });
   }
-  return toCsv([...ITEM_COLUMNS], rows);
+  return toCsv([...ITEM_COLUMNS, ...places.map((p) => placeLowColumn(p.name))], rows);
 }
 
 function lowText(it: Item): string {
@@ -105,7 +123,7 @@ export interface ItemsCsvResult {
  *
  * Errors carry the spreadsheet's own row number (the header is row 1) so the shop can find them.
  */
-export function itemsFromCsv(text: string, shopId: string): ItemsCsvResult {
+export function itemsFromCsv(text: string, shopId: string, places: CsvPlace[] = []): ItemsCsvResult {
   const rows = parseCsv(text);
   const errors: ItemsCsvResult['errors'] = [];
   if (rows.length === 0) return { items: [], rows: [], errors: [{ row: 1, message: 'The file is empty' }] };
@@ -134,6 +152,12 @@ export function itemsFromCsv(text: string, shopId: string): ItemsCsvResult {
     const nameEn = get('name_en');
     const nameKn = get('name_kn');
 
+    const lowAtPlace: Record<string, LowAt> = {};
+    for (const p of places) {
+      const v = get(placeLowColumn(p.name));
+      if (v) lowAtPlace[p.id] = lowFromText(v) as LowAt;
+    }
+
     let item: ItemInput | null = null;
     if (id && byId.has(id)) item = byId.get(id)!;
     else if (nameEn || nameKn) {
@@ -146,6 +170,7 @@ export function itemsFromCsv(text: string, shopId: string): ItemsCsvResult {
         aliases: [],
         racks: get('rack_shop') ? { [shopId]: get('rack_shop') } : {},
         ...(get('low_at') ? { lowAt: lowFromText(get('low_at')) as Item['lowAt'] } : get('reorder_shop') ? { reorderAt: { [shopId]: Number(get('reorder_shop')) } } : {}),
+        ...(Object.keys(lowAtPlace).length ? { lowAtPlace } : {}),
         ...(get('active') ? { active: !/^(no|n|0|false)$/i.test(get('active')) } : {}),
       };
       items.push(item);

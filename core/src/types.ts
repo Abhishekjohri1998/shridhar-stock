@@ -105,6 +105,13 @@ export interface Item {
    * which sums it when the item has no `lowAt` yet. New saves do not write it.
    */
   reorderAt?: Record<string, number>;
+  /**
+   * Running out at one place, keyed by place id, in any of the item's units: "2 box" at the shop.
+   * It drives the shelf highlight and what the refill brings to the shop; `lowAt` stays the
+   * total that puts an item on the buy list. Items that never had it read their old
+   * `reorderAt` here instead (`lowAtPlaceOf`), without anything rewritten.
+   */
+  lowAtPlace?: Record<string, LowAt>;
   active: boolean;
   updatedAt: string;
 }

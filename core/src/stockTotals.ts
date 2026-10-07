@@ -49,3 +49,38 @@ export function isLow(item: Pick<Item, 'id' | 'units' | 'lowAt' | 'reorderAt'>, 
   const level = lowBase(item);
   return level != null && total < level;
 }
+
+type PlaceLowItem = Pick<Item, 'units' | 'lowAt' | 'reorderAt' | 'lowAtPlace'>;
+
+/**
+ * Running out at each place, keyed by place id. Entries in a unit the item no longer has are
+ * left out. An item never saved under the per-place rule (no `lowAtPlace`, no `lowAt`) reads its
+ * old `reorderAt` levels here, in the base unit; nothing is written back.
+ */
+export function lowAtPlaceOf(item: PlaceLowItem): Record<string, LowAt> {
+  const out: Record<string, LowAt> = {};
+  if (item.lowAtPlace) {
+    for (const [loc, l] of Object.entries(item.lowAtPlace)) {
+      const u = l && Number.isFinite(l.qty) && l.qty >= 0 ? findUnit(item, l.unit) : undefined;
+      if (u) out[loc] = { qty: l.qty, unit: u.code };
+    }
+    return out;
+  }
+  if (item.lowAt !== undefined) return out;
+  for (const [loc, n] of Object.entries(item.reorderAt ?? {})) {
+    if (typeof n === 'number' && Number.isFinite(n) && n >= 0) out[loc] = { qty: round3(n), unit: item.units[0]!.code };
+  }
+  return out;
+}
+
+/** The running-out level at one place in base units, or undefined when that place has none. */
+export function placeLowBase(item: PlaceLowItem, locId: string): number | undefined {
+  const l = lowAtPlaceOf(item)[locId];
+  return l ? toBase(item, l.unit, l.qty) : undefined;
+}
+
+/** Below its level at this place. A place with no level is never low. */
+export function isLowAt(item: PlaceLowItem, locId: string, qty: number): boolean {
+  const level = placeLowBase(item, locId);
+  return level != null && qty < level;
+}

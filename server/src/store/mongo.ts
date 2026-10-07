@@ -76,6 +76,8 @@ const itemSchema = new Schema(
     // The old level per place. Kept as saved; new saves write lowAt instead.
     reorderAt: { type: Schema.Types.Mixed, required: false },
     lowAt: { type: Schema.Types.Mixed, required: false },
+    // Running out at each place, keyed by place id.
+    lowAtPlace: { type: Schema.Types.Mixed, required: false },
     active: { type: Boolean, required: false, default: true },
     updatedAt: { type: String, required: true },
   },

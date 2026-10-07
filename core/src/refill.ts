@@ -1,4 +1,4 @@
-import { lowBase, totalsByItem } from './stockTotals';
+import { lowBase, placeLowBase, totalsByItem } from './stockTotals';
 import type { Item, Location, StockLevel } from './types';
 
 export interface TripLine {
@@ -26,8 +26,9 @@ export interface Refill {
 /**
  * What to bring to the shop, grouped into one trip per godown, and what to buy.
  *
- * The shop's shelf is short when it holds less than the item's running-out level (`lowAt`, in
- * base units). It is topped up to twice the level, from whichever godown holds the most, and never
+ * The shop's shelf is short when it holds less than the item's running-out level for the shop
+ * (`lowAtPlace`), or, for an item with none, its running-out level for all places (`lowAt`), in
+ * base units. It is topped up to twice the level, from whichever godown holds the most, and never
  * more than that godown has. Grouping by godown answers "while someone is going there anyway,
  * what else to bring".
  *
@@ -47,20 +48,22 @@ export function proposeRefill(items: Item[], stock: StockLevel[], locations: Loc
   for (const item of items) {
     if (!item.active) continue;
     const level = lowBase(item);
-    if (level == null) continue;
+    const shelf = placeLowBase(item, shop.id) ?? level;
+    if (shelf == null) continue;
     const shopQty = have(item.id, shop.id);
-    if (shopQty < level) {
-      const need = Math.max(0, 2 * level - shopQty);
+    if (shopQty < shelf) {
+      const need = Math.max(0, 2 * shelf - shopQty);
       const best = godowns
         .map((g) => ({ g, q: have(item.id, g.id) }))
         .filter((x) => x.q > 0)
         .sort((a, b) => b.q - a.q)[0];
       if (best) {
         const list = trips.get(best.g.id) ?? [];
-        list.push({ itemId: item.id, qty: Math.min(need, best.q), shopQty, level, godownQty: best.q });
+        list.push({ itemId: item.id, qty: Math.min(need, best.q), shopQty, level: shelf, godownQty: best.q });
         trips.set(best.g.id, list);
       }
     }
+    if (level == null) continue;
     const total = totals.get(item.id) ?? 0;
     if (total < level) buy.push({ itemId: item.id, qty: Math.max(0, 2 * level - total), total, shopQty, level });
   }

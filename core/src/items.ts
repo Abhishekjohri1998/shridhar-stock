@@ -116,6 +116,17 @@ export function checkItem(input: ItemInput): Checked<ItemInput> {
     if (sum != null) lowAt = { qty: round3(sum), unit: units[0]!.code };
   }
 
+  // Running out at one place, in any of the item's units. A blank one is dropped.
+  const lowAtPlace: Record<string, LowAt> = {};
+  for (const [loc, l] of Object.entries(input.lowAtPlace ?? {})) {
+    if (!l || num(l.qty) == null) continue;
+    const n = num(l.qty)!;
+    if (Number.isNaN(n) || n < 0) return { ok: false, error: 'The running-out level at a place must be 0 or more' };
+    const unit = units.find((u) => unitKey(u.code) === unitKey(String(l.unit ?? '') || units[0]!.code));
+    if (!unit) return { ok: false, error: 'The running-out level at a place is in a unit the item does not have' };
+    lowAtPlace[loc] = { qty: round3(n), unit: unit.code };
+  }
+
   // A default unit the item does not have is dropped: the item then reads its first unit.
   const du = String(input.defaultUnit ?? '').trim();
   const defaultUnit = du ? units.find((u) => unitKey(u.code) === unitKey(du))?.code : undefined;
@@ -139,6 +150,7 @@ export function checkItem(input: ItemInput): Checked<ItemInput> {
       aliases,
       racks,
       ...(lowAt ? { lowAt } : {}),
+      ...(Object.keys(lowAtPlace).length ? { lowAtPlace } : {}),
       ...(input.active != null ? { active: !!input.active } : {}),
     },
   };

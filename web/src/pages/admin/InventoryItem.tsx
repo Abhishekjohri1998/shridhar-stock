@@ -10,6 +10,7 @@ import {
   qtyInUnit,
   formToInput,
   isLow,
+  isLowAt,
   itemToForm,
   pickName,
   toBase,
@@ -320,10 +321,31 @@ function ItemDetails({
               <span className="muted">{bi('(all places together)', '(ಎಲ್ಲಾ ಕಡೆ ಸೇರಿ)')}</span>
             </div>
           </div>
+          {locs.map((l) => {
+            const place = pickName(l.name, l.nameKn, lang);
+            const lp = form.lowPlace[l.id] ?? { qty: '', unit: form.lowUnit };
+            const setLp = (patch: Partial<{ qty: string; unit: string }>) => set({ lowPlace: { ...form.lowPlace, [l.id]: { ...lp, ...patch } } });
+            const label = bi('Running out in ' + place + ' below', place + 'ನಲ್ಲಿ ಇದಕ್ಕಿಂತ ಕಡಿಮೆಯಾದರೆ ಮುಗಿಯುತ್ತಿದೆ');
+            return (
+              <div className="field" key={l.id}>
+                <span>{label}</span>
+                <div className="bar mb-0">
+                  <input inputMode="decimal" className="in-qty" value={lp.qty} onChange={(e) => setLp({ qty: e.target.value })} aria-label={label} />
+                  <Select
+                    value={unitChoices.some((u) => u.code === lp.unit) ? lp.unit : base}
+                    onChange={(unit) => setLp({ unit })}
+                    className="w-auto"
+                    aria-label={bi('Unit', 'ಘಟಕ')}
+                    options={unitChoices.map((u) => ({ value: u.code, label: (lang === 'kn' && u.labelKn) || u.code }))}
+                  />
+                </div>
+              </div>
+            );
+          })}
           <p className="muted">
             {bi(
-              'Running low is the shop and every godown added up. Leave it empty for an item that never needs buying ahead.',
-              'ಅಂಗಡಿ ಮತ್ತು ಎಲ್ಲಾ ಗೋದಾಮು ಸೇರಿಸಿ ನೋಡಲಾಗುತ್ತದೆ. ಮೊದಲೇ ಖರೀದಿಸಬೇಕಿಲ್ಲದ ಸಾಮಾನಿಗೆ ಖಾಲಿ ಬಿಡಿ.',
+              'Running low is the shop and every godown added up: it puts the item on the buy list. The level for one place marks that shelf and decides what the refill brings to the shop. Leave any of them empty when not needed.',
+              'ಅಂಗಡಿ ಮತ್ತು ಎಲ್ಲಾ ಗೋದಾಮು ಸೇರಿಸಿ ನೋಡಲಾಗುತ್ತದೆ: ಇದು ಖರೀದಿ ಪಟ್ಟಿಗೆ ಸೇರಿಸುತ್ತದೆ. ಒಂದು ಜಾಗದ ಮಟ್ಟ ಆ ಶೆಲ್ಫ್ ಅನ್ನು ಗುರುತಿಸುತ್ತದೆ ಮತ್ತು ಅಂಗಡಿಗೆ ಏನು ತರಬೇಕು ಎಂದು ಹೇಳುತ್ತದೆ. ಬೇಡವಾದರೆ ಖಾಲಿ ಬಿಡಿ.',
             )}
           </p>
           <div className="grid2">
@@ -421,7 +443,7 @@ function ItemStock({ item, locs, stock, readOnly, onChanged }: { item: Item; loc
             {locs.map((l) => (
               <tr key={l.id}>
                 <td className="name">{pickName(l.name, l.nameKn, lang)}</td>
-                <td className={'num ' + (qtyAt(l.id) < 0 ? 'qty-neg' : '')}>{describeQty(item, qtyAt(l.id), lang)}</td>
+                <td className={'num ' + (qtyAt(l.id) < 0 ? 'qty-neg' : isLowAt(item, l.id, qtyAt(l.id)) ? 'qty-low' : '')}>{describeQty(item, qtyAt(l.id), lang)}</td>
                 <td className="muted">{item.racks[l.id] ?? ''}</td>
               </tr>
             ))}

@@ -45,7 +45,7 @@ const SECTIONS: Section[] = [
     tour: 'refill',
     roles: ['admin'],
     title: ['Bring from godown', 'ಗೋದಾಮಿನಿಂದ ತರಿಸಿ'],
-    body: ['What is low in the shop, grouped into one trip per godown. “Send request” puts it on the godown’s screen.', 'ಅಂಗಡಿಯಲ್ಲಿ ಕಡಿಮೆ ಇರುವುದು, ಪ್ರತಿ ಗೋದಾಮಿಗೆ ಒಂದು ಓಡಾಟ. “ಬೇಡಿಕೆ ಕಳುಹಿಸಿ” ಗೋದಾಮಿನ ಪರದೆಗೆ ಹೋಗುತ್ತದೆ.'],
+    body: ['What is low in the shop, grouped into one trip per godown. An item’s “Running out in Shop below” level decides it, else its level for all places. “Send request” puts it on the godown’s screen.', 'ಅಂಗಡಿಯಲ್ಲಿ ಕಡಿಮೆ ಇರುವುದು, ಪ್ರತಿ ಗೋದಾಮಿಗೆ ಒಂದು ಓಡಾಟ. ಸಾಮಾನಿನ “ಅಂಗಡಿಯಲ್ಲಿ ಇದಕ್ಕಿಂತ ಕಡಿಮೆ” ಮಟ್ಟ ಇದನ್ನು ನಿರ್ಧರಿಸುತ್ತದೆ, ಇಲ್ಲದಿದ್ದರೆ ಎಲ್ಲಾ ಕಡೆ ಸೇರಿದ ಮಟ್ಟ. “ಬೇಡಿಕೆ ಕಳುಹಿಸಿ” ಗೋದಾಮಿನ ಪರದೆಗೆ ಹೋಗುತ್ತದೆ.'],
   },
   {
     tour: 'purchases',

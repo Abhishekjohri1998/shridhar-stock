@@ -10,6 +10,7 @@ import {
   itemsFromCsv,
   itemsToCsv,
   lowAtOf,
+  lowAtPlaceOf,
   rackNames,
   normalisePhone,
   parseCsv,
@@ -241,10 +242,15 @@ adminRoutes.get(
   }),
 );
 
-/** Racks may only be keyed by places that exist. */
+/** Racks and running-out levels per place may only be keyed by places that exist. */
 async function dropUnknownPlaces(input: ItemInput): Promise<ItemInput> {
   const ids = new Set((await getRepo().listLocations()).map((l) => l.id));
   const out = { ...input, racks: Object.fromEntries(Object.entries(input.racks).filter(([k]) => ids.has(k))) };
+  if (input.lowAtPlace) {
+    const kept = Object.entries(input.lowAtPlace).filter(([k]) => ids.has(k));
+    if (kept.length) out.lowAtPlace = Object.fromEntries(kept);
+    else delete out.lowAtPlace;
+  }
   // Suppliers too: only ones that exist are kept on the item.
   if (input.suppliers?.length) {
     const sups = new Set((await getRepo().listDocs<{ id: string }>('suppliers')).map((s) => s.id));
@@ -587,9 +593,9 @@ adminRoutes.get(
   admin,
   handler(async (_req, res) => {
     const repo = getRepo();
-    const [items, shop] = await Promise.all([repo.listItems(), shopOf(repo)]);
+    const [items, shop, places] = await Promise.all([repo.listItems(), shopOf(repo), repo.listLocations()]);
     items.sort((a, b) => (a.nameEn || a.nameKn).localeCompare(b.nameEn || b.nameKn));
-    sendCsv(res, 'items.csv', itemsToCsv(items, shop.id));
+    sendCsv(res, 'items.csv', itemsToCsv(items, shop.id, placeOrder(places).filter((l) => l.active)));
   }),
 );
 
@@ -605,9 +611,9 @@ adminRoutes.get(
   admin,
   handler(async (_req, res) => {
     const repo = getRepo();
-    const [items, shop] = await Promise.all([repo.listItems(), shopOf(repo)]);
+    const [items, shop, places] = await Promise.all([repo.listItems(), shopOf(repo), repo.listLocations()]);
     items.sort((a, b) => (a.nameEn || a.nameKn).localeCompare(b.nameEn || b.nameKn));
-    const [header = [], ...rows] = parseCsv(itemsToCsv(items, shop.id)).filter((r) => r.some((c) => c !== ''));
+    const [header = [], ...rows] = parseCsv(itemsToCsv(items, shop.id, placeOrder(places).filter((l) => l.active))).filter((r) => r.some((c) => c !== ''));
     // Numbers go in as numbers, so a price can be summed; everything else stays text.
     const typed: Cell[][] = rows.map((r) => r.map((c) => (/^-?\d+(\.\d+)?$/.test(c) && !/^0\d/.test(c) ? Number(c) : c)));
     sendXlsx(res, 'items.xlsx', toXlsx([{ name: 'Items', header, rows: typed }]));
@@ -721,7 +727,7 @@ adminRoutes.get(
 
 /** The parts of an item a spreadsheet can change, for telling "changed" from "unchanged". */
 function comparable(i: ItemInput): string {
-  return JSON.stringify([i.nameEn, i.nameKn, i.category ?? '', i.units, i.aliases, i.racks, lowAtOf(i) ?? null, i.active ?? true]);
+  return JSON.stringify([i.nameEn, i.nameKn, i.category ?? '', i.units, i.aliases, i.racks, lowAtOf(i) ?? null, lowAtPlaceOf(i), i.active ?? true]);
 }
 
 /**
@@ -734,9 +740,9 @@ adminRoutes.post(
   handler(async (req, res) => {
     const { csv, dry } = z.object({ csv: z.string().max(2_000_000), dry: z.boolean().default(true) }).parse(req.body);
     const repo = getRepo();
-    const [existing, shop] = await Promise.all([repo.listItems(), shopOf(repo)]);
+    const [existing, shop, places] = await Promise.all([repo.listItems(), shopOf(repo), repo.listLocations()]);
     const byId = new Map(existing.map((i) => [i.id, i]));
-    const parsed = itemsFromCsv(csv, shop.id);
+    const parsed = itemsFromCsv(csv, shop.id, places);
     const errors = [...parsed.errors];
     const ready: { input: ItemInput; old?: Item }[] = [];
 
@@ -748,10 +754,11 @@ adminRoutes.post(
         continue;
       }
       // Keep racks for godowns: the spreadsheet only carries the shop's. An empty low_at keeps
-      // the level the item has.
+      // the level the item has, and so does an empty low_<place> for that place.
       const oldLow = old ? lowAtOf(old) : undefined;
+      const oldPlaceLow = old ? lowAtPlaceOf(old) : {};
       const merged: ItemInput = old
-        ? { ...raw, racks: { ...old.racks, ...raw.racks }, ...(!raw.lowAt && !raw.reorderAt && oldLow ? { lowAt: oldLow } : {}), active: raw.active ?? old.active }
+        ? { ...raw, racks: { ...old.racks, ...raw.racks }, ...(!raw.lowAt && !raw.reorderAt && oldLow ? { lowAt: oldLow } : {}), ...(Object.keys(oldPlaceLow).length || raw.lowAtPlace ? { lowAtPlace: { ...oldPlaceLow, ...raw.lowAtPlace } } : {}), active: raw.active ?? old.active }
         : raw;
       const r = checkItem(merged);
       if (!r.ok) {
