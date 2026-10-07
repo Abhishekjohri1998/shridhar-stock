@@ -34,7 +34,7 @@ export const homeTour = tour('home', ['Home', 'ಮುಖಪುಟ'], [
   step(
     'home-needs',
     ['Needs you now', 'ಈಗ ನಿಮ್ಮ ಗಮನ ಬೇಕು'],
-    ['Four cards: lines to confirm, running low, below zero, transfers on the way.', 'ನಾಲ್ಕು ಕಾರ್ಡ್: ಖಚಿತಪಡಿಸಬೇಕಾದ ಸಾಲು, ಮುಗಿಯುತ್ತಿರುವುದು, ಸೊನ್ನೆಗಿಂತ ಕಡಿಮೆ, ದಾರಿಯಲ್ಲಿರುವ ಸಾಗಣೆ.'],
+    ['Four cards: lines to digitise, running low, below zero, transfers on the way.', 'ನಾಲ್ಕು ಕಾರ್ಡ್: ಡಿಜಿಟೈಸ್ ಮಾಡಬೇಕಾದ ಸಾಲು, ಮುಗಿಯುತ್ತಿರುವುದು, ಸೊನ್ನೆಗಿಂತ ಕಡಿಮೆ, ದಾರಿಯಲ್ಲಿರುವ ಸಾಗಣೆ.'],
     ['The number says how many are waiting. Coloured means do it today.', 'ಸಂಖ್ಯೆ ಎಷ್ಟು ಬಾಕಿ ಎಂದು ಹೇಳುತ್ತದೆ. ಬಣ್ಣ ಇದ್ದರೆ ಇಂದೇ ಮಾಡಿ.'],
     ['You go straight to that list, ready to act.', 'ನೇರವಾಗಿ ಆ ಪಟ್ಟಿಗೆ ಹೋಗುತ್ತೀರಿ.'],
   ),
@@ -102,7 +102,7 @@ export const reportsTour = tour('reports', ['Reports', 'ವರದಿಗಳು'],
     'reports-sales',
     ['Takings', 'ಆದಾಯ'],
     ['The total, split into lines linked to an item and lines not linked yet.', 'ಒಟ್ಟು, ಸಾಮಾನಿಗೆ ಜೋಡಿಸಿದ ಸಾಲು ಮತ್ತು ಇನ್ನೂ ಜೋಡಿಸದ ಸಾಲುಗಳಾಗಿ.'],
-    ['“Not linked” shrinks as you confirm lines in Bills → To confirm.', 'ಬಿಲ್ → ಖಚಿತಪಡಿಸಿ ಯಲ್ಲಿ ಸಾಲು ಖಚಿತಪಡಿಸಿದಂತೆ “ಜೋಡಿಸಿಲ್ಲ” ಕಡಿಮೆಯಾಗುತ್ತದೆ.'],
+    ['“Not linked” shrinks as you digitise lines in Bills → To digitise.', 'ಬಿಲ್ → ಡಿಜಿಟೈಸ್ ಮಾಡಿ ಯಲ್ಲಿ ಸಾಲು ಡಿಜಿಟೈಸ್ ಮಾಡಿದಂತೆ “ಜೋಡಿಸಿಲ್ಲ” ಕಡಿಮೆಯಾಗುತ್ತದೆ.'],
     ['Nothing: these are totals.', 'ಏನೂ ಇಲ್ಲ: ಇವು ಮೊತ್ತಗಳು.'],
   ),
   step(
@@ -118,9 +118,9 @@ export const reportsTour = tour('reports', ['Reports', 'ವರದಿಗಳು'],
 export const billsTour = tour('bills', ['Bills', 'ಬಿಲ್‌ಗಳು'], [
   step(
     'section-tabs',
-    ['Bills · To confirm', 'ಬಿಲ್‌ಗಳು · ಖಚಿತಪಡಿಸಿ'],
+    ['Bills · To digitise', 'ಬಿಲ್‌ಗಳು · ಡಿಜಿಟೈಸ್ ಮಾಡಿ'],
     ['Two tabs: every bill, and the lines waiting for you.', 'ಎರಡು ಟ್ಯಾಬ್: ಎಲ್ಲಾ ಬಿಲ್‌ಗಳು, ಮತ್ತು ನಿಮಗಾಗಿ ಕಾಯುತ್ತಿರುವ ಸಾಲುಗಳು.'],
-    ['Bills shows what happened; To confirm is where you act.', 'ಬಿಲ್‌ಗಳು ಏನಾಯಿತು ಎಂದು ತೋರಿಸುತ್ತದೆ; ಖಚಿತಪಡಿಸಿ ಯಲ್ಲಿ ನೀವು ಕೆಲಸ ಮಾಡುತ್ತೀರಿ.'],
+    ['Bills shows what happened; To digitise is where you act.', 'ಬಿಲ್‌ಗಳು ಏನಾಯಿತು ಎಂದು ತೋರಿಸುತ್ತದೆ; ಡಿಜಿಟೈಸ್ ಮಾಡಿ ಯಲ್ಲಿ ನೀವು ಕೆಲಸ ಮಾಡುತ್ತೀರಿ.'],
     ['That tab opens.', 'ಆ ಟ್ಯಾಬ್ ತೆರೆಯುತ್ತದೆ.'],
   ),
   step(
@@ -147,21 +147,21 @@ export const billsTour = tour('bills', ['Bills', 'ಬಿಲ್‌ಗಳು'], [
   step(
     'bills-state',
     ['How each line moved stock', 'ಪ್ರತಿ ಸಾಲು ಸ್ಟಾಕ್ ಬದಲಿಸಿದ ಬಗೆ'],
-    ['Matched, confirmed, to confirm, or not stock.', 'ಹೊಂದಿದೆ, ಖಚಿತವಾಗಿದೆ, ಖಚಿತಪಡಿಸಬೇಕು, ಅಥವಾ ಸ್ಟಾಕ್ ಅಲ್ಲ.'],
-    ['“To confirm” lines have not moved stock yet: they wait for you.', '“ಖಚಿತಪಡಿಸಬೇಕು” ಸಾಲುಗಳು ಇನ್ನೂ ಸ್ಟಾಕ್ ಬದಲಿಸಿಲ್ಲ: ನಿಮಗಾಗಿ ಕಾಯುತ್ತಿವೆ.'],
-    ['Nothing here; open the To confirm tab to answer them.', 'ಇಲ್ಲಿ ಏನೂ ಇಲ್ಲ; ಉತ್ತರಿಸಲು ಖಚಿತಪಡಿಸಿ ಟ್ಯಾಬ್ ತೆರೆಯಿರಿ.'],
+    ['Matched, digitised, to digitise, or not stock.', 'ಹೊಂದಿದೆ, ಡಿಜಿಟೈಸ್ ಆಗಿದೆ, ಡಿಜಿಟೈಸ್ ಮಾಡಬೇಕು, ಅಥವಾ ಸ್ಟಾಕ್ ಅಲ್ಲ.'],
+    ['“To digitise” lines have not moved stock yet: they wait for you.', '“ಡಿಜಿಟೈಸ್ ಮಾಡಬೇಕು” ಸಾಲುಗಳು ಇನ್ನೂ ಸ್ಟಾಕ್ ಬದಲಿಸಿಲ್ಲ: ನಿಮಗಾಗಿ ಕಾಯುತ್ತಿವೆ.'],
+    ['Nothing here; open the To digitise tab to answer them.', 'ಇಲ್ಲಿ ಏನೂ ಇಲ್ಲ; ಉತ್ತರಿಸಲು ಡಿಜಿಟೈಸ್ ಮಾಡಿ ಟ್ಯಾಬ್ ತೆರೆಯಿರಿ.'],
   ),
   step(
     'nav-bills',
     ['Back here any time', 'ಯಾವಾಗ ಬೇಕಾದರೂ ಇಲ್ಲಿಗೆ'],
     ['Bills in the menu.', 'ಮೆನುವಿನಲ್ಲಿ ಬಿಲ್‌ಗಳು.'],
-    ['Opens the bills list, with To confirm as its second tab.', 'ಬಿಲ್ ಪಟ್ಟಿ ತೆರೆಯುತ್ತದೆ, ಎರಡನೇ ಟ್ಯಾಬ್ ಖಚಿತಪಡಿಸಿ.'],
+    ['Opens the bills list, with To digitise as its second tab.', 'ಬಿಲ್ ಪಟ್ಟಿ ತೆರೆಯುತ್ತದೆ, ಎರಡನೇ ಟ್ಯಾಬ್ ಡಿಜಿಟೈಸ್ ಮಾಡಿ.'],
     ['The Bills tab opens.', 'ಬಿಲ್‌ಗಳ ಟ್ಯಾಬ್ ತೆರೆಯುತ್ತದೆ.'],
   ),
   helpStep,
 ]);
 
-export const confirmTour = tour('confirm', ['To confirm', 'ಖಚಿತಪಡಿಸಿ'], [
+export const confirmTour = tour('confirm', ['To digitise', 'ಡಿಜಿಟೈಸ್ ಮಾಡಿ'], [
   step(
     undefined,
     ['Lines waiting for you', 'ನಿಮಗಾಗಿ ಕಾಯುತ್ತಿರುವ ಸಾಲುಗಳು'],
@@ -206,8 +206,8 @@ export const confirmTour = tour('confirm', ['To confirm', 'ಖಚಿತಪಡಿ
   ),
   step(
     'confirm-line-ok',
-    ['This line is right', 'ಈ ಸಾಲು ಸರಿ'],
-    ['Confirms just this one line.', 'ಈ ಒಂದು ಸಾಲನ್ನು ಮಾತ್ರ ಖಚಿತಪಡಿಸುತ್ತದೆ.'],
+    ['Digitise', 'ಡಿಜಿಟೈಸ್ ಮಾಡಿ'],
+    ['Digitises just this one line.', 'ಈ ಒಂದು ಸಾಲನ್ನು ಮಾತ್ರ ಡಿಜಿಟೈಸ್ ಮಾಡುತ್ತದೆ.'],
     ['Stock goes down in the shop, and the name is remembered for next time.', 'ಅಂಗಡಿಯ ಸ್ಟಾಕ್ ಕಡಿಮೆಯಾಗುತ್ತದೆ, ಹೆಸರು ಮುಂದಿನ ಸಲಕ್ಕೆ ನೆನಪಿರುತ್ತದೆ.'],
     ['The line leaves the list, and one line says what changed, like “Shop: Parle-G −2 pack”.', 'ಸಾಲು ಪಟ್ಟಿಯಿಂದ ಹೋಗುತ್ತದೆ, ಏನು ಬದಲಾಯಿತು ಎಂದು ಒಂದು ಸಾಲು ಹೇಳುತ್ತದೆ, ಉದಾ “ಅಂಗಡಿ: ಪಾರ್ಲೆ-ಜಿ −2 ಪ್ಯಾಕ್”.'],
   ),
@@ -220,8 +220,8 @@ export const confirmTour = tour('confirm', ['To confirm', 'ಖಚಿತಪಡಿ
   ),
   step(
     'confirm-all',
-    ['✓ Confirm all on this bill', '✓ ಈ ಬಿಲ್‌ನ ಎಲ್ಲಾ ಖಚಿತಪಡಿಸಿ'],
-    ['Confirms every line on the bill that has its item picked.', 'ಸಾಮಾನು ಆರಿಸಿದ ಬಿಲ್‌ನ ಎಲ್ಲಾ ಸಾಲುಗಳನ್ನು ಖಚಿತಪಡಿಸುತ್ತದೆ.'],
+    ['✓ Digitise all on this bill', '✓ ಈ ಬಿಲ್‌ನ ಎಲ್ಲಾ ಡಿಜಿಟೈಸ್ ಮಾಡಿ'],
+    ['Digitises every line on the bill that has its item picked.', 'ಸಾಮಾನು ಆರಿಸಿದ ಬಿಲ್‌ನ ಎಲ್ಲಾ ಸಾಲುಗಳನ್ನು ಡಿಜಿಟೈಸ್ ಮಾಡುತ್ತದೆ.'],
     ['The fastest way: pick the items, then one tap for the whole bill.', 'ಅತಿ ಬೇಗದ ದಾರಿ: ಸಾಮಾನು ಆರಿಸಿ, ನಂತರ ಇಡೀ ಬಿಲ್‌ಗೆ ಒಂದು ಒತ್ತು.'],
     ['Those lines leave the list and stock goes down. Lines still missing an item stay for you.', 'ಆ ಸಾಲುಗಳು ಪಟ್ಟಿಯಿಂದ ಹೋಗುತ್ತವೆ, ಸ್ಟಾಕ್ ಕಡಿಮೆಯಾಗುತ್ತದೆ. ಸಾಮಾನು ಇಲ್ಲದ ಸಾಲುಗಳು ಉಳಿಯುತ್ತವೆ.'],
   ),

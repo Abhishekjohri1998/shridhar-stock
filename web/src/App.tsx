@@ -47,7 +47,7 @@ const tab = (to: string, en: string, kn: string): Tab => ({ to, en, kn });
  */
 const ADMIN: Place[] = [
   { to: '/admin', en: 'Home', kn: 'ಮುಖಪುಟ', icon: 'home', tour: 'nav-home', tabs: [tab('/admin', 'Today', 'ಇಂದು'), tab('/admin/reports', 'Reports', 'ವರದಿ')] },
-  { to: '/admin/bills', en: 'Bills', kn: 'ಬಿಲ್‌ಗಳು', icon: 'receipt', tour: 'nav-bills', tabs: [tab('/admin/bills', 'Bills', 'ಬಿಲ್‌ಗಳು'), tab('/admin/confirm', 'To confirm', 'ಖಚಿತಪಡಿಸಿ')] },
+  { to: '/admin/bills', en: 'Bills', kn: 'ಬಿಲ್‌ಗಳು', icon: 'receipt', tour: 'nav-bills', tabs: [tab('/admin/bills', 'Bills', 'ಬಿಲ್‌ಗಳು'), tab('/admin/confirm', 'To digitise', 'ಡಿಜಿಟೈಸ್ ಮಾಡಿ')] },
   {
     to: '/admin/inventory',
     en: 'Inventory',
@@ -293,7 +293,7 @@ function MoreSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
-/** The tabs of the place you are in: Bills · To confirm, Purchases · Transfers, and so on. */
+/** The tabs of the place you are in: Bills · To digitise, Purchases · Transfers, and so on. */
 function SectionTabs({ tabs }: { tabs: Tab[] }) {
   const { lang } = useSession();
   const loc = useLocation();

@@ -6,7 +6,7 @@ import { useSession } from '../lib/session';
 import { useBi } from '../components/ui';
 
 const ROLE_WHAT: Partial<Record<Role, [string, string]>> = {
-  admin: ['Runs everything: bills, confirming written lines, inventory, bringing from the godown, purchases, setup.', 'ಎಲ್ಲವನ್ನೂ ನಡೆಸುತ್ತಾರೆ: ಬಿಲ್, ಬರೆದ ಸಾಲು ಖಚಿತಪಡಿಸುವುದು, ಸಾಮಾನು, ಗೋದಾಮಿನಿಂದ ತರಿಸುವುದು, ಖರೀದಿ, ಸೆಟಪ್.'],
+  admin: ['Runs everything: bills, digitising written lines, inventory, bringing from the godown, purchases, setup.', 'ಎಲ್ಲವನ್ನೂ ನಡೆಸುತ್ತಾರೆ: ಬಿಲ್, ಬರೆದ ಸಾಲು ಡಿಜಿಟೈಸ್ ಮಾಡುವುದು, ಸಾಮಾನು, ಗೋದಾಮಿನಿಂದ ತರಿಸುವುದು, ಖರೀದಿ, ಸೆಟಪ್.'],
   worker: ['Sees each bill as a pick list by rack, ticks what was fetched. The TV screen shows it big.', 'ಪ್ರತಿ ಬಿಲ್ ಅನ್ನು ರ‍್ಯಾಕ್ ಪ್ರಕಾರ ನೋಡಿ, ತಂದದ್ದನ್ನು ಟಿಕ್ ಮಾಡುತ್ತಾರೆ. ಟಿವಿ ಪರದೆ ದೊಡ್ಡದಾಗಿ ತೋರಿಸುತ್ತದೆ.'],
   godown: ['Sends what the shop asks for, receives what comes in.', 'ಅಂಗಡಿ ಕೇಳಿದ್ದನ್ನು ಕಳುಹಿಸುತ್ತಾರೆ, ಬಂದದ್ದನ್ನು ಸ್ವೀಕರಿಸುತ್ತಾರೆ.'],
 };
@@ -14,7 +14,7 @@ const ROLE_WHAT: Partial<Record<Role, [string, string]>> = {
 const STORY: { role: Role; to: string; en: string; kn: string }[] = [
   { role: 'admin', to: '/admin', en: 'Home: what needs you now, today’s sales and the week. The first time each person signs in, a short tour explains the screen; “?” plays it again.', kn: 'ಮುಖಪುಟ: ಈಗ ನಿಮ್ಮ ಗಮನ ಬೇಕಾದ್ದು, ಇಂದಿನ ಮಾರಾಟ, ವಾರ. ಮೊದಲ ಸಲ ಒಳಗೆ ಬಂದಾಗ ಚಿಕ್ಕ ಪರಿಚಯ; “?” ಮತ್ತೆ ತೋರಿಸುತ್ತದೆ.' },
   { role: 'admin', to: '/admin/bills', en: 'Bills arrive from the billing app by themselves. Typed lines are matched to items and take stock down.', kn: 'ಬಿಲ್ಲಿಂಗ್‌ನಿಂದ ಬಿಲ್‌ಗಳು ತಾನಾಗಿ ಬರುತ್ತವೆ. ಟೈಪ್ ಸಾಲುಗಳು ಸಾಮಾನಿಗೆ ಹೊಂದಿ ಸ್ಟಾಕ್ ಕಡಿಮೆ ಮಾಡುತ್ತವೆ.' },
-  { role: 'admin', to: '/admin/confirm', en: 'Bills · To confirm: bills #53 and #54 have handwritten lines. Pick the item for each, then “Confirm all on this bill”: the lines leave the list and stock goes down.', kn: 'ಬಿಲ್ · ಖಚಿತಪಡಿಸಿ: ಬಿಲ್ #53, #54 ರಲ್ಲಿ ಕೈಬರಹದ ಸಾಲುಗಳಿವೆ. ಪ್ರತಿಯೊಂದಕ್ಕೆ ಸಾಮಾನು ಆರಿಸಿ, “ಈ ಬಿಲ್‌ನ ಎಲ್ಲಾ ಖಚಿತಪಡಿಸಿ”: ಸ್ಟಾಕ್ ಕಡಿಮೆಯಾಗುತ್ತದೆ.' },
+  { role: 'admin', to: '/admin/confirm', en: 'Bills · To digitise: bills #53 and #54 have handwritten lines. Pick the item for each, then “Digitise all on this bill”: the lines leave the list and stock goes down.', kn: 'ಬಿಲ್ · ಡಿಜಿಟೈಸ್ ಮಾಡಿ: ಬಿಲ್ #53, #54 ರಲ್ಲಿ ಕೈಬರಹದ ಸಾಲುಗಳಿವೆ. ಪ್ರತಿಯೊಂದಕ್ಕೆ ಸಾಮಾನು ಆರಿಸಿ, “ಈ ಬಿಲ್‌ನ ಎಲ್ಲಾ ಡಿಜಿಟೈಸ್ ಮಾಡಿ”: ಸ್ಟಾಕ್ ಕಡಿಮೆಯಾಗುತ್ತದೆ.' },
   { role: 'worker', to: '/worker', en: 'The shop worker sees bill #54 as a pick list grouped by rack, and ticks what was fetched: billing’s tick turns on too.', kn: 'ಕೆಲಸಗಾರರು ಬಿಲ್ #54 ಅನ್ನು ರ‍್ಯಾಕ್ ಪ್ರಕಾರ ನೋಡಿ ತಂದದ್ದನ್ನು ಟಿಕ್ ಮಾಡುತ್ತಾರೆ: ಬಿಲ್ಲಿಂಗ್‌ನ ಟಿಕ್ ಕೂಡ ಬರುತ್ತದೆ.' },
   { role: 'worker', to: '/worker/screen', en: 'The TV screen: the same bill, big, for the second monitor at the counter.', kn: 'ಟಿವಿ ಪರದೆ: ಅದೇ ಬಿಲ್, ದೊಡ್ಡದಾಗಿ, ಕೌಂಟರ್‌ನ ಎರಡನೇ ಮಾನಿಟರ್‌ಗೆ.' },
   { role: 'admin', to: '/admin/inventory?low=1', en: 'Inventory: coffee and toor dal are low with the shop and godowns added up. An item’s page corrects its count in boxes.', kn: 'ಸಾಮಾನು: ಅಂಗಡಿ ಮತ್ತು ಗೋದಾಮು ಸೇರಿಸಿ ಕಾಫಿ, ತೊಗರಿ ಬೇಳೆ ಕಡಿಮೆ. ಸಾಮಾನಿನ ಪುಟದಲ್ಲಿ ಬಾಕ್ಸ್‌ನಲ್ಲಿ ಎಣಿಕೆ ಸರಿಪಡಿಸಬಹುದು.' },

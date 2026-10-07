@@ -232,7 +232,7 @@ reportRoutes.get(
       case 'sales': {
         const s = await salesByItem(d.bills, d.byId, p.from, p.to);
         const rows: (string | number)[][] = s.rows.map((r) => [r.itemId, r.name, r.nameKn, r.baseQty, d.byId.get(r.itemId)?.units[0]?.code ?? '', r.lines, r.amount, r.cost, round2(r.amount - r.cost)]);
-        rows.push(['', 'Not yet linked (handwriting to confirm)', '', '', '', s.unlinkedLines, s.unlinked, '', '']);
+        rows.push(['', 'Not yet linked (handwriting to digitise)', '', '', '', s.unlinkedLines, s.unlinked, '', '']);
         rows.push(['', 'Not stock (services, charges)', '', '', '', '', s.notStock, '', '']);
         return sendCsv(res, 'sales-by-item-' + span + '.csv', toCsv(['item_id', 'name_en', 'name_kn', 'qty_base', 'base_unit', 'lines', 'sales', 'cost', 'margin'], rows));
       }

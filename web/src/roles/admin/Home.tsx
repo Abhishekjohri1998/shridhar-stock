@@ -41,7 +41,7 @@ export function AdminHome() {
   if (error) return <div className="msg err">{error}</div>;
   if (!s) return <Loading />;
   const needs = [
-    { n: s.toConfirm, label: bi('Bill lines to confirm', 'ಖಚಿತಪಡಿಸಬೇಕಾದ ಸಾಲುಗಳು'), to: '/admin/confirm', tone: 'warn', icon: 'checkCircle' as const },
+    { n: s.toConfirm, label: bi('Bill lines to digitise', 'ಡಿಜಿಟೈಸ್ ಮಾಡಬೇಕಾದ ಸಾಲುಗಳು'), to: '/admin/confirm', tone: 'warn', icon: 'checkCircle' as const },
     { n: s.low, label: bi('Running low, all places together', 'ಮುಗಿಯುತ್ತಿದೆ, ಎಲ್ಲಾ ಕಡೆ ಸೇರಿ'), to: '/admin/inventory?low=1', tone: 'warn', icon: 'refill' as const },
     { n: s.negative, label: bi('Below zero: count these', 'ಸೊನ್ನೆಗಿಂತ ಕಡಿಮೆ: ಎಣಿಸಿ'), to: '/admin/inventory', tone: 'bad', icon: 'alert' as const },
     { n: s.inTransit, label: bi('Transfers on the way', 'ದಾರಿಯಲ್ಲಿರುವ ಸಾಗಣೆ'), to: '/admin/transfers', tone: 'info', icon: 'truck' as const },

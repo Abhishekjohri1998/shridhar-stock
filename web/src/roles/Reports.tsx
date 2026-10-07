@@ -88,7 +88,7 @@ export function ReportsPage() {
             </div>
             <div className={'tile ' + (r.sales.unlinked ? 'warn' : '')}>
               <b><Money v={r.sales.unlinked} /></b>
-              {bi('Not linked yet', 'ಇನ್ನೂ ಜೋಡಿಸಿಲ್ಲ')} ({r.sales.unlinkedLines} {bi('lines to confirm', 'ಸಾಲು')})
+              {bi('Not linked yet', 'ಇನ್ನೂ ಜೋಡಿಸಿಲ್ಲ')} ({r.sales.unlinkedLines} {bi('lines to digitise', 'ಸಾಲು')})
             </div>
             <div className="tile">
               <b><Money v={r.sales.notStock} /></b>
@@ -103,7 +103,7 @@ export function ReportsPage() {
           </div>
           {r.sales.unlinked > 0 && (
             <p className="muted">
-              {bi('The table below counts only linked lines. Confirming handwritten lines makes it complete.', 'ಕೆಳಗಿನ ಪಟ್ಟಿ ಜೋಡಿಸಿದ ಸಾಲುಗಳನ್ನು ಮಾತ್ರ ಎಣಿಸುತ್ತದೆ.')}
+              {bi('The table below counts only linked lines. Digitising handwritten lines makes it complete.', 'ಕೆಳಗಿನ ಪಟ್ಟಿ ಜೋಡಿಸಿದ ಸಾಲುಗಳನ್ನು ಮಾತ್ರ ಎಣಿಸುತ್ತದೆ.')}
             </p>
           )}
           <div className="bar my-10">

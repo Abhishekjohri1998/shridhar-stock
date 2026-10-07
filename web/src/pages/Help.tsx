@@ -32,8 +32,8 @@ const SECTIONS: Section[] = [
   {
     tour: 'confirm',
     roles: ['admin'],
-    title: ['To confirm', 'ಖಚಿತಪಡಿಸಿ'],
-    body: ['Handwritten lines, and names no item has, wait here. Pick the item and confirm: stock goes down and the name is remembered.', 'ಕೈಬರಹದ ಸಾಲುಗಳು ಮತ್ತು ಗೊತ್ತಿಲ್ಲದ ಹೆಸರುಗಳು ಇಲ್ಲಿ ಕಾಯುತ್ತವೆ. ಸಾಮಾನು ಆರಿಸಿ ಖಚಿತಪಡಿಸಿ: ಸ್ಟಾಕ್ ಕಡಿಮೆಯಾಗುತ್ತದೆ, ಹೆಸರು ನೆನಪಿರುತ್ತದೆ.'],
+    title: ['To digitise', 'ಡಿಜಿಟೈಸ್ ಮಾಡಿ'],
+    body: ['Handwritten lines, and names no item has, wait here. Pick the item and digitise: stock goes down and the name is remembered.', 'ಕೈಬರಹದ ಸಾಲುಗಳು ಮತ್ತು ಗೊತ್ತಿಲ್ಲದ ಹೆಸರುಗಳು ಇಲ್ಲಿ ಕಾಯುತ್ತವೆ. ಸಾಮಾನು ಆರಿಸಿ ಡಿಜಿಟೈಸ್ ಮಾಡಿ: ಸ್ಟಾಕ್ ಕಡಿಮೆಯಾಗುತ್ತದೆ, ಹೆಸರು ನೆನಪಿರುತ್ತದೆ.'],
   },
   {
     tour: 'inventory',
@@ -136,8 +136,8 @@ export function HelpPage() {
         </ol>
         <p className="m-0">
           {bi(
-            'A bill made at the counter takes stock down in the shop by itself. Handwritten lines wait in To confirm until you pick the item. When an item runs low, bring it from a godown in one trip, or buy it from a supplier. When it arrives and is marked received, stock goes up again. Every change is kept, so every number can be explained.',
-            'ಕೌಂಟರ್‌ನಲ್ಲಿ ಮಾಡಿದ ಬಿಲ್ ಅಂಗಡಿಯ ಸ್ಟಾಕ್ ತಾನಾಗಿ ಕಡಿಮೆ ಮಾಡುತ್ತದೆ. ಕೈಬರಹದ ಸಾಲುಗಳು ನೀವು ಸಾಮಾನು ಆರಿಸುವವರೆಗೆ ಖಚಿತಪಡಿಸಿ ಯಲ್ಲಿ ಕಾಯುತ್ತವೆ. ಸಾಮಾನು ಮುಗಿಯುತ್ತಿದ್ದಾಗ ಗೋದಾಮಿನಿಂದ ಒಂದೇ ಓಡಾಟದಲ್ಲಿ ತರಿಸಿ, ಅಥವಾ ಸರಬರಾಜುದಾರರಿಂದ ಕೊಳ್ಳಿ. ಬಂದು “ಬಂದಿದೆ” ಎಂದು ಗುರುತಿಸಿದಾಗ ಸ್ಟಾಕ್ ಮತ್ತೆ ಹೆಚ್ಚುತ್ತದೆ. ಪ್ರತಿ ಬದಲಾವಣೆ ಉಳಿಯುತ್ತದೆ.',
+            'A bill made at the counter takes stock down in the shop by itself. Handwritten lines wait in To digitise until you pick the item. When an item runs low, bring it from a godown in one trip, or buy it from a supplier. When it arrives and is marked received, stock goes up again. Every change is kept, so every number can be explained.',
+            'ಕೌಂಟರ್‌ನಲ್ಲಿ ಮಾಡಿದ ಬಿಲ್ ಅಂಗಡಿಯ ಸ್ಟಾಕ್ ತಾನಾಗಿ ಕಡಿಮೆ ಮಾಡುತ್ತದೆ. ಕೈಬರಹದ ಸಾಲುಗಳು ನೀವು ಸಾಮಾನು ಆರಿಸುವವರೆಗೆ ಡಿಜಿಟೈಸ್ ಮಾಡಿ ಯಲ್ಲಿ ಕಾಯುತ್ತವೆ. ಸಾಮಾನು ಮುಗಿಯುತ್ತಿದ್ದಾಗ ಗೋದಾಮಿನಿಂದ ಒಂದೇ ಓಡಾಟದಲ್ಲಿ ತರಿಸಿ, ಅಥವಾ ಸರಬರಾಜುದಾರರಿಂದ ಕೊಳ್ಳಿ. ಬಂದು “ಬಂದಿದೆ” ಎಂದು ಗುರುತಿಸಿದಾಗ ಸ್ಟಾಕ್ ಮತ್ತೆ ಹೆಚ್ಚುತ್ತದೆ. ಪ್ರತಿ ಬದಲಾವಣೆ ಉಳಿಯುತ್ತದೆ.',
           )}
         </p>
       </div>

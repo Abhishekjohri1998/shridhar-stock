@@ -114,7 +114,7 @@ export function SettingsPage() {
     try {
       const r = await http.post<{ newBills: number; posted: number; reversed: number; toConfirm: number }>('/admin/link/sync', {});
       setSyncMsg(
-        bi('Read. New bills: ', 'ಓದಲಾಯಿತು. ಹೊಸ ಬಿಲ್: ') + r.newBills + bi(', stock moves: ', ', ಸ್ಟಾಕ್ ಬದಲಾವಣೆ: ') + (r.posted + r.reversed) + bi(', to confirm: ', ', ಖಚಿತಪಡಿಸಬೇಕು: ') + r.toConfirm,
+        bi('Read. New bills: ', 'ಓದಲಾಯಿತು. ಹೊಸ ಬಿಲ್: ') + r.newBills + bi(', stock moves: ', ', ಸ್ಟಾಕ್ ಬದಲಾವಣೆ: ') + (r.posted + r.reversed) + bi(', to digitise: ', ', ಡಿಜಿಟೈಸ್ ಮಾಡಬೇಕು: ') + r.toConfirm,
       );
     } catch (e) {
       setSyncMsg((e as Error).message);

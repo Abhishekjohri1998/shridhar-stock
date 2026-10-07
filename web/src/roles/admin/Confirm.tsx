@@ -71,7 +71,7 @@ export function ConfirmPage() {
   };
   return (
     <>
-      <h1 className="title">{bi('Bill lines to confirm', 'ಖಚಿತಪಡಿಸಬೇಕಾದ ಬಿಲ್ ಸಾಲುಗಳು')}</h1>
+      <h1 className="title">{bi('Bill lines to digitise', 'ಡಿಜಿಟೈಸ್ ಮಾಡಬೇಕಾದ ಬಿಲ್ ಸಾಲುಗಳು')}</h1>
       <p className="muted">
         {bi(
           'Handwritten lines, and typed names that match no item, bill by bill. Pick the item: the stock goes down and the name is remembered for next time.',
@@ -135,7 +135,7 @@ function BillCard({ g, items, onDone }: { g: BillGroup; items: Map<string, Item>
           g.billNo +
           ': ' +
           r.done.length +
-          (r.done.length === 1 ? bi(' line confirmed', ' ಸಾಲು ಖಚಿತವಾಗಿದೆ') : bi(' lines confirmed', ' ಸಾಲುಗಳು ಖಚಿತವಾಗಿವೆ')) +
+          (r.done.length === 1 ? bi(' line digitised', ' ಸಾಲು ಡಿಜಿಟೈಸ್ ಆಗಿದೆ') : bi(' lines digitised', ' ಸಾಲುಗಳು ಡಿಜಿಟೈಸ್ ಆಗಿವೆ')) +
           (blank ? ' · ' + blank + bi(' still need you', ' ಇನ್ನೂ ನಿಮ್ಮ ಗಮನ ಬೇಕು') : '') +
           (r.failed.length ? ' · ' + r.failed.length + bi(' could not be done', ' ಆಗಲಿಲ್ಲ') : ''),
       );
@@ -155,11 +155,11 @@ function BillCard({ g, items, onDone }: { g: BillGroup; items: Map<string, Item>
           </span>
           <span className="muted">
             {' '}
-            · {when(g.at, lang)} · {g.lines.length} {g.lines.length === 1 ? bi('line to confirm', 'ಸಾಲು ಖಚಿತಪಡಿಸಬೇಕು') : bi('lines to confirm', 'ಸಾಲುಗಳು ಖಚಿತಪಡಿಸಬೇಕು')}
+            · {when(g.at, lang)} · {g.lines.length} {g.lines.length === 1 ? bi('line to digitise', 'ಸಾಲು ಡಿಜಿಟೈಸ್ ಮಾಡಬೇಕು') : bi('lines to digitise', 'ಸಾಲುಗಳು ಡಿಜಿಟೈಸ್ ಮಾಡಬೇಕು')}
           </span>
         </button>
         <button className="btn primary" data-tour="confirm-all" disabled={busy || filled.length === 0} onClick={confirmAll}>
-          ✓ {bi('Confirm all on this bill', 'ಈ ಬಿಲ್‌ನ ಎಲ್ಲಾ ಖಚಿತಪಡಿಸಿ')}
+          ✓ {bi('Digitise all on this bill', 'ಈ ಬಿಲ್‌ನ ಎಲ್ಲಾ ಡಿಜಿಟೈಸ್ ಮಾಡಿ')}
           {blank > 0 && filled.length > 0 && ' (' + filled.length + ')'}
         </button>
       </div>
@@ -323,7 +323,7 @@ function ConfirmLine({
       )}
       <div className="bar mt-10">
         <button className="btn" data-tour="confirm-line-ok" disabled={busy || blank} onClick={() => send(false)}>
-          ✓ {bi('This line is right', 'ಈ ಸಾಲು ಸರಿ')}
+          ✓ {bi('Digitise', 'ಡಿಜಿಟೈಸ್ ಮಾಡಿ')}
         </button>
         <button className="btn" data-tour="confirm-not-stock" disabled={busy} onClick={() => send(true)}>
           {bi('Not stock (service, note)', 'ಸ್ಟಾಕ್ ಅಲ್ಲ (ಸೇವೆ, ಟಿಪ್ಪಣಿ)')}

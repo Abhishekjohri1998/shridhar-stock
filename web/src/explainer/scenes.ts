@@ -1,7 +1,7 @@
 /**
  * The explainer's eight chapters: each a title card, then a mock screen where the cursor does the
  * steps, with a caption line in English or Kannada. Labels on the mock screens are the website's
- * own words (Places, People, To confirm, Bring from godown, …), so what you see in the video is
+ * own words (Places, People, To digitise, Bring from godown, …), so what you see in the video is
  * what you will find in the app.
  *
  * Times are in seconds from the end of the chapter's title card.
@@ -56,7 +56,7 @@ const L = {
   worker: bi('Shop worker', 'ಅಂಗಡಿ ಕೆಲಸಗಾರ'),
   you: bi('You', 'ನೀವು'),
   bills: bi('Bills', 'ಬಿಲ್‌ಗಳು'),
-  toConfirm: bi('To confirm', 'ಖಚಿತಪಡಿಸಿ'),
+  toConfirm: bi('To digitise', 'ಡಿಜಿಟೈಸ್ ಮಾಡಿ'),
   items: bi('Items & stock', 'ಸಾಮಾನು ಮತ್ತು ಸ್ಟಾಕ್'),
   bring: bi('Bring from godown', 'ಗೋದಾಮಿನಿಂದ ತರಿಸಿ'),
   purchases: bi('Purchases', 'ಖರೀದಿ'),
@@ -277,7 +277,7 @@ function signingIn(p: Pen, s: number) {
   } else if (phase === 1 || phase === 3) {
     p.tabletTop(sc, 'stock', phase === 3 ? null : 'Shridhar · ' + p.tx(L.admin), 1);
     p.text(bi('Needs you now', 'ಈಗ ನಿಮ್ಮ ಗಮನ ಬೇಕು'), sc.x + 24, sc.y + 96, { size: 22, weight: 600, display: true, color: c.ink900 });
-    [bi('Bill lines to confirm', 'ಖಚಿತಪಡಿಸಬೇಕಾದ ಸಾಲುಗಳು'), bi('Running low, all places together', 'ಮುಗಿಯುತ್ತಿದೆ, ಎಲ್ಲಾ ಕಡೆ ಸೇರಿ'), bi('Transfers on the way', 'ದಾರಿಯಲ್ಲಿರುವ ಸಾಗಣೆ')].forEach((l, i) => {
+    [bi('Bill lines to digitise', 'ಡಿಜಿಟೈಸ್ ಮಾಡಬೇಕಾದ ಸಾಲುಗಳು'), bi('Running low, all places together', 'ಮುಗಿಯುತ್ತಿದೆ, ಎಲ್ಲಾ ಕಡೆ ಸೇರಿ'), bi('Transfers on the way', 'ದಾರಿಯಲ್ಲಿರುವ ಸಾಗಣೆ')].forEach((l, i) => {
       p.box(sc.x + 24, sc.y + 126 + i * 66, sc.w - 48, 54, { fill: c.paper1, r: 14 });
       p.text(String([2, 1, 0][i]), sc.x + 46, sc.y + 153 + i * 66, { size: 24, weight: 600, display: true, color: c.gold600 });
       p.text(l, sc.x + 80, sc.y + 153 + i * 66, { size: 17, color: c.ink700, maxW: sc.w - 130 });
@@ -429,13 +429,13 @@ function writtenLines(p: Pen, s: number) {
     { label: L.bills, on: false },
     { label: L.toConfirm, on: true },
   ];
-  const r = p.appFrame(1, tabs, bi('Bill lines to confirm', 'ಖಚಿತಪಡಿಸಬೇಕಾದ ಸಾಲುಗಳು'));
+  const r = p.appFrame(1, tabs, bi('Bill lines to digitise', 'ಡಿಜಿಟೈಸ್ ಮಾಡಬೇಕಾದ ಸಾಲುಗಳು'));
   const done = s > 7.3;
   const gone = prog(s, 7.3, 7.9);
   p.slide(1 - gone, 0, -10, () => {
     p.card(r.x, r.y, 884, 64);
-    p.text(bi('Bill #77 · walk-in · 1 line to confirm', 'ಬಿಲ್ #77 · ಗ್ರಾಹಕ · 1 ಸಾಲು ಖಚಿತಪಡಿಸಬೇಕು'), r.x + 20, r.y + 32, { size: 18, weight: 600, color: c.ink900, maxW: 500 });
-    p.button(r.x + 884 - 330, r.y + 10, 314, bi('✓ Confirm all on this bill', '✓ ಈ ಬಿಲ್‌ನ ಎಲ್ಲಾ ಖಚಿತಪಡಿಸಿ'), { primary: true, press: s - 7.0, size: 16 });
+    p.text(bi('Bill #77 · walk-in · 1 line to digitise', 'ಬಿಲ್ #77 · ಗ್ರಾಹಕ · 1 ಸಾಲು ಡಿಜಿಟೈಸ್ ಮಾಡಬೇಕು'), r.x + 20, r.y + 32, { size: 18, weight: 600, color: c.ink900, maxW: 500 });
+    p.button(r.x + 884 - 330, r.y + 10, 314, bi('✓ Digitise all on this bill', '✓ ಈ ಬಿಲ್‌ನ ಎಲ್ಲಾ ಡಿಜಿಟೈಸ್ ಮಾಡಿ'), { primary: true, press: s - 7.0, size: 16 });
     p.card(r.x, r.y + 80, 884, 300);
     p.pill(r.x + 20, r.y + 112, bi('Written by hand: pick the item', 'ಕೈಯಲ್ಲಿ ಬರೆದದ್ದು: ಸಾಮಾನು ಆರಿಸಿ'), 'warn', 15);
     p.box(r.x + 20, r.y + 136, 360, 70, { fill: '#fffaf0', stroke: c.line, r: 10 });
@@ -460,7 +460,7 @@ function writtenLines(p: Pen, s: number) {
   if (done) {
     p.slide(prog(s, 7.6, 8.2), 0, 12, () => {
       p.box(r.x, r.y + 10, 884, 56, { fill: c.okWash, stroke: c.okEdge, r: 14 });
-      p.text(bi('Bill #77: 1 line confirmed', 'ಬಿಲ್ #77: 1 ಸಾಲು ಖಚಿತವಾಗಿದೆ'), r.x + 20, r.y + 38, { size: 19, weight: 600, color: c.ok700 });
+      p.text(bi('Bill #77: 1 line digitised', 'ಬಿಲ್ #77: 1 ಸಾಲು ಡಿಜಿಟೈಸ್ ಆಗಿದೆ'), r.x + 20, r.y + 38, { size: 19, weight: 600, color: c.ok700 });
     });
     p.slide(prog(s, 8.3, 8.9), 0, 16, () => p.change(r.x, r.y + 100, p.tx(L.shop) + ': Sugar', 40, 39, 'kg', prog(s, 8.9, 10)));
   }
@@ -485,7 +485,7 @@ function runningLow(p: Pen, s: number) {
     const r = p.appFrame(0, [{ label: L.today, on: true }, { label: L.reports }], bi('Needs you now', 'ಈಗ ನಿಮ್ಮ ಗಮನ ಬೇಕು'));
     const low = s > 1.2 ? 1 : 0;
     const needs: [Bi, number, boolean][] = [
-      [bi('Bill lines to confirm', 'ಖಚಿತಪಡಿಸಬೇಕಾದ ಸಾಲುಗಳು'), 0, false],
+      [bi('Bill lines to digitise', 'ಡಿಜಿಟೈಸ್ ಮಾಡಬೇಕಾದ ಸಾಲುಗಳು'), 0, false],
       [bi('Running low, all places together', 'ಮುಗಿಯುತ್ತಿದೆ, ಎಲ್ಲಾ ಕಡೆ ಸೇರಿ'), low, true],
       [bi('Below zero: count these', 'ಸೊನ್ನೆಗಿಂತ ಕಡಿಮೆ: ಎಣಿಸಿ'), 0, false],
       [bi('Transfers on the way', 'ದಾರಿಯಲ್ಲಿರುವ ಸಾಗಣೆ'), 0, false],
@@ -751,14 +751,14 @@ export const CHAPTERS: Chapter[] = [
   {
     id: 'confirm',
     title: bi('Handwritten lines', 'ಕೈಬರಹದ ಸಾಲುಗಳು'),
-    sub: bi('Bills → To confirm', 'ಬಿಲ್‌ಗಳು → ಖಚಿತಪಡಿಸಿ'),
+    sub: bi('Bills → To digitise', 'ಬಿಲ್‌ಗಳು → ಡಿಜಿಟೈಸ್ ಮಾಡಿ'),
     route: '/admin/confirm',
     tour: 'confirm',
     dur: 16,
     cues: [
-      cue(0, 'A line written by hand waits in Bills → To confirm.', 'ಕೈಯಲ್ಲಿ ಬರೆದ ಸಾಲು ಬಿಲ್‌ಗಳು → ಖಚಿತಪಡಿಸಿ ಯಲ್ಲಿ ಕಾಯುತ್ತದೆ.'),
+      cue(0, 'A line written by hand waits in Bills → To digitise.', 'ಕೈಯಲ್ಲಿ ಬರೆದ ಸಾಲು ಬಿಲ್‌ಗಳು → ಡಿಜಿಟೈಸ್ ಮಾಡಿ ಯಲ್ಲಿ ಕಾಯುತ್ತದೆ.'),
       cue(1.8, 'Pick the item it means.', 'ಅದು ಯಾವ ಸಾಮಾನು ಎಂದು ಆರಿಸಿ.'),
-      cue(5.4, '“Confirm all on this bill”: stock goes down, and the name is remembered.', '“ಈ ಬಿಲ್‌ನ ಎಲ್ಲಾ ಖಚಿತಪಡಿಸಿ”: ಸ್ಟಾಕ್ ಕಡಿಮೆಯಾಗುತ್ತದೆ, ಹೆಸರು ನೆನಪಿರುತ್ತದೆ.'),
+      cue(5.4, '“Digitise all on this bill”: stock goes down, and the name is remembered.', '“ಈ ಬಿಲ್‌ನ ಎಲ್ಲಾ ಡಿಜಿಟೈಸ್ ಮಾಡಿ”: ಸ್ಟಾಕ್ ಕಡಿಮೆಯಾಗುತ್ತದೆ, ಹೆಸರು ನೆನಪಿರುತ್ತದೆ.'),
     ],
     draw: writtenLines,
   },

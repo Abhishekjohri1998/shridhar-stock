@@ -19,8 +19,8 @@ export const STATUS: Record<string, [en: string, kn: string]> = {
   declined: ['Declined', 'ನಿರಾಕರಿಸಲಾಗಿದೆ'],
   'typed-match': ['Typed, matched', 'ಟೈಪ್, ಹೊಂದಿದೆ'],
   'read-auto': ['Handwriting read', 'ಕೈಬರಹ ಓದಲಾಗಿದೆ'],
-  'to-confirm': ['To confirm', 'ಖಚಿತಪಡಿಸಬೇಕು'],
-  confirmedLine: ['Confirmed', 'ಖಚಿತವಾಗಿದೆ'],
+  'to-confirm': ['To digitise', 'ಡಿಜಿಟೈಸ್ ಮಾಡಬೇಕು'],
+  confirmedLine: ['Digitised', 'ಡಿಜಿಟೈಸ್ ಆಗಿದೆ'],
   'not-item': ['Not stock', 'ಸ್ಟಾಕ್ ಅಲ್ಲ'],
 };
 
