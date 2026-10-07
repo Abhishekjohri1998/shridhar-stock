@@ -47,21 +47,22 @@ export function InventoryItemPage({ readOnly = false }: { readOnly?: boolean }) 
   const live = useLive('stock', 'items');
   const { value, error, reload } = useLoad(async () => {
     const none = { info: null as StockInfo | null, suppliers: [] as ItemSupplierRow[] };
-    const [locs, item, stock, cats, sups, about] = await Promise.all([
+    const [locs, item, stock, cats, sups, about, racks] = await Promise.all([
       api.locations(),
       id ? api.item(id) : Promise.resolve(null),
       id ? api.stock() : Promise.resolve([] as StockLevel[]),
       readOnly ? Promise.resolve([] as string[]) : api.categories().catch(() => [] as string[]),
       readOnly ? Promise.resolve([] as Supplier[]) : http.get<Supplier[]>('/admin/suppliers').catch(() => [] as Supplier[]),
       id && !readOnly ? api.itemInfo(id).catch(() => none) : Promise.resolve(none),
+      readOnly ? Promise.resolve({} as Record<string, string[]>) : api.racks().catch(() => ({}) as Record<string, string[]>),
     ]);
-    return { locs: locs.filter((l) => l.active), item, stock: stock.filter((s) => s.itemId === id), cats, sups, about };
+    return { locs: locs.filter((l) => l.active), item, stock: stock.filter((s) => s.itemId === id), cats, sups, about, racks };
   }, [id, live]);
 
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
-  const { item, locs, stock, cats, sups, about } = value;
-  if (!item) return readOnly ? <div className="msg err">{bi('No such item', 'ಈ ಸಾಮಾನು ಇಲ್ಲ')}</div> : <ItemDetails item={null} locs={locs} cats={cats} sups={sups} found={[]} />;
+  const { item, locs, stock, cats, sups, about, racks } = value;
+  if (!item) return readOnly ? <div className="msg err">{bi('No such item', 'ಈ ಸಾಮಾನು ಇಲ್ಲ')}</div> : <ItemDetails item={null} locs={locs} cats={cats} racks={racks} sups={sups} found={[]} />;
   const total = totalQty(item, stock);
   return (
     <>
@@ -83,7 +84,7 @@ export function InventoryItemPage({ readOnly = false }: { readOnly?: boolean }) 
       />
       </div>
       {tab === 'details' ? (
-        <ItemDetails item={item} locs={locs} cats={cats} sups={sups} found={about.suppliers} readOnly={readOnly} onSaved={reload} />
+        <ItemDetails item={item} locs={locs} cats={cats} racks={racks} sups={sups} found={about.suppliers} readOnly={readOnly} onSaved={reload} />
       ) : (
         <>
           {about.info && <StockSummary item={item} locs={locs} stock={stock} info={about.info} sups={sups} />}
@@ -98,6 +99,7 @@ function ItemDetails({
   item,
   locs,
   cats,
+  racks = {},
   sups,
   found,
   readOnly = false,
@@ -107,6 +109,8 @@ function ItemDetails({
   locs: Location[];
   /** Categories other items already use, suggested as the shop types. */
   cats: string[];
+  /** Racks other items already use, per place, suggested as the shop types. */
+  racks?: Record<string, string[]>;
   sups: Supplier[];
   /** This item's suppliers as the server sees them: added by hand, or from purchase orders. */
   found: ItemSupplierRow[];
@@ -326,7 +330,7 @@ function ItemDetails({
             {locs.map((l) => (
               <label className="field" key={l.id}>
                 <span>{t('items.rack', { place: pickName(l.name, l.nameKn, lang) })}</span>
-                <input value={form.racks[l.id] ?? ''} onChange={(e) => set({ racks: { ...form.racks, [l.id]: e.target.value } })} />
+                <SuggestInput value={form.racks[l.id] ?? ''} onChange={(v) => set({ racks: { ...form.racks, [l.id]: v } })} suggestions={(racks[l.id] ?? []).map((r) => ({ value: r }))} />
               </label>
             ))}
           </div>

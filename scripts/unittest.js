@@ -512,6 +512,22 @@ async function ledger() {
   }
 }
 
+// ---------------------------------------------------------------- rack suggestions
+{
+  const its = [
+    { racks: { shop: 'Rack 10', g1: 'Back' } },
+    { racks: { shop: 'Rack 2' } },
+    { racks: { shop: ' rack 2 ' } },
+    { racks: { shop: '  ', g1: 'Front' } },
+    { racks: {} },
+    {},
+  ];
+  const r = C.rackNames(its, 'shop');
+  check('rack suggestions: each once, in natural order', JSON.stringify(r) === JSON.stringify(['Rack 2', 'Rack 10']), JSON.stringify(r));
+  check('rack suggestions are per place', JSON.stringify(C.rackNames(its, 'g1')) === JSON.stringify(['Back', 'Front']));
+  check('rack suggestions: a place with none has none', C.rackNames(its, 'g9').length === 0);
+}
+
 ledger()
   .catch((err) => {
     failed++;

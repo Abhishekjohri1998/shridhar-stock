@@ -41,3 +41,16 @@ export function groupPick<T extends PickPlace>(lines: T[]): PickGroup<T>[] {
   if (rest.length) out.push({ key: 'other', place: '', rack: '', other: true, lines: rest });
   return out;
 }
+
+/**
+ * The racks already in use at one place, for the rack box to suggest: each once (whatever its
+ * case or spaces), blanks left out, in their natural order ("Rack 2" before "Rack 10").
+ */
+export function rackNames(items: { racks?: Record<string, string> }[], locId: string): string[] {
+  const seen = new Map<string, string>();
+  for (const it of items) {
+    const r = String(it.racks?.[locId] ?? '').trim();
+    if (r && !seen.has(r.toLowerCase())) seen.set(r.toLowerCase(), r);
+  }
+  return [...seen.values()].sort(rackCompare);
+}

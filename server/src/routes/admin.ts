@@ -10,6 +10,7 @@ import {
   itemsFromCsv,
   itemsToCsv,
   lowAtOf,
+  rackNames,
   normalisePhone,
   parseCsv,
   isActiveRole,
@@ -308,6 +309,21 @@ adminRoutes.get(
       if (c && !seen.has(c.toLowerCase())) seen.set(c.toLowerCase(), c);
     }
     res.json([...seen.values()].sort((a, b) => a.localeCompare(b)));
+  }),
+);
+
+/** The racks items already use at each place, for the rack boxes to suggest. Keyed by place id. */
+adminRoutes.get(
+  '/racks',
+  admin,
+  handler(async (_req, res) => {
+    const items = await getRepo().listItems();
+    const out: Record<string, string[]> = {};
+    for (const loc of new Set(items.flatMap((i) => Object.keys(i.racks ?? {})))) {
+      const names = rackNames(items, loc);
+      if (names.length) out[loc] = names;
+    }
+    res.json(out);
   }),
 );
 

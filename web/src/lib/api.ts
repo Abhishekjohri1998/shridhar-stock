@@ -128,6 +128,7 @@ export const api = {
   addItem: (i: ItemInput) => request<Item>('/items', send('POST', i)),
   saveItem: (id: string, i: ItemInput) => request<Item>('/items/' + id, send('PUT', i)),
   categories: () => request<string[]>('/categories'),
+  racks: () => request<Record<string, string[]>>('/racks'),
   itemInfo: (id: string) => request<{ info: StockInfo; suppliers: ItemSupplierRow[] }>('/items/' + id + '/info'),
   itemSuppliers: () => request<Record<string, ItemSupplierRow[]>>('/item-suppliers'),
 
