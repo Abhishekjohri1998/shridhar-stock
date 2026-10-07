@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import type { Vehicle } from '@stock/core';
+import type { Vehicle, VehicleKind } from '@stock/core';
 import { http } from '../../lib/api';
 import { useLoad, useSession } from '../../lib/session';
 import { Empty, Loading, useBi } from '../../components/ui';
@@ -33,7 +33,7 @@ export function VehiclesPage() {
       {value.length === 0 && <Empty>{bi('No vehicles yet. Add the shop’s tempo or auto, and transfers can pick it with its driver.', 'ಇನ್ನೂ ವಾಹನಗಳಿಲ್ಲ. ಅಂಗಡಿಯ ಟೆಂಪೋ ಅಥವಾ ಆಟೋ ಸೇರಿಸಿ, ಸಾಗಣೆಯಲ್ಲಿ ಚಾಲಕನ ಜೊತೆ ಆರಿಸಬಹುದು.')}</Empty>}
       {value.map((v) => (
         <div className="card clickable" key={v.id} onClick={() => setEditing(v)}>
-          <span className="name">{v.number}</span> {v.type && <span className="pill">{v.type}</span>}
+          <span className="name">{v.kind === 'car' ? '🚚 ' : v.kind === 'bike' ? '🏍 ' : ''}{v.number}</span> {v.type && <span className="pill">{v.type}</span>}
           {!v.active && <span className="pill bad"> {t('people.off')}</span>}
           {(v.driverName || v.driverPhone) && <div className="muted">{[v.driverName, v.driverPhone].filter(Boolean).join(' · ')}</div>}
         </div>
@@ -49,6 +49,7 @@ function VehicleForm({ vehicle, onDone }: { vehicle: Vehicle | null; onDone: () 
   const [type, setType] = useState(vehicle?.type ?? '');
   const [driverName, setDriverName] = useState(vehicle?.driverName ?? '');
   const [driverPhone, setDriverPhone] = useState(vehicle?.driverPhone ?? '');
+  const [kind, setKind] = useState<VehicleKind | undefined>(vehicle?.kind);
   const [error, setError] = useState('');
 
   const run = async (fn: () => Promise<unknown>) => {
@@ -62,7 +63,7 @@ function VehicleForm({ vehicle, onDone }: { vehicle: Vehicle | null; onDone: () 
   };
   const save = (e: FormEvent | null, active?: boolean) => {
     e?.preventDefault();
-    const body = { number, type, driverName, driverPhone, ...(active != null ? { active } : {}) };
+    const body = { number, type, driverName, driverPhone, ...(kind ? { kind } : {}), ...(active != null ? { active } : {}) };
     return run(() => (vehicle ? http.put('/admin/vehicles/' + vehicle.id, body) : http.post('/admin/vehicles', body)));
   };
 
@@ -86,6 +87,16 @@ function VehicleForm({ vehicle, onDone }: { vehicle: Vehicle | null; onDone: () 
           <span>{bi('Driver’s phone', 'ಚಾಲಕನ ಫೋನ್')}</span>
           <input inputMode="tel" value={driverPhone} onChange={(e) => setDriverPhone(e.target.value)} />
         </label>
+      </div>
+      <div className="field">
+        <span>{bi('For deliveries', 'ಡೆಲಿವರಿಗೆ')}</span>
+        <div className="chips" data-tour="vehicles-kind">
+          {(['bike', 'car'] as const).map((k) => (
+            <button type="button" key={k} className={'chip ' + (kind === k ? 'on' : '')} onClick={() => setKind(k)}>
+              {k === 'bike' ? '🏍 ' + bi('Bike', 'ಬೈಕ್') : '🚚 ' + bi('4-wheeler', '4 ಚಕ್ರ')}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="bar">
         <button className="btn primary">{t('common.save')}</button>

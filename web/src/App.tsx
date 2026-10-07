@@ -11,7 +11,7 @@ import { AdminHome } from './roles/admin/Home';
 import { ConfirmPage } from './roles/admin/Confirm';
 import { BillsPage, SettingsPage } from './roles/admin/Flows';
 import { RefillPage, TransfersPage } from './roles/admin/Moving';
-import { GodownHome, WorkerHome } from './roles/RoleScreens';
+import { DeliveriesHome, GodownHome, WorkerHome } from './roles/RoleScreens';
 import { InventoryPage } from './pages/admin/Inventory';
 import { InventoryItemPage } from './pages/admin/InventoryItem';
 import { LowToast } from './components/LowToast';
@@ -33,6 +33,7 @@ const PlacesPage = named(() => import('./pages/admin/Places'), 'PlacesPage');
 const PeoplePage = named(() => import('./pages/admin/People'), 'PeoplePage');
 const FilesPage = named(() => import('./pages/admin/Files'), 'FilesPage');
 const VehiclesPage = named(() => import('./pages/admin/Vehicles'), 'VehiclesPage');
+const DeliveriesPage = named(() => import('./pages/admin/Deliveries'), 'DeliveriesPage');
 const RecordPage = named(() => import('./explainer/Record'), 'RecordPage');
 
 /** A screen inside one menu place, shown as a tab. */
@@ -62,7 +63,7 @@ const ADMIN: Place[] = [
     kn: 'ಖರೀದಿ ಮತ್ತು ಸಾಗಣೆ',
     icon: 'cart',
     tour: 'nav-move',
-    tabs: [tab('/admin/purchases', 'Purchases', 'ಖರೀದಿ'), tab('/admin/transfers', 'Transfers', 'ಸಾಗಣೆ')],
+    tabs: [tab('/admin/purchases', 'Purchases', 'ಖರೀದಿ'), tab('/admin/transfers', 'Transfers', 'ಸಾಗಣೆ'), tab('/admin/deliveries', 'Deliveries', 'ಡೆಲಿವರಿ')],
   },
   {
     to: '/admin/places',
@@ -83,7 +84,7 @@ const ADMIN: Place[] = [
 const PRIMARY = ['/admin', '/admin/bills', '/admin/inventory'];
 
 /** The worker's three views, as tabs. The godown job is the middle one. */
-const WORKER_TABS: Tab[] = [tab('/worker', 'Pick list', 'ಪಟ್ಟಿ'), tab('/worker/godown', 'Godown', 'ಗೋದಾಮು'), tab('/worker/screen', 'TV screen', 'ಟಿವಿ ಪರದೆ')];
+const WORKER_TABS: Tab[] = [tab('/worker', 'Pick list', 'ಪಟ್ಟಿ'), tab('/worker/godown', 'Godown', 'ಗೋದಾಮು'), tab('/worker/deliveries', 'Deliveries', 'ಡೆಲಿವರಿ'), tab('/worker/screen', 'TV screen', 'ಟಿವಿ ಪರದೆ')];
 
 const inTab = (path: string, t: Tab) => path === t.to || (t.to === '/admin/inventory' && path.startsWith('/admin/inventory/'));
 const placeOf = (path: string) => ADMIN.find((p) => p.tabs.some((t) => inTab(path, t)));
@@ -421,6 +422,7 @@ function Shell() {
                 <Route path="/admin/refill" element={<RefillPage />} />
                 <Route path="/admin/purchases" element={<PurchasesPage />} />
                 <Route path="/admin/transfers" element={<TransfersPage />} />
+                <Route path="/admin/deliveries" element={<DeliveriesPage />} />
                 <Route path="/admin/places" element={<PlacesPage />} />
                 <Route path="/admin/people" element={<PeoplePage />} />
                 <Route path="/admin/vehicles" element={<VehiclesPage />} />
@@ -430,7 +432,6 @@ function Shell() {
                 {/* Old links and bookmarks still land somewhere sensible. */}
                 <Route path="/admin/setup" element={<Navigate to="/admin/places" replace />} />
                 <Route path="/admin/move" element={<Navigate to="/admin/purchases" replace />} />
-                <Route path="/admin/deliveries" element={<Navigate to="/admin/bills" replace />} />
                 <Route path="/admin/requests" element={<Navigate to="/admin" replace />} />
                 <Route path="/admin/items" element={<Navigate to="/admin/inventory" replace />} />
                 <Route path="/admin/items/:id" element={<ToInventory base="/admin/inventory" />} />
@@ -441,6 +442,7 @@ function Shell() {
               <>
                 <Route path="/worker" element={<WorkerHome />} />
                 <Route path="/worker/godown" element={<GodownHome />} />
+                <Route path="/worker/deliveries" element={<DeliveriesHome />} />
                 <Route path="/worker/screen" element={<WorkerHome screen />} />
                 <Route path="/godown" element={<Navigate to="/worker/godown" replace />} />
               </>

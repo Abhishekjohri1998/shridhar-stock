@@ -18,8 +18,8 @@ export const workerTour = tour('worker', ['Pick list', 'ಪಟ್ಟಿ'], [
   ),
   step(
     'section-tabs',
-    ['Pick list · Godown · TV screen', 'ಪಟ್ಟಿ · ಗೋದಾಮು · ಟಿವಿ ಪರದೆ'],
-    ['Three tabs: the bills to fetch, the godown job, and the big screen.', 'ಮೂರು ಟ್ಯಾಬ್: ತರಬೇಕಾದ ಬಿಲ್, ಗೋದಾಮಿನ ಕೆಲಸ, ದೊಡ್ಡ ಪರದೆ.'],
+    ['Pick list · Godown · Deliveries · TV screen', 'ಪಟ್ಟಿ · ಗೋದಾಮು · ಡೆಲಿವರಿ · ಟಿವಿ ಪರದೆ'],
+    ['Four tabs: the bills to fetch, the godown job, your home deliveries, and the big screen.', 'ನಾಲ್ಕು ಟ್ಯಾಬ್: ತರಬೇಕಾದ ಬಿಲ್, ಗೋದಾಮಿನ ಕೆಲಸ, ನಿಮ್ಮ ಮನೆ ಡೆಲಿವರಿ, ದೊಡ್ಡ ಪರದೆ.'],
     ['Godown is what the shop asks a godown to send, and what is coming in. The TV screen is large, for the second monitor at the counter.', 'ಗೋದಾಮು: ಅಂಗಡಿ ಕಳುಹಿಸಲು ಕೇಳಿದ್ದು ಮತ್ತು ಬರುತ್ತಿರುವುದು. ಟಿವಿ ಪರದೆ ದೊಡ್ಡದು, ಕೌಂಟರ್‌ನ ಎರಡನೇ ಮಾನಿಟರ್‌ಗೆ.'],
     ['That view opens.', 'ಆ ನೋಟ ತೆರೆಯುತ್ತದೆ.'],
   ),

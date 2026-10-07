@@ -61,7 +61,7 @@ for (const t of all) {
 }
 
 // The router's mapping and the help page's "Show me".
-for (const p of ['/admin', '/admin/reports', '/admin/bills', '/admin/confirm', '/admin/inventory', '/admin/inventory/it_1', '/admin/refill', '/admin/purchases', '/admin/transfers', '/admin/places', '/admin/people', '/admin/vehicles', '/admin/files', '/admin/settings', '/worker', '/worker/screen', '/worker/godown']) {
+for (const p of ['/admin', '/admin/reports', '/admin/bills', '/admin/confirm', '/admin/inventory', '/admin/inventory/it_1', '/admin/refill', '/admin/purchases', '/admin/transfers', '/admin/deliveries', '/admin/places', '/admin/people', '/admin/vehicles', '/admin/files', '/admin/settings', '/worker', '/worker/screen', '/worker/godown', '/worker/deliveries']) {
   const id = tours.tourForPath(p);
   check(p + ' has a tour', !!id && !!tours.TOURS[id], id);
 }

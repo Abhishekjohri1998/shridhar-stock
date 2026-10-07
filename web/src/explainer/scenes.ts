@@ -783,8 +783,9 @@ export const CHAPTERS: Chapter[] = [
     cues: [
       cue(0, 'Buy & move → Purchases → “+ New order”, then add the item.', 'ಖರೀದಿ ಮತ್ತು ಸಾಗಣೆ → ಖರೀದಿ → “+ ಹೊಸ ಆರ್ಡರ್”, ನಂತರ ಸಾಮಾನು ಸೇರಿಸಿ.'),
       cue(3.2, 'Its usual supplier is suggested. Add quantity and cost, then “Save order”.', 'ಯಾವಾಗಲೂ ಕೊಡುವವರು ಕಾಣುತ್ತಾರೆ. ಪ್ರಮಾಣ, ಬೆಲೆ ಹಾಕಿ “ಆರ್ಡರ್ ಉಳಿಸಿ”.'),
-      cue(8.4, 'When the goods come, “Mark received”: stock goes up in that place.', 'ಸಾಮಾನು ಬಂದಾಗ “ಬಂದಿದೆ ಎಂದು ಗುರುತಿಸಿ”: ಆ ಸ್ಥಳದ ಸ್ಟಾಕ್ ಹೆಚ್ಚುತ್ತದೆ.'),
-      cue(12.2, 'Any time you are unsure, press ? for that screen’s tour.', 'ಗೊಂದಲವಾದರೆ, ಆ ಪುಟದ ಪರಿಚಯಕ್ಕೆ ? ಒತ್ತಿ.'),
+      cue(6.8, 'When the goods come, “Mark received”: stock goes up in that place.', 'ಸಾಮಾನು ಬಂದಾಗ “ಬಂದಿದೆ ಎಂದು ಗುರುತಿಸಿ”: ಆ ಸ್ಥಳದ ಸ್ಟಾಕ್ ಹೆಚ್ಚುತ್ತದೆ.'),
+      cue(10.0, 'Home delivery: a bill’s “🏠 Deliver”, a pin, a worker; watch them live on the map.', 'ಮನೆ ಡೆಲಿವರಿ: ಬಿಲ್‌ನ “🏠 ಡೆಲಿವರಿ”, ಪಿನ್, ಕೆಲಸಗಾರ; ನಕ್ಷೆಯಲ್ಲಿ ನೇರ ನೋಡಿ.'),
+      cue(13.0, 'Any time you are unsure, press ? for that screen’s tour.', 'ಗೊಂದಲವಾದರೆ, ಆ ಪುಟದ ಪರಿಚಯಕ್ಕೆ ? ಒತ್ತಿ.'),
     ],
     draw: buying,
   },

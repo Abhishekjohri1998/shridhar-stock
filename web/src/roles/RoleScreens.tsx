@@ -390,3 +390,258 @@ function ReceiveCard({ t, nm, dq, onDone }: { t: Transfer; nm: (id: string) => s
     </div>
   );
 }
+
+// ---------------------------------------------------------------- deliveries (any worker)
+
+type WorkerDelivery = Omit<Delivery, 'track'>;
+
+/**
+ * Inside the tablet/phone app the stock screen is a WebView: the app asks Android for location
+ * permission when the page says so, and answers with a 'location-permission' event. In a plain
+ * browser the browser asks by itself, so there is nothing to wait for.
+ */
+function askLocationPermission(): Promise<'granted' | 'denied' | 'unknown'> {
+  const rn = (window as unknown as { ReactNativeWebView?: { postMessage: (s: string) => void } }).ReactNativeWebView;
+  if (!rn) return Promise.resolve('unknown');
+  return new Promise((resolve) => {
+    const done = (r: 'granted' | 'denied' | 'unknown') => {
+      clearTimeout(timer);
+      window.removeEventListener('location-permission', onAnswer);
+      resolve(r);
+    };
+    const onAnswer = (e: Event) => done((e as CustomEvent<{ granted?: boolean }>).detail?.granted ? 'granted' : 'denied');
+    const timer = setTimeout(() => done('unknown'), 10_000);
+    window.addEventListener('location-permission', onAnswer);
+    rn.postMessage(JSON.stringify({ type: 'need-location' }));
+  });
+}
+
+/** How often the phone sends where it is. */
+const SEND_EVERY_MS = 10_000;
+
+/**
+ * While a delivery is on the way and this screen is open: watch the phone's position and send the
+ * latest one every ~10 s. Keeps the screen awake where the browser allows.
+ */
+function useSharePosition(id: string | null, onProblem: (msg: string) => void) {
+  const bi = useBi();
+  const [sending, setSending] = useState(false);
+  useEffect(() => {
+    if (!id) return;
+    let stopped = false;
+    let watch: number | null = null;
+    let latest: { lat: number; lng: number } | null = null;
+    let sentKey = '';
+    let lock: { release: () => Promise<void> } | null = null;
+    const send = () => {
+      if (!latest || stopped) return;
+      const key = latest.lat.toFixed(6) + ',' + latest.lng.toFixed(6);
+      if (key === sentKey) return;
+      sentKey = key;
+      http.post('/worker/deliveries/' + id + '/position', latest).catch(() => {
+        sentKey = '';
+      });
+    };
+    const timer = setInterval(send, SEND_EVERY_MS);
+    void (async () => {
+      const perm = await askLocationPermission();
+      if (stopped) return;
+      if (perm === 'denied') {
+        onProblem(bi('Location is not allowed. Allow it for this app in the phone’s Settings, then open this screen again.', 'ಸ್ಥಳ ಅನುಮತಿ ಇಲ್ಲ. ಫೋನಿನ ಸೆಟ್ಟಿಂಗ್ಸ್‌ನಲ್ಲಿ ಈ ಆ್ಯಪ್‌ಗೆ ಅನುಮತಿಸಿ, ಈ ಪರದೆ ಮತ್ತೆ ತೆರೆಯಿರಿ.'));
+        return;
+      }
+      if (!navigator.geolocation) {
+        onProblem(bi('This phone cannot share its location.', 'ಈ ಫೋನ್ ಸ್ಥಳ ಹಂಚಲು ಆಗುವುದಿಲ್ಲ.'));
+        return;
+      }
+      let first = true;
+      watch = navigator.geolocation.watchPosition(
+        (p) => {
+          latest = { lat: p.coords.latitude, lng: p.coords.longitude };
+          setSending(true);
+          onProblem('');
+          if (first) {
+            first = false;
+            send();
+          }
+        },
+        (e) => {
+          setSending(false);
+          onProblem(
+            e.code === e.PERMISSION_DENIED
+              ? bi('Location is not allowed. Allow it in the phone’s Settings, then open this screen again.', 'ಸ್ಥಳ ಅನುಮತಿ ಇಲ್ಲ. ಫೋನಿನ ಸೆಟ್ಟಿಂಗ್ಸ್‌ನಲ್ಲಿ ಅನುಮತಿಸಿ, ಈ ಪರದೆ ಮತ್ತೆ ತೆರೆಯಿರಿ.')
+              : bi('Cannot find the location right now. Turn on GPS.', 'ಈಗ ಸ್ಥಳ ಸಿಗುತ್ತಿಲ್ಲ. GPS ಆನ್ ಮಾಡಿ.'),
+          );
+        },
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 30_000 },
+      );
+      try {
+        const wl = (navigator as unknown as { wakeLock?: { request: (t: 'screen') => Promise<{ release: () => Promise<void> }> } }).wakeLock;
+        if (wl) lock = await wl.request('screen');
+      } catch {
+        /* the screen may sleep; the banner says to keep it open */
+      }
+    })();
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      if (watch != null) navigator.geolocation.clearWatch(watch);
+      void lock?.release().catch(() => undefined);
+      setSending(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+  return sending;
+}
+
+/** The phone's own map app: geo: inside the tablet app, Google Maps directions in a browser. */
+function mapsLink(d: WorkerDelivery): string {
+  const inApp = !!(window as unknown as { ReactNativeWebView?: unknown }).ReactNativeWebView;
+  if (d.lat != null && d.lng != null) {
+    return inApp ? 'geo:' + d.lat + ',' + d.lng + '?q=' + d.lat + ',' + d.lng + '(' + encodeURIComponent(d.name) + ')' : 'https://www.google.com/maps/dir/?api=1&destination=' + d.lat + ',' + d.lng;
+  }
+  return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(d.address);
+}
+
+/** Worker → Deliveries: their own deliveries, Start (shares location), Delivered or Couldn't deliver. */
+export function DeliveriesHome() {
+  const bi = useBi();
+  const { lang } = useSession();
+  const live = useLive('delivery');
+  const { value, error, reload } = useLoad(() => http.get<WorkerDelivery[]>('/worker/deliveries'), [live]);
+  const [problem, setProblem] = useState('');
+  const [msg, setMsg] = useState('');
+  const [closing, setClosing] = useState<{ id: string; ok: boolean } | null>(null);
+  const [amount, setAmount] = useState('');
+  const [reason, setReason] = useState('');
+  const onWay = value?.find((d) => d.status === 'out') ?? null;
+  const sending = useSharePosition(onWay?.id ?? null, setProblem);
+
+  if (error) return <div className="msg err">{error}</div>;
+  if (!value) return <Loading />;
+
+  const act = async (fn: () => Promise<unknown>) => {
+    setMsg('');
+    try {
+      await fn();
+      setClosing(null);
+      reload();
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  };
+
+  return (
+    <>
+      <h1 className="title">{bi('Deliveries', 'ಡೆಲಿವರಿ')}</h1>
+      {onWay && (
+        <div className={'share-banner' + (sending ? ' on' : '')} data-tour="worker-share" role="status">
+          <span className="share-dot" aria-hidden />
+          <div>
+            <b>{bi('Sharing your location: keep this screen open', 'ನಿಮ್ಮ ಸ್ಥಳ ಹಂಚಲಾಗುತ್ತಿದೆ: ಈ ಪರದೆ ತೆರೆದೇ ಇಡಿ')}</b>
+            <div className="muted">{bi('If the phone locks, the shop stops seeing you. It stops by itself when you mark it done.', 'ಫೋನ್ ಲಾಕ್ ಆದರೆ ಅಂಗಡಿಗೆ ಕಾಣುವುದಿಲ್ಲ. ಮುಗಿಸಿದಾಗ ತಾನೇ ನಿಲ್ಲುತ್ತದೆ.')}</div>
+          </div>
+        </div>
+      )}
+      {problem && <div className="msg err">{problem}</div>}
+      {msg && <div className="msg err">{msg}</div>}
+      {value.length === 0 && <Empty tour="worker-deliveries">{bi('No deliveries for you right now. The shop assigns them; they appear here by themselves.', 'ಈಗ ನಿಮಗೆ ಡೆಲಿವರಿ ಇಲ್ಲ. ಅಂಗಡಿ ಕೊಟ್ಟಾಗ ಇಲ್ಲಿ ತಾನಾಗಿ ಬರುತ್ತದೆ.')}</Empty>}
+      {value.map((d) => {
+        const active = d.status === 'pending' || d.status === 'out';
+        return (
+          <div key={d.id} className={'card' + (active ? '' : ' faded')} data-tour="worker-deliveries">
+            <div className="bar between">
+              <span className="name">
+                {d.vehicleKind === 'car' ? '🚚' : '🏍'} {d.name}
+                {d.billNo ? <span className="muted"> · #{d.billNo}</span> : null}
+              </span>
+              <Status s={d.status} label={d.status === 'pending' ? bi('Assigned', 'ನೇಮಿಸಲಾಗಿದೆ') : statusWord(d.status, lang)} />
+            </div>
+            <div>{d.address}</div>
+            {d.landmark && <div className="muted">{d.landmark}</div>}
+            <p className="muted">
+              {d.itemCount != null && d.itemCount + bi(' item lines', ' ಸಾಲು')}
+              {d.amountDue > 0 && (
+                <>
+                  {' · '}
+                  {bi('Collect', 'ಪಡೆಯಬೇಕು')} <b>{formatRupees(d.amountDue)}</b>
+                </>
+              )}
+              {d.collected != null && ' · ' + bi('Collected', 'ಪಡೆದದ್ದು') + ' ' + formatRupees(d.collected)}
+              {d.reason && ' · “' + d.reason + '”'}
+            </p>
+            {active && (
+              <div className="bar">
+                {d.phone && (
+                  <a className="btn" href={'tel:' + d.phone}>
+                    📞 {bi('Call', 'ಕರೆ')}
+                  </a>
+                )}
+                <a className="btn" href={mapsLink(d)} target="_blank" rel="noreferrer" data-tour="worker-maps">
+                  🧭 {bi('Open in Maps', 'ನಕ್ಷೆಯಲ್ಲಿ ತೆರೆಯಿರಿ')}
+                </a>
+                {d.status === 'pending' && (
+                  <button
+                    className="btn primary"
+                    disabled={!!onWay}
+                    onClick={() => {
+                      setProblem('');
+                      void act(() => http.post('/worker/deliveries/' + d.id + '/start', {}));
+                    }}
+                    data-tour="worker-start"
+                  >
+                    ▶ {bi('Start delivery', 'ಡೆಲಿವರಿ ಶುರು')}
+                  </button>
+                )}
+                {d.status === 'out' && (
+                  <>
+                    <button
+                      className="btn primary"
+                      onClick={() => {
+                        setClosing({ id: d.id, ok: true });
+                        setAmount(String(d.amountDue || ''));
+                      }}
+                    >
+                      ✓ {bi('Delivered', 'ತಲುಪಿಸಿದೆ')}
+                    </button>
+                    <button
+                      className="btn danger"
+                      onClick={() => {
+                        setClosing({ id: d.id, ok: false });
+                        setReason('');
+                      }}
+                    >
+                      ✕ {bi('Couldn’t deliver', 'ತಲುಪಿಸಲಾಗಲಿಲ್ಲ')}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+            {closing?.id === d.id && closing.ok && (
+              <div className="bar">
+                <label className="field grow">
+                  <span>{bi('Amount collected ₹', 'ಪಡೆದ ಮೊತ್ತ ₹')}</span>
+                  <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
+                </label>
+                <button className="btn primary" onClick={() => act(() => http.post('/worker/deliveries/' + d.id + '/delivered', { collected: Math.max(0, Number(amount) || 0) }))}>
+                  {bi('Save', 'ಉಳಿಸಿ')}
+                </button>
+              </div>
+            )}
+            {closing?.id === d.id && !closing.ok && (
+              <div className="bar">
+                <label className="field grow">
+                  <span>{bi('Why?', 'ಏಕೆ?')}</span>
+                  <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={bi('Door locked, wrong address…', 'ಬಾಗಿಲು ಬೀಗ, ತಪ್ಪು ವಿಳಾಸ…')} />
+                </label>
+                <button className="btn danger" disabled={!reason.trim()} onClick={() => act(() => http.post('/worker/deliveries/' + d.id + '/failed', { reason }))}>
+                  {bi('Save', 'ಉಳಿಸಿ')}
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}

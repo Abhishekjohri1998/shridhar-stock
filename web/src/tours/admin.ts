@@ -490,6 +490,13 @@ export const transfersTour = tour('transfers', ['Transfers', 'ಸಾಗಣೆ'],
     ['Stops a request you no longer need.', 'ಬೇಡವಾದ ಬೇಡಿಕೆಯನ್ನು ನಿಲ್ಲಿಸುತ್ತದೆ.'],
     ['It is cancelled and leaves the godown’s screen. No stock moves.', 'ರದ್ದಾಗಿ ಗೋದಾಮಿನ ಪರದೆಯಿಂದ ಹೋಗುತ್ತದೆ. ಸ್ಟಾಕ್ ಬದಲಾಗುವುದಿಲ್ಲ.'],
   ),
+  step(
+    'deliveries-new',
+    ['Deliveries', 'ಡೆಲಿವರಿ'],
+    ['Home deliveries by a worker, with a pin on the map and 🏍 bike or 🚚 4-wheeler.', 'ಕೆಲಸಗಾರರ ಮನೆ ಡೆಲಿವರಿ, ನಕ್ಷೆಯಲ್ಲಿ ಪಿನ್ ಮತ್ತು 🏍 ಬೈಕ್ ಅಥವಾ 🚚 4 ಚಕ್ರ.'],
+    ['The live map shows each worker on the way, gliding as their phone reports.', 'ದಾರಿಯಲ್ಲಿರುವ ಕೆಲಸಗಾರರನ್ನು ನಕ್ಷೆ ನೇರವಾಗಿ ತೋರಿಸುತ್ತದೆ.'],
+    ['“+ New delivery” opens the form; a bill’s “🏠 Deliver” fills it.', '“+ ಹೊಸ ಡೆಲಿವರಿ” ಫಾರ್ಮ್ ತೆರೆಯುತ್ತದೆ; ಬಿಲ್‌ನ “🏠 ಡೆಲಿವರಿ” ತುಂಬಿಸುತ್ತದೆ.'],
+  ),
   helpStep,
 ]);
 

@@ -57,7 +57,7 @@ const SECTIONS: Section[] = [
     tour: 'transfers',
     roles: ['admin'],
     title: ['Transfers', 'ಸಾಗಣೆ'],
-    body: ['Goods between the shop and godowns, with vehicle and driver. Asked, then sent by the godown, then received at the shop.', 'ಅಂಗಡಿ ಮತ್ತು ಗೋದಾಮುಗಳ ನಡುವೆ ಸಾಮಾನು, ವಾಹನ ಮತ್ತು ಚಾಲಕ ಜೊತೆ. ಕೇಳಿದ್ದು, ಗೋದಾಮು ಕಳುಹಿಸಿದ್ದು, ಅಂಗಡಿಗೆ ಬಂದದ್ದು.'],
+    body: ['Goods between the shop and godowns, with vehicle and driver. Asked, then sent by the godown, then received at the shop. Deliveries: a bill’s “🏠 Deliver” sends it home with a worker, 🏍 or 🚚, and the live map shows them on the way.', 'ಅಂಗಡಿ ಮತ್ತು ಗೋದಾಮುಗಳ ನಡುವೆ ಸಾಮಾನು, ವಾಹನ ಮತ್ತು ಚಾಲಕ ಜೊತೆ. ಕೇಳಿದ್ದು, ಗೋದಾಮು ಕಳುಹಿಸಿದ್ದು, ಅಂಗಡಿಗೆ ಬಂದದ್ದು. ಡೆಲಿವರಿ: ಬಿಲ್‌ನ “🏠 ಡೆಲಿವರಿ” ಕೆಲಸಗಾರರ ಮೂಲಕ ಮನೆಗೆ, 🏍 ಅಥವಾ 🚚; ನಕ್ಷೆ ದಾರಿಯಲ್ಲಿ ತೋರಿಸುತ್ತದೆ.'],
   },
   {
     tour: 'setup',

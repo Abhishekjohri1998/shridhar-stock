@@ -17,6 +17,7 @@ import { itemName, placeName, qtyText, useCatalog } from '../../lib/catalog';
 import { useLoad, useSession } from '../../lib/session';
 import { statusWord } from '../../lib/words';
 import { Empty, InkView, Loading, Money, Status, useBi, when, Table } from '../../components/ui';
+import { PinPicker } from '../../components/PinPicker';
 
 // ---------------------------------------------------------------- bills from billing
 
@@ -55,6 +56,13 @@ export function BillsPage() {
               {b.balance > 0 && <span className="pill warn"> {bi('due', 'ಬಾಕಿ')} {formatRupees(b.balance)}</span>}
             </span>
           </div>
+          {!b.cancelled && (
+            <div className="bar">
+              <Link className="btn" to={'/admin/deliveries?bill=' + b.no} data-tour="bills-deliver">
+                🏠 {bi('Deliver', 'ಡೆಲಿವರಿ')}
+              </Link>
+            </div>
+          )}
           <Table className="list plain">
             <tbody>
               {b.lines.map((l) => (
@@ -93,7 +101,15 @@ export function SettingsPage() {
   const { lang } = useSession();
   const [version, setVersion] = useState(0);
   const [syncMsg, setSyncMsg] = useState('');
-  const { value: settings } = useLoad(() => http.get<{ roundTo: number }>('/admin/settings'), [version]);
+  const { value: settings } = useLoad(() => http.get<{ roundTo: number; bikeMaxItems: number; bikeMaxAmount: number; shopLat?: number; shopLng?: number }>('/admin/settings'), [version]);
+  const saveSettings = async (patch: Record<string, number>) => {
+    try {
+      await http.put('/admin/settings', patch);
+    } catch (e) {
+      setSyncMsg((e as Error).message);
+    }
+    setVersion((v) => v + 1);
+  };
   const setRound = async (roundTo: number) => {
     try {
       await http.put('/admin/settings', { roundTo });
@@ -156,6 +172,7 @@ export function SettingsPage() {
           ))}
         </div>
       </div>
+      {settings && <DeliverySettings s={settings} save={saveSettings} />}
     </>
   );
 }
@@ -163,4 +180,40 @@ export function SettingsPage() {
 export function useItemsName() {
   const { lang } = useSession();
   return (n: { nameEn: string; nameKn: string }) => pickName(n.nameEn, n.nameKn, lang);
+}
+
+// ---------------------------------------------------------------- settings: home deliveries
+
+/** The Bike / 4-wheeler rule and the shop's place on the map. */
+function DeliverySettings({ s, save }: { s: { bikeMaxItems: number; bikeMaxAmount: number; shopLat?: number; shopLng?: number }; save: (patch: Record<string, number>) => Promise<void> }) {
+  const bi = useBi();
+  const [items, setItems] = useState(String(s.bikeMaxItems));
+  const [amount, setAmount] = useState(String(s.bikeMaxAmount));
+  const [pinOpen, setPinOpen] = useState(false);
+  const shop = s.shopLat != null && s.shopLng != null ? { lat: s.shopLat, lng: s.shopLng } : null;
+  return (
+    <div className="card">
+      <h2 className="subtitle mt-0" data-tour="settings-delivery">{bi('Home delivery', 'ಮನೆ ಡೆಲಿವರಿ')}</h2>
+      <p>{bi('A delivery is suggested by 🏍 bike when it has at most this many item lines and this amount; otherwise by 🚚 4-wheeler. The admin can switch it with one tap.', 'ಇಷ್ಟು ಸಾಲು ಮತ್ತು ಇಷ್ಟು ಮೊತ್ತದವರೆಗೆ 🏍 ಬೈಕ್; ಹೆಚ್ಚಿದ್ದರೆ 🚚 4 ಚಕ್ರ. ಒಂದು ಒತ್ತಿನಲ್ಲಿ ಬದಲಿಸಬಹುದು.')}</p>
+      <div className="grid2">
+        <label className="field">
+          <span>{bi('Bike: up to item lines', 'ಬೈಕ್: ಸಾಲುಗಳವರೆಗೆ')}</span>
+          <input inputMode="numeric" value={items} onChange={(e) => setItems(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>{bi('Bike: up to ₹', 'ಬೈಕ್: ₹ ವರೆಗೆ')}</span>
+          <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        </label>
+      </div>
+      <div className="bar">
+        <button className="btn" onClick={() => save({ bikeMaxItems: Math.max(0, Math.round(Number(items) || 0)), bikeMaxAmount: Math.max(0, Number(amount) || 0) })}>
+          {bi('Save the rule', 'ನಿಯಮ ಉಳಿಸಿ')}
+        </button>
+        <button className="btn" onClick={() => setPinOpen(!pinOpen)}>
+          🏪 {shop ? bi('Move the shop on the map', 'ನಕ್ಷೆಯಲ್ಲಿ ಅಂಗಡಿ ಸರಿಸಿ') : bi('Put the shop on the map', 'ಅಂಗಡಿಯನ್ನು ನಕ್ಷೆಯಲ್ಲಿ ಇಡಿ')}
+        </button>
+      </div>
+      {pinOpen && <PinPicker value={shop} icon="🏪" onChange={(p) => void save({ shopLat: p.lat, shopLng: p.lng })} />}
+    </div>
+  );
 }

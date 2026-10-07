@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { hasToken, http } from './api';
 
-export type LiveKind = 'bills' | 'stock' | 'transfers' | 'pos' | 'items' | 'link' | 'low';
+export type LiveKind = 'bills' | 'stock' | 'transfers' | 'pos' | 'items' | 'link' | 'low' | 'delivery';
 
 /**
  * One live stream per tab, shared by every screen on it.
