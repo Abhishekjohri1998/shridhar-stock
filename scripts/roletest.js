@@ -98,7 +98,7 @@ async function main() {
     eq('an old delivery login is moved to shop worker', (await send('PUT', '/people/p_olddelivery', T.admin, { role: 'worker' })).status, 200);
     eq('and then signs in', (await call('/auth/login', null, { phone: '9111100012', pin: '2468' })).status, 200);
     eq('nobody can be moved to a removed role', (await send('PUT', '/people/p_worker', T.admin, { role: 'customer' })).status, 400);
-    for (const p of ['/delivery/mine', '/customer/bills', '/customer/catalogue', '/customer/orders', '/admin/deliveries', '/admin/orders']) {
+    for (const p of ['/delivery/mine', '/customer/bills', '/customer/catalogue', '/customer/orders', '/admin/orders']) {
       eq(p + ' is gone', (await call(p, T.admin)).status, 404);
     }
     eq('demo PIN works like a real login', (await call('/auth/login', null, { phone: '9000000003', pin: '1111' })).status, 200);

@@ -50,7 +50,15 @@ export async function seedAdmin(repo: InvRepo): Promise<void> {
 /** The shop's settings, with the defaults for anything never set. Kept in meta, id "settings". */
 export async function settingsOf(repo: InvRepo): Promise<ShopSettings> {
   const doc = await repo.getDoc<{ id: string } & Partial<ShopSettings>>('meta', 'settings');
-  return { ...DEFAULT_SETTINGS, ...(doc?.roundTo != null ? { roundTo: doc.roundTo } : {}) };
+  const out: ShopSettings = { ...DEFAULT_SETTINGS };
+  if (doc?.roundTo != null) out.roundTo = doc.roundTo;
+  if (typeof doc?.bikeMaxItems === 'number') out.bikeMaxItems = doc.bikeMaxItems;
+  if (typeof doc?.bikeMaxAmount === 'number') out.bikeMaxAmount = doc.bikeMaxAmount;
+  if (typeof doc?.shopLat === 'number' && typeof doc?.shopLng === 'number') {
+    out.shopLat = doc.shopLat;
+    out.shopLng = doc.shopLng;
+  }
+  return out;
 }
 
 /** Places in the order every screen lists them: the shop first, then godowns by name. */

@@ -437,7 +437,7 @@ roleRoutes.get(
   requireRole('admin', 'worker', 'godown'),
   handler(async (_req, res) => {
     const all = await getRepo().listDocs<Vehicle>('vehicles');
-    res.json(all.filter((v) => v.active).sort((a, b) => a.number.localeCompare(b.number)).map((v) => ({ number: v.number, type: v.type, driverName: v.driverName })));
+    res.json(all.filter((v) => v.active).sort((a, b) => a.number.localeCompare(b.number)).map((v) => ({ number: v.number, type: v.type, driverName: v.driverName, ...(v.kind ? { kind: v.kind } : {}) })));
   }),
 );
 

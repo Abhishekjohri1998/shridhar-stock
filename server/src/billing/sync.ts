@@ -196,6 +196,8 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limit = 10
       ...(c.address ? { address: c.address } : before?.address ? { address: before.address } : {}),
       // Stock's own addition for deliveries, kept across syncs.
       ...(before?.landmark ? { landmark: before.landmark } : {}),
+      // The home's map pin, also stock's own.
+      ...(before?.lat != null && before?.lng != null ? { lat: before.lat, lng: before.lng } : {}),
       balance: c.balance ?? 0,
     });
     result.customers++;

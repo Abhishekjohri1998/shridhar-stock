@@ -16,3 +16,4 @@ export * from './xlsx';
 export * from './pick';
 export * from './stockTotals';
 export * from './itemInfo';
+export * from './delivery';

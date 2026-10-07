@@ -42,6 +42,13 @@ export const env = {
   linkKey: str('LINK_KEY', ''),
   /** Demo mode: sample data, "log in as" any role, and the walkthrough. File store only. */
   demo: str('DEMO', '') === '1',
+  /**
+   * The address search for delivery pins: OpenStreetMap's free Nominatim, asked at most once a
+   * second, with answers kept. GEOCODE_CONTACT (an email or site) goes in the User-Agent, as
+   * Nominatim's usage policy asks.
+   */
+  geocodeUrl: str('GEOCODE_URL', 'https://nominatim.openstreetmap.org'),
+  geocodeContact: str('GEOCODE_CONTACT', ''),
 };
 
 export function warnAboutDefaults(): void {

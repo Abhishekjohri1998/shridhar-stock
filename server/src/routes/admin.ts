@@ -493,10 +493,24 @@ adminRoutes.put(
   admin,
   handler(async (req, res) => {
     const body = z
-      .object({ roundTo: z.number().refine((n) => (ROUND_STEPS as readonly number[]).includes(n), 'Round to none, 1, 5 or 10 rupees') })
+      .object({
+        roundTo: z.number().refine((n) => (ROUND_STEPS as readonly number[]).includes(n), 'Round to none, 1, 5 or 10 rupees').optional(),
+        // The delivery rule: up to this many item lines and rupees goes by bike.
+        bikeMaxItems: z.number().int().min(0).max(1000).optional(),
+        bikeMaxAmount: z.number().min(0).max(10_000_000).optional(),
+        shopLat: z.number().min(-90).max(90).optional(),
+        shopLng: z.number().min(-180).max(180).optional(),
+      })
       .parse(req.body);
     const repo = getRepo();
-    const next = { ...(await settingsOf(repo)), roundTo: body.roundTo as (typeof ROUND_STEPS)[number] };
+    const next = { ...(await settingsOf(repo)) };
+    if (body.roundTo != null) next.roundTo = body.roundTo as (typeof ROUND_STEPS)[number];
+    if (body.bikeMaxItems != null) next.bikeMaxItems = body.bikeMaxItems;
+    if (body.bikeMaxAmount != null) next.bikeMaxAmount = body.bikeMaxAmount;
+    if (body.shopLat != null && body.shopLng != null) {
+      next.shopLat = body.shopLat;
+      next.shopLng = body.shopLng;
+    }
     await repo.putDoc('meta', { id: 'settings', ...next });
     // Every screen showing a bill total shows it rounded the new way.
     emit('bills');
@@ -512,6 +526,7 @@ const vehicleBody = z.object({
   driverName: z.string().trim().max(60).default(''),
   driverPhone: z.string().trim().max(20).default(''),
   active: z.boolean().optional(),
+  kind: z.enum(['bike', 'car']).optional(),
 });
 
 /** "KA-17 AB 1234" and "ka17ab1234" are the same vehicle. */
@@ -541,7 +556,7 @@ adminRoutes.post(
   handler(async (req, res) => {
     const b = vehicleBody.parse(req.body);
     const phone = await checkVehicle(b);
-    const v: Vehicle = { id: newId('veh'), number: b.number, type: b.type, driverName: b.driverName, driverPhone: phone, active: true };
+    const v: Vehicle = { id: newId('veh'), number: b.number, type: b.type, driverName: b.driverName, driverPhone: phone, active: true, ...(b.kind ? { kind: b.kind } : {}) };
     await getRepo().putDoc('vehicles', v);
     res.status(201).json(v);
   }),
@@ -556,7 +571,7 @@ adminRoutes.put(
     const old = await repo.getDoc<Vehicle>('vehicles', String(req.params.id));
     if (!old) throw new HttpError(404, 'No such vehicle');
     const phone = await checkVehicle(b, old.id);
-    const v: Vehicle = { ...old, number: b.number, type: b.type, driverName: b.driverName, driverPhone: phone, active: b.active ?? old.active };
+    const v: Vehicle = { ...old, number: b.number, type: b.type, driverName: b.driverName, driverPhone: phone, active: b.active ?? old.active, ...(b.kind ? { kind: b.kind } : {}) };
     await repo.putDoc('vehicles', v);
     res.json(v);
   }),

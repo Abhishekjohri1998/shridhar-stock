@@ -12,7 +12,7 @@ import type { PersonRecord } from './store/types';
  *
  * The server is one process, so the hub is a set in memory.
  */
-export type EventKind = 'bills' | 'stock' | 'transfers' | 'pos' | 'items' | 'link' | 'low';
+export type EventKind = 'bills' | 'stock' | 'transfers' | 'pos' | 'items' | 'link' | 'low' | 'delivery';
 
 /** Who an event is for. Absent fields mean "not narrowed by this". */
 export interface Audience {
@@ -31,6 +31,8 @@ const clients = new Set<Client>();
 function wants(p: PersonRecord, a: Audience): boolean {
   if (p.role === 'admin') return true;
   if (a.roles && !a.roles.includes(p.role)) return false;
+  // A delivery is told only to the worker it is for.
+  if (a.personId && p.id !== a.personId) return false;
   return true;
 }
 
@@ -45,6 +47,8 @@ const DEFAULT_ROLES: Record<EventKind, Role[]> = {
   link: [],
   // An item going below its level: the admin's screens only.
   low: [],
+  // A delivery: the admin, and the one worker it is assigned to (narrowed by personId).
+  delivery: ['worker', 'godown'],
 };
 
 const emitHooks = new Set<(kind: EventKind) => void>();

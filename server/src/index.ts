@@ -10,6 +10,7 @@ import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
 import { billingLinkRoutes } from './routes/billingLink';
 import { demoRoutes } from './routes/demo';
+import { deliveryRoutes } from './routes/deliveries';
 import { liveRoutes } from './routes/live';
 import { reportRoutes } from './routes/reports';
 import { roleRoutes } from './routes/roles';
@@ -57,6 +58,7 @@ async function main(): Promise<void> {
   api.use(roleRoutes);
   api.use(actionRoutes);
   api.use(reportRoutes);
+  api.use(deliveryRoutes);
   if (env.demo) api.use(demoRoutes);
   api.use((_req, res) => {
     res.status(404).json({ error: 'No such address' });

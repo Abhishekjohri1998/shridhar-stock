@@ -250,6 +250,9 @@ export interface CustomerProfile {
   balance: number;
   /** Billing's id for this customer, so an address set here can be sent back to billing. */
   billingId?: string;
+  /** The home's pin on the map, dropped by the admin for a delivery and reused next time. */
+  lat?: number;
+  lng?: number;
 }
 
 // ------------------------------------------------------------------ movement between places
@@ -327,12 +330,24 @@ export interface PurchaseOrder {
   times: Partial<Record<POStatus, string>>;
 }
 
-// ------------------------------------------------------------------ deliveries and orders (old records only: these features were removed)
+// ------------------------------------------------------------------ deliveries (done by Workers) and orders (old records only)
 
+/** Assigned ('pending'), On the way ('out'), then Delivered or Not delivered. Old records use the same words. */
 export type DeliveryStatus = 'pending' | 'out' | 'delivered' | 'failed';
+
+/** A bike for small orders, a 4-wheeler for big ones. */
+export type VehicleKind = 'bike' | 'car';
+
+/** A point the worker's phone sent, with when. */
+export interface TrackPoint {
+  lat: number;
+  lng: number;
+  at: string;
+}
 
 export interface Delivery {
   id: string;
+  /** The bill being delivered; 0 for a delivery started from a customer, with no bill. */
   billNo: number;
   customerKey: string;
   name: string;
@@ -346,6 +361,22 @@ export interface Delivery {
   note?: string;
   at: string;
   times: Partial<Record<DeliveryStatus, string>>;
+  /** Where the home is. Old records have none. */
+  lat?: number;
+  lng?: number;
+  /** How many item lines, which with the amount decides Bike or 4-wheeler. */
+  itemCount?: number;
+  vehicleKind?: VehicleKind;
+  /** The worker's last position, while on the way. */
+  pos?: TrackPoint;
+  /** The route so far while on the way; only its first and last points once it is over. */
+  track?: TrackPoint[];
+  /** What the worker collected at the door. */
+  collected?: number;
+  /** Why it could not be delivered. */
+  reason?: string;
+  /** Who started it (the admin). */
+  by?: string;
 }
 
 export interface OrderLine {
@@ -379,12 +410,21 @@ export interface Vehicle {
   driverName: string;
   driverPhone: string;
   active: boolean;
+  /** Bike or 4-wheeler, for the delivery suggestion. Vehicles saved before have none. */
+  kind?: VehicleKind;
 }
 
 /** The shop's own settings, kept by the admin. */
 export interface ShopSettings {
   /** Bills are rounded to the nearest this many rupees; 0 for no rounding. */
   roundTo: 0 | 1 | 5 | 10;
+  /** A delivery goes by bike when it has at most this many item lines... */
+  bikeMaxItems: number;
+  /** ...and comes to at most this many rupees; otherwise by 4-wheeler. */
+  bikeMaxAmount: number;
+  /** The shop on the map, for the live delivery map. */
+  shopLat?: number;
+  shopLng?: number;
 }
 
-export const DEFAULT_SETTINGS: ShopSettings = { roundTo: 0 };
+export const DEFAULT_SETTINGS: ShopSettings = { roundTo: 0, bikeMaxItems: 10, bikeMaxAmount: 3000 };

@@ -128,6 +128,8 @@ export const DOC_INDEXES: Partial<Record<DocCollection, Record<string, 1 | -1>[]
   bills: [{ at: -1 }, { no: -1 }, { cancelled: 1, at: -1 }],
   transfers: [{ status: 1, at: -1 }, { at: -1 }],
   pos: [{ status: 1, at: -1 }, { at: -1 }],
+  // Deliveries: the admin's live list by status, and each worker's own.
+  deliveries: [{ status: 1, at: -1 }, { personId: 1, status: 1 }, { at: -1 }],
 };
 function docSchemaFor(col: DocCollection): Schema {
   const s = docSchema.clone();
