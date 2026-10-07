@@ -183,6 +183,12 @@ async function main() {
     eq('an older given does not undo a newer tick', d4.ticks.a.fetched, false);
     eq('select all on a draft', (await call('/worker/drafts/d_x/fetched', { fetched: true })).status, 200);
     check('ticks every line', Object.values((await link('/draft', { draftId: 'd_x', lines })).body.ticks).every((t) => t.fetched));
+    // Real strokes on a draft line reach the worker, a bad or huge one falls back to the flag.
+    const ink = { w: 300, h: 60, strokes: [[10, 10, 50, 40, 90, 20]] };
+    await link('/draft', { draftId: 'd_ink', lines: [{ key: 'h', qty: 1, rate: 5, ink }, { key: 'j', qty: 1, rate: 5, ink: { w: 'x' } }, { key: 'k', qty: 1, rate: 5, ink: { w: 300, h: 60, strokes: Array.from({ length: 300 }, () => Array(40).fill(1)) } }] });
+    const wi = (await call('/worker/bills')).body.find((b) => b.draftId === 'd_ink');
+    check("a draft line's handwriting reaches the pick list", wi && JSON.stringify(wi.lines[0].ink) === JSON.stringify(ink) && !wi.lines[1].ink && !wi.lines[2].ink, JSON.stringify(wi && wi.lines));
+    await link('/draft', { draftId: 'd_ink', closed: true, lines: [] });
     eq('a bad draft is 400', (await link('/draft', { lines: [] })).status, 400);
     eq('a closed draft goes', (await link('/draft', { draftId: 'd_x', closed: true, lines: [] })).status, 200);
     eq('from the worker screen too', (await call('/worker/bills')).body.length, 0);

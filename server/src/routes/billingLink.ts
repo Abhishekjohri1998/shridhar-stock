@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   findUnit,
   hasInk,
+  type Ink,
   isActiveRole,
   itemMatches,
   normalisePhone,
@@ -92,6 +93,23 @@ billingLinkRoutes.get(
   }),
 );
 
+/** About 40 KB of stroke numbers per draft, and per line a sane shape; more is dropped to "handwritten". */
+export const DRAFT_INK_NUMBERS = 8000;
+const inkShape = z.object({
+  w: z.number().finite().positive().max(10000),
+  h: z.number().finite().positive().max(10000),
+  strokes: z.array(z.array(z.number().finite()).max(4000)).max(400),
+});
+
+/** A draft line's ink: real strokes when they are valid, else only the "it is handwritten" flag. */
+function cleanInk(v: unknown): boolean | Ink {
+  if (v == null || typeof v === 'boolean') return !!v;
+  const p = inkShape.safeParse(v);
+  if (!p.success) return true;
+  const ink = { w: p.data.w, h: p.data.h, strokes: p.data.strokes.map((s) => s.map((n) => Math.round(n * 10) / 10)) };
+  return hasInk(ink) ? ink : true;
+}
+
 const draftBody = z.object({
   draftId: z.string().trim().min(1).max(80),
   customerName: z.string().max(120).optional().default(''),
@@ -120,7 +138,18 @@ billingLinkRoutes.post(
   handler(async (req, res) => {
     const body = draftBody.parse(req.body);
     // The writing itself when billing sends it, so the worker sees it as on a saved bill.
-    res.json({ ticks: putDraft({ ...body, lines: body.lines.map((l) => ({ ...l, ink: typeof l.ink === 'object' && hasInk(l.ink) ? l.ink : !!l.ink })) }) });
+    let budget = DRAFT_INK_NUMBERS;
+    const lines = body.lines.map((l) => {
+      const ink = cleanInk(l.ink);
+      if (ink && typeof ink === 'object') {
+        const n = ink.strokes.reduce((s, st) => s + st.length, 0);
+        // Past the draft's budget the line still shows as handwritten, just without the strokes.
+        if (n > budget) return { ...l, ink: true };
+        budget -= n;
+      }
+      return { ...l, ink };
+    });
+    res.json({ ticks: putDraft({ ...body, lines }) });
   }),
 );
 
