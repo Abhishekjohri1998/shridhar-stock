@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Icon, type IconName } from './Icon';
 import { formatRupees, inkBounds, inkPath, type Ink, type Lang } from '@stock/core';
 import { useSession } from '../lib/session';
+import { SuggestInput } from './Select';
 import { http } from '../lib/api';
 
 /** English or Kannada, for the role screens' own words. Both are always written. */
@@ -96,10 +97,10 @@ export function Status({ s, label }: { s: string; label: string }) {
 }
 
 /**
- * The shop's vehicles as suggestions for a vehicle box: `<input list="vehicles">`. The box still
- * takes anything typed, for a hired auto or a supplier's own lorry.
+ * A vehicle box with the shop's vehicles as suggestions right under it. The box still takes
+ * anything typed, for a hired auto or a supplier's own lorry.
  */
-export function VehicleOptions({ id = 'vehicles' }: { id?: string }) {
+export function VehicleInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
   const [list, setList] = useState<{ number: string; type: string; driverName: string }[]>([]);
   useEffect(() => {
     let live = true;
@@ -111,15 +112,7 @@ export function VehicleOptions({ id = 'vehicles' }: { id?: string }) {
       live = false;
     };
   }, []);
-  return (
-    <datalist id={id}>
-      {list.map((v) => (
-        <option key={v.number} value={v.number}>
-          {[v.type, v.driverName].filter(Boolean).join(' · ')}
-        </option>
-      ))}
-    </datalist>
-  );
+  return <SuggestInput value={value} onChange={onChange} placeholder={placeholder} suggestions={list.map((v) => ({ value: v.number, hint: [v.type, v.driverName].filter(Boolean).join(' · ') }))} />;
 }
 
 /** A light outline of a screen while it loads, so it never looks frozen. Read out as "Loading…". */
@@ -272,4 +265,4 @@ export function WeekChart({ days }: { days: WeekDay[] }) {
   );
 }
 
-export { Select, type SelectOption } from './Select';
+export { Select, SuggestInput, type SelectOption } from './Select';

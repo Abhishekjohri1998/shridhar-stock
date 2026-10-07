@@ -29,7 +29,7 @@ import {
 import { api, http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
-import { Loading, Select, Table, Tabs, useBi, when } from '../../components/ui';
+import { Loading, Select, SuggestInput, Table, Tabs, useBi, when } from '../../components/ui';
 import { lowWords } from './Inventory';
 
 type Tab = 'details' | 'stock';
@@ -174,12 +174,7 @@ function ItemDetails({
           </div>
           <label className="field">
             <span>{t('items.category')}</span>
-            <input list="item-categories" data-tour="item-category" value={form.category} onChange={(e) => set({ category: e.target.value })} />
-            <datalist id="item-categories">
-              {cats.map((c) => (
-                <option key={c} value={c} />
-              ))}
-            </datalist>
+            <SuggestInput data-tour="item-category" value={form.category} onChange={(v) => set({ category: v })} suggestions={cats.map((c) => ({ value: c }))} />
           </label>
         </div>
 

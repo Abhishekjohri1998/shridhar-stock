@@ -4,7 +4,7 @@ import { http } from '../lib/api';
 import { useLive } from '../lib/live';
 import { useLoad, useSession } from '../lib/session';
 import { statusWord } from '../lib/words';
-import { Empty, Greeting, InkView, Loading, Money, Status, Tabs, Tile, useBi, useWeekSales, VehicleOptions, WeekChart, when, Table, Select } from '../components/ui';
+import { Empty, Greeting, InkView, Loading, Money, Status, Tabs, Tile, useBi, useWeekSales, VehicleInput, WeekChart, when, Table, Select } from '../components/ui';
 import type { IconName } from '../components/Icon';
 
 /** A slow safety net under the live stream, for a phone whose stream quietly stalled. */
@@ -322,8 +322,7 @@ function SendCard({ t, nm, dq, rack, have, onDone }: { t: Transfer; nm: (id: str
       <div className="grid2 mt-10" data-tour="godown-vehicle">
         <label className="field">
           <span>{bi('Vehicle', 'ವಾಹನ')}</span>
-          <input list="vehicles" value={vehicle} onChange={(e) => setVehicle(e.target.value)} placeholder="KA-17 AB 1234" />
-          <VehicleOptions />
+          <VehicleInput value={vehicle} onChange={setVehicle} placeholder="KA-17 AB 1234" />
         </label>
         <label className="field">
           <span>{bi('Driver', 'ಚಾಲಕ')}</span>

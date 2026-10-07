@@ -224,3 +224,144 @@ export function Select<V extends string>({
     </>
   );
 }
+
+/**
+ * A text box with suggestions that drop down right under it as you type, in place of a native
+ * `<datalist>`, which the Android app's WebView draws in the top corner of the screen. Anything
+ * can still be typed; a suggestion only fills the box. Placed the same way as Select's list.
+ */
+export function SuggestInput({
+  value,
+  onChange,
+  suggestions,
+  placeholder,
+  'data-tour': tour,
+  'aria-label': ariaLabel,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  suggestions: { value: string; hint?: string }[];
+  placeholder?: string;
+  'data-tour'?: string;
+  'aria-label'?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+  const [place, setPlace] = useState<{ left: number; top?: number; bottom?: number; width: number; maxHeight: number } | null>(null);
+  const box = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const id = useId();
+  const q = value.trim().toLowerCase();
+  const shown = suggestions.filter((s) => s.value.toLowerCase().includes(q) && s.value.toLowerCase() !== q).slice(0, 8);
+  const visible = open && shown.length > 0;
+
+  const measure = useCallback(() => {
+    const b = box.current?.getBoundingClientRect();
+    if (!b) return;
+    const below = window.innerHeight - b.bottom - 8;
+    const above = b.top - 8;
+    const want = Math.min(320, shown.length * 48 + 12);
+    const width = Math.max(b.width, 180);
+    const left = Math.max(8, Math.min(b.left, window.innerWidth - width - 8));
+    if (below >= want || below >= above) setPlace({ left, top: b.bottom + 4, width, maxHeight: Math.max(120, Math.min(want, below)) });
+    else setPlace({ left, bottom: window.innerHeight - b.top + 4, width, maxHeight: Math.min(want, above) });
+  }, [shown.length]);
+
+  useLayoutEffect(() => {
+    if (visible) measure();
+  }, [visible, measure]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const outside = (e: MouseEvent | TouchEvent) => {
+      const t = e.target as Node;
+      if (!box.current?.contains(t) && !list.current?.contains(t)) setOpen(false);
+    };
+    const follow = (e: Event) => {
+      if (!list.current?.contains(e.target as Node)) measure();
+    };
+    document.addEventListener('mousedown', outside);
+    document.addEventListener('touchstart', outside);
+    window.addEventListener('scroll', follow, true);
+    window.addEventListener('resize', measure);
+    return () => {
+      document.removeEventListener('mousedown', outside);
+      document.removeEventListener('touchstart', outside);
+      window.removeEventListener('scroll', follow, true);
+      window.removeEventListener('resize', measure);
+    };
+  }, [visible, measure]);
+
+  const pick = (v: string) => {
+    onChange(v);
+    setOpen(false);
+    setActive(-1);
+  };
+
+  const key = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (!visible) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActive((i) => Math.min(shown.length - 1, i + 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActive((i) => Math.max(-1, i - 1));
+    } else if (e.key === 'Enter' && active >= 0 && shown[active]) {
+      e.preventDefault();
+      pick(shown[active]!.value);
+    } else if (e.key === 'Escape') {
+      setOpen(false);
+    }
+  };
+
+  return (
+    <>
+      <input
+        ref={box}
+        value={value}
+        placeholder={placeholder}
+        data-tour={tour}
+        aria-label={ariaLabel}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={visible}
+        aria-controls={visible ? id : undefined}
+        autoComplete="off"
+        onChange={(e) => {
+          onChange(e.target.value);
+          setOpen(true);
+          setActive(-1);
+        }}
+        onFocus={() => setOpen(true)}
+        onClick={() => setOpen(true)}
+        onKeyDown={key}
+      />
+      {visible &&
+        place &&
+        createPortal(
+          <div ref={list} className="select-pop" style={{ left: place.left, top: place.top, bottom: place.bottom, minWidth: place.width, maxHeight: place.maxHeight }}>
+            <div className="select-list" role="listbox" id={id} aria-label={ariaLabel}>
+              {shown.map((s, i) => (
+                <div
+                  key={s.value}
+                  role="option"
+                  aria-selected={i === active}
+                  className={'select-opt' + (i === active ? ' active' : '')}
+                  onMouseEnter={() => setActive(i)}
+                  // Keeps the box focused, so the keyboard does not drop and reopen.
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => pick(s.value)}
+                >
+                  <span className="select-opt-text">
+                    {s.value}
+                    {s.hint && <span className="muted"> {s.hint}</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
