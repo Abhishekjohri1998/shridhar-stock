@@ -32,6 +32,7 @@ const locationSchema = new Schema(
     kind: { type: String, required: true, enum: ['shop', 'godown'] },
     address: { type: String, required: false },
     active: { type: Boolean, required: false, default: true },
+    layout: { type: Schema.Types.Mixed, required: false },
   },
   { versionKey: false },
 );

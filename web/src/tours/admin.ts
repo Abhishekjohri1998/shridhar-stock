@@ -271,6 +271,13 @@ export const inventoryTour = tour('inventory', ['Inventory', 'ಸಾಮಾನು
     ['The server does it every 5 minutes anyway; this does it now.', 'ಸರ್ವರ್ ಪ್ರತಿ 5 ನಿಮಿಷಕ್ಕೆ ಮಾಡುತ್ತದೆ; ಇದು ಈಗಲೇ ಮಾಡುತ್ತದೆ.'],
     ['A line says how many were checked and fixed. Real stock never changes.', 'ಎಷ್ಟು ಪರಿಶೀಲಿಸಿ ಸರಿಪಡಿಸಿತು ಎಂದು ಒಂದು ಸಾಲು. ನಿಜವಾದ ಸ್ಟಾಕ್ ಬದಲಾಗುವುದಿಲ್ಲ.'],
   ),
+  step(
+    'section-tabs',
+    ['3D view', '3D ನೋಟ'],
+    ['The shop and each godown in 3D, racks coloured green, amber, red or grey by their stock.', 'ಅಂಗಡಿ ಮತ್ತು ಪ್ರತಿ ಗೋದಾಮು 3D ಯಲ್ಲಿ, ಸ್ಟಾಕ್ ಪ್ರಕಾರ ರ‍್ಯಾಕ್ ಹಸಿರು, ಹಳದಿ, ಕೆಂಪು ಅಥವಾ ಬೂದು.'],
+    ['Drag to turn, pinch to zoom; a rack lists its items and what to bring from the godown.', 'ತಿರುಗಿಸಲು ಎಳೆಯಿರಿ, ಜೂಮ್‌ಗೆ ಪಿಂಚ್; ರ‍್ಯಾಕ್ ಅದರ ಸಾಮಾನು ಮತ್ತು ಗೋದಾಮಿನಿಂದ ತರಬೇಕಾದ್ದು ತೋರಿಸುತ್ತದೆ.'],
+    ['The 3D view tab opens.', '3D ನೋಟ ಟ್ಯಾಬ್ ತೆರೆಯುತ್ತದೆ.'],
+  ),
   helpStep,
 ]);
 

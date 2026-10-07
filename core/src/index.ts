@@ -17,3 +17,4 @@ export * from './pick';
 export * from './stockTotals';
 export * from './itemInfo';
 export * from './delivery';
+export * from './layout';

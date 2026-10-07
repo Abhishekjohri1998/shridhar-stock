@@ -217,6 +217,36 @@ adminRoutes.put(
   }),
 );
 
+/**
+ * A place's floor plan for the 3D view. Saving replaces only the layout; null takes it off, and the
+ * sample plan from the racks is drawn again. Stock and racks are never touched.
+ */
+const rackBoxBody = z.object({
+  name: z.string().trim().min(1).max(60),
+  x: z.number().finite().min(-500).max(500),
+  z: z.number().finite().min(-500).max(500),
+  w: z.number().finite().min(0.1).max(50),
+  d: z.number().finite().min(0.1).max(50),
+  h: z.number().finite().min(0.1).max(20),
+  rot: z.number().finite().min(-360).max(360),
+});
+const layoutBody = z.object({ layout: z.object({ racks: z.array(rackBoxBody).max(500) }).nullable() });
+
+adminRoutes.put(
+  '/locations/:id/layout',
+  admin,
+  handler(async (req, res) => {
+    const body = layoutBody.parse(req.body);
+    const repo = getRepo();
+    const loc = (await repo.listLocations()).find((l) => l.id === req.params.id);
+    if (!loc) throw new HttpError(404, 'No such place');
+    const { layout: _old, ...rest } = loc;
+    const next: Location = body.layout ? { ...rest, layout: body.layout } : rest;
+    await repo.saveLocation(next);
+    res.json(next);
+  }),
+);
+
 // ---------------------------------------------------------------- items
 
 adminRoutes.get(

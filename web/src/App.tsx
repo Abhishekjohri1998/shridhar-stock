@@ -33,6 +33,8 @@ const PlacesPage = named(() => import('./pages/admin/Places'), 'PlacesPage');
 const PeoplePage = named(() => import('./pages/admin/People'), 'PeoplePage');
 const FilesPage = named(() => import('./pages/admin/Files'), 'FilesPage');
 const VehiclesPage = named(() => import('./pages/admin/Vehicles'), 'VehiclesPage');
+/** three.js is big: the 3D view is its own chunk, fetched only when the tab is opened. */
+const Inventory3DPage = named(() => import('./pages/admin/Inventory3D'), 'Inventory3DPage');
 const DeliveriesPage = named(() => import('./pages/admin/Deliveries'), 'DeliveriesPage');
 const RecordPage = named(() => import('./explainer/Record'), 'RecordPage');
 
@@ -55,7 +57,7 @@ const ADMIN: Place[] = [
     kn: 'ಸಾಮಾನು',
     icon: 'box',
     tour: 'nav-inventory',
-    tabs: [tab('/admin/inventory', 'Items & stock', 'ಸಾಮಾನು ಮತ್ತು ಸ್ಟಾಕ್'), tab('/admin/refill', 'Bring from godown', 'ಗೋದಾಮಿನಿಂದ ತರಿಸಿ')],
+    tabs: [tab('/admin/inventory', 'Items & stock', 'ಸಾಮಾನು ಮತ್ತು ಸ್ಟಾಕ್'), tab('/admin/refill', 'Bring from godown', 'ಗೋದಾಮಿನಿಂದ ತರಿಸಿ'), tab('/admin/inventory-3d', '3D view', '3D ನೋಟ')],
   },
   {
     to: '/admin/purchases',
@@ -419,6 +421,7 @@ function Shell() {
                 <Route path="/admin/inventory" element={<InventoryPage />} />
                 <Route path="/admin/inventory/new" element={<InventoryItemPage />} />
                 <Route path="/admin/inventory/:id" element={<InventoryItemPage />} />
+                <Route path="/admin/inventory-3d" element={<Inventory3DPage />} />
                 <Route path="/admin/refill" element={<RefillPage />} />
                 <Route path="/admin/purchases" element={<PurchasesPage />} />
                 <Route path="/admin/transfers" element={<TransfersPage />} />

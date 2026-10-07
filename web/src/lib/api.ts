@@ -1,4 +1,4 @@
-import type { ItemSupplierRow, StockInfo, Item, ItemInput, Location, Person, Role, StockLevel, StockMove, AdjustReason } from '@stock/core';
+import type { ItemSupplierRow, StockInfo, Item, ItemInput, Location, PlaceLayout, Person, Role, StockLevel, StockMove, AdjustReason } from '@stock/core';
 
 import { takeHandoff } from './handoff';
 
@@ -122,6 +122,7 @@ export const api = {
   addLocation: (l: { name: string; nameKn: string; address?: string }) => request<Location>('/locations', send('POST', l)),
   updateLocation: (id: string, l: { name: string; nameKn: string; address?: string; active?: boolean }) =>
     request<Location>('/locations/' + id, send('PUT', l)),
+  saveLayout: (id: string, layout: PlaceLayout | null) => request<Location>('/locations/' + id + '/layout', send('PUT', { layout })),
 
   items: (all = false) => request<Item[]>('/items' + (all ? '?all=1' : '')),
   item: (id: string) => request<Item>('/items/' + id),

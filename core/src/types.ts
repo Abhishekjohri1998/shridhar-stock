@@ -40,6 +40,24 @@ export interface Location {
   kind: 'shop' | 'godown';
   address?: string;
   active: boolean;
+  /** The floor plan for the 3D view. Optional: without it a sample plan is made from the racks. */
+  layout?: PlaceLayout;
+}
+
+/** One shelving unit on a place's floor plan, in metres. `rot` is in degrees about the vertical. */
+export interface RackBox {
+  name: string;
+  x: number;
+  z: number;
+  w: number;
+  d: number;
+  h: number;
+  rot: number;
+}
+
+/** A place's floor plan. Racks it does not list are added in sample rows behind it. */
+export interface PlaceLayout {
+  racks: RackBox[];
 }
 
 /** A price that applies from a quantity upwards, in the unit it belongs to. */

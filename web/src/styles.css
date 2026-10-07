@@ -761,3 +761,26 @@ img, svg.ink { max-width: 100%; }
 .share-banner.on { background: var(--ok-wash); border-color: var(--ok-edge); }
 .share-dot { flex: none; width: 14px; height: 14px; border-radius: var(--r-pill); background: var(--gold-600); }
 .share-banner.on .share-dot { background: var(--ok-700); animation: fade 1.2s var(--ease) infinite alternate; }
+
+/* ---- Inventory → 3D view ------------------------------------------- */
+.plan3d { position: relative; margin: var(--gap) 0; border-radius: var(--r-lg); overflow: hidden; border: 1px solid var(--line); background: var(--paper-0); box-shadow: var(--sh-1); }
+.plan3d-canvas { width: 100%; height: min(70vh, 640px); min-height: 320px; }
+.plan3d-flat { display: block; width: 100%; max-height: 70vh; background: var(--paper-1); }
+.plan3d-none { padding: var(--pad); color: var(--ink-500); }
+.plan3d-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: var(--gap); color: var(--ink-500); font-size: 0.9rem; }
+.plan3d-key::before, .plan3d-dot { content: ''; display: inline-block; width: 12px; height: 12px; border-radius: var(--r-pill); margin-right: 6px; vertical-align: -1px; background: var(--ink-400); flex: none; }
+.plan3d-key.ok::before, .plan3d-dot.ok { background: var(--ok-700); }
+.plan3d-key.getting-low::before, .plan3d-dot.getting-low { background: var(--gold-600); }
+.plan3d-key.low::before, .plan3d-dot.low { background: var(--danger-600); }
+.plan3d-card { position: absolute; top: 12px; right: 12px; bottom: 12px; width: min(340px, calc(100% - 24px)); overflow-y: auto; box-shadow: var(--sh-3); animation: plan3d-in var(--t-fast) var(--ease); }
+.plan3d-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.plan3d-items { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 10px; }
+.plan3d-items li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.plan3d-qty { margin-left: auto; color: var(--ink-700); font-weight: 600; }
+.plan3d-bring { flex-basis: 100%; color: var(--brand-700); font-weight: 600; }
+@keyframes plan3d-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+@media (max-width: 640px) {
+  .plan3d-card { position: static; width: auto; box-shadow: none; border-radius: 0; animation: none; }
+  .plan3d-canvas { height: 56vh; }
+}
+@media (prefers-reduced-motion: reduce) { .plan3d-card { animation: none; } }

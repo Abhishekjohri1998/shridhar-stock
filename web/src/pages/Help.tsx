@@ -39,7 +39,7 @@ const SECTIONS: Section[] = [
     tour: 'inventory',
     roles: ['admin'],
     title: ['Inventory', 'ಸಾಮಾನು ಮತ್ತು ಸ್ಟಾಕ್'],
-    body: ['Every item, its units and prices, and its stock in each place. Open an item to correct its count, in boxes or pieces. Its Stock tab sums it up: total, value at cost, last bought and sold, days left. Details holds its units (any name, a default unit), price by quantity, category and suppliers.', 'ಪ್ರತಿ ಸಾಮಾನು, ಘಟಕ ಮತ್ತು ಬೆಲೆ, ಪ್ರತಿ ಸ್ಥಳದ ಸ್ಟಾಕ್. ಎಣಿಕೆ ಸರಿಪಡಿಸಲು ಸಾಮಾನು ತೆರೆಯಿರಿ, ಬಾಕ್ಸ್ ಅಥವಾ ತುಂಡಿನಲ್ಲಿ. ಸ್ಟಾಕ್ ಟ್ಯಾಬ್: ಒಟ್ಟು, ಖರೀದಿ ಮೌಲ್ಯ, ಕೊನೆಯ ಖರೀದಿ ಮತ್ತು ಮಾರಾಟ, ಎಷ್ಟು ದಿನಕ್ಕೆ ಸಾಕು. ವಿವರ: ಘಟಕಗಳು (ಯಾವ ಹೆಸರೂ, ಮೊದಲ ಆಯ್ಕೆಯ ಘಟಕ), ಪ್ರಮಾಣದ ಪ್ರಕಾರ ಬೆಲೆ, ವರ್ಗ ಮತ್ತು ಸರಬರಾಜುದಾರರು.'],
+    body: ['Every item, its units and prices, and its stock in each place. Open an item to correct its count, in boxes or pieces. Its Stock tab sums it up: total, value at cost, last bought and sold, days left. Details holds its units (any name, a default unit), price by quantity, category and suppliers. 3D view: each place’s racks in 3D, coloured by stock; tap one to see its items.', 'ಪ್ರತಿ ಸಾಮಾನು, ಘಟಕ ಮತ್ತು ಬೆಲೆ, ಪ್ರತಿ ಸ್ಥಳದ ಸ್ಟಾಕ್. ಎಣಿಕೆ ಸರಿಪಡಿಸಲು ಸಾಮಾನು ತೆರೆಯಿರಿ, ಬಾಕ್ಸ್ ಅಥವಾ ತುಂಡಿನಲ್ಲಿ. ಸ್ಟಾಕ್ ಟ್ಯಾಬ್: ಒಟ್ಟು, ಖರೀದಿ ಮೌಲ್ಯ, ಕೊನೆಯ ಖರೀದಿ ಮತ್ತು ಮಾರಾಟ, ಎಷ್ಟು ದಿನಕ್ಕೆ ಸಾಕು. ವಿವರ: ಘಟಕಗಳು (ಯಾವ ಹೆಸರೂ, ಮೊದಲ ಆಯ್ಕೆಯ ಘಟಕ), ಪ್ರಮಾಣದ ಪ್ರಕಾರ ಬೆಲೆ, ವರ್ಗ ಮತ್ತು ಸರಬರಾಜುದಾರರು. 3D ನೋಟ: ಪ್ರತಿ ಸ್ಥಳದ ರ‍್ಯಾಕ್‌ಗಳು 3D ಯಲ್ಲಿ, ಸ್ಟಾಕ್ ಪ್ರಕಾರ ಬಣ್ಣ; ಒಂದನ್ನು ಒತ್ತಿದರೆ ಸಾಮಾನು ಕಾಣುತ್ತದೆ.'],
   },
   {
     tour: 'refill',

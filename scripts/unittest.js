@@ -607,6 +607,43 @@ async function ledger() {
   check('rack suggestions: a place with none has none', C.rackNames(its, 'g9').length === 0);
 }
 
+// ---------------------------------------------------------------- 3D view: the sample layout from racks
+{
+  const its = [
+    { id: 'a', racks: { shop: 'Rack 1' } },
+    { id: 'b', racks: { shop: 'Rack 2' } },
+    { id: 'c', racks: { shop: 'Rack 3' } },
+    { id: 'd', racks: { shop: 'Rack 4' } },
+    { id: 'e', racks: { shop: 'Rack 10', g1: 'Back' } },
+    { id: 'f', racks: {} },
+  ];
+  const l = C.layoutFor({ id: 'shop' }, its);
+  check('3D: one shelving unit per rack, in natural order', JSON.stringify(l.racks.map((r) => r.name)) === JSON.stringify(['Rack 1', 'Rack 2', 'Rack 3', 'Rack 4', 'Rack 10']), JSON.stringify(l.racks.map((r) => r.name)));
+  check('3D: rows of four, the fifth starts a new row', l.racks[0].z === l.racks[3].z && l.racks[4].z > l.racks[0].z);
+  check('3D: units in a row do not overlap', l.racks[1].x - l.racks[0].x >= l.racks[0].w);
+  check('3D: the sample plan is the same every time', JSON.stringify(C.layoutFor({ id: 'shop' }, its)) === JSON.stringify(l));
+  check('3D: each place has its own racks', JSON.stringify(C.layoutFor({ id: 'g1' }, its).racks.map((r) => r.name)) === '["Back"]');
+  check('3D: a place with no racks has an empty plan', C.layoutFor({ id: 'g9' }, its).racks.length === 0);
+  check('3D: items with stock but no rack get a "No rack" unit', C.layoutFor({ id: 'shop' }, its, new Set(['f'])).racks.some((r) => r.name === 'No rack'));
+  const saved = { racks: [{ name: 'Rack 1', x: 5, z: 5, w: 3, d: 1, h: 2, rot: 90 }, { name: 'bad', x: 'x' }] };
+  const m = C.layoutFor({ id: 'shop', layout: saved }, its);
+  check('3D: a saved layout is kept, malformed racks dropped', m.racks[0].x === 5 && m.racks[0].rot === 90 && !m.racks.some((r) => r.name === 'bad'));
+  check('3D: racks missing from a saved layout are added behind it', m.racks.length === 5 && m.racks.slice(1).every((r) => r.z > 5.5));
+  // Status colours.
+  const pc = [{ code: 'pc', label: 'Piece', labelKn: '', perBase: 1, price: 1 }];
+  const it = (extra) => ({ id: 'x', nameEn: 'X', nameKn: '', units: pc, aliases: [], racks: { shop: 'R' }, active: true, updatedAt: '', ...extra });
+  const placed = it({ lowAtPlace: { shop: { qty: 10, unit: 'pc' } } });
+  check('3D: below the place level is red', C.itemStatusAt(placed, 'shop', 5, 100) === 'low');
+  check('3D: under 1.5× the place level is amber', C.itemStatusAt(placed, 'shop', 12, 100) === 'getting-low');
+  check('3D: well above is green', C.itemStatusAt(placed, 'shop', 30, 30) === 'ok');
+  const total = it({ lowAt: { qty: 20, unit: 'pc' } });
+  check('3D: with no place level, the total decides', C.itemStatusAt(total, 'shop', 5, 15) === 'low' && C.itemStatusAt(total, 'shop', 5, 100) === 'ok');
+  check('3D: an item with no level and none left is grey', C.itemStatusAt(it({}), 'shop', 0, 0) === 'empty');
+  check('3D: a rack is its worst item', C.rackStatus([{ status: 'ok' }, { status: 'low' }, { status: 'empty' }]) === 'low' && C.rackStatus([{ status: 'empty' }]) === 'empty' && C.rackStatus([]) === 'empty');
+  const rc = C.rackContents([placed], [{ itemId: 'x', locationId: 'shop', qty: 3 }], 'shop');
+  check('3D: rack contents keyed by rack', rc.get('r')?.[0]?.qty === 3 && rc.get('r')[0].status === 'low');
+}
+
 ledger()
   .catch((err) => {
     failed++;

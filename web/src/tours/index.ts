@@ -16,7 +16,7 @@ export function tourForPath(path: string): string | null {
   if (p === '/admin/reports') return 'reports';
   if (p === '/admin/bills') return 'bills';
   if (p === '/admin/confirm') return 'confirm';
-  if (p === '/admin/inventory') return 'inventory';
+  if (p === '/admin/inventory' || p === '/admin/inventory-3d') return 'inventory';
   if (p.startsWith('/admin/inventory/')) return 'item';
   if (p === '/admin/refill') return 'refill';
   if (p === '/admin/purchases') return 'purchases';
