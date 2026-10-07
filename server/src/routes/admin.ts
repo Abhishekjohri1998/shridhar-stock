@@ -727,7 +727,7 @@ adminRoutes.get(
 
 /** The parts of an item a spreadsheet can change, for telling "changed" from "unchanged". */
 function comparable(i: ItemInput): string {
-  return JSON.stringify([i.nameEn, i.nameKn, i.category ?? '', i.units, i.aliases, i.racks, lowAtOf(i) ?? null, lowAtPlaceOf(i), i.active ?? true]);
+  return JSON.stringify([i.nameEn, i.nameKn, i.category ?? '', i.units, i.aliases, i.racks, lowAtOf(i) ?? null, lowAtPlaceOf(i), i.sellUnit ?? '', i.active ?? true]);
 }
 
 /**

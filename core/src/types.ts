@@ -90,6 +90,11 @@ export interface Item {
    * offers. Absent on older items, which read it as their first unit (`defaultUnitOf`).
    */
   defaultUnit?: string;
+  /**
+   * The unit billing offers first, when it is not the one stock is counted in: rice counted in
+   * bags and sold by the kg. Absent means the default unit (`sellUnitOf`).
+   */
+  sellUnit?: string;
   /** Suppliers the shop added by hand as ones who supply this item (supplier ids). Purchase orders add more when read. */
   suppliers?: string[];
   aliases: Alias[];

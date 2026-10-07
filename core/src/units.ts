@@ -71,6 +71,20 @@ export function unitsDefaultFirst(item: Pick<Item, 'units'> & { defaultUnit?: st
   return [d, ...item.units.filter((u) => u !== d)];
 }
 
+/**
+ * The unit billing offers first: the one chosen to sell in, else the default unit, else the first.
+ * Read here, never written back.
+ */
+export function sellUnitOf(item: Pick<Item, 'units'> & { defaultUnit?: string; sellUnit?: string }): ItemUnit {
+  return (item.sellUnit ? findUnit(item, item.sellUnit) : undefined) ?? defaultUnitOf(item);
+}
+
+/** The item's units with the selling one first and the rest in their own order. */
+export function unitsSellFirst(item: Pick<Item, 'units'> & { defaultUnit?: string; sellUnit?: string }): ItemUnit[] {
+  const s = sellUnitOf(item);
+  return [s, ...item.units.filter((u) => u !== s)];
+}
+
 /** A base quantity in one unit, as a plain number and the unit: 150 pc is "1.042 box". */
 export function qtyInUnit(item: Pick<Item, 'units'>, code: string, baseQty: number, lang: 'en' | 'kn' = 'en'): string {
   const u = findUnit(item, code) ?? baseUnit(item);

@@ -113,6 +113,11 @@ async function main() {
     eq('a pack default is saved', (await put(parle.id, { ...parleBody, defaultUnit: 'PACK' })).status, 200);
     const pd = (await link('/items?q=parle')).body.items[0];
     check('the default unit comes first, the rest after', pd.units.map((u) => u.code).join() === 'pack,pc', JSON.stringify(pd.units));
+    check('and is named as the selling unit when none is chosen', pd.sellUnit === 'pack', JSON.stringify(pd));
+    // Counted in packs, sold by the piece: billing leads with the selling unit.
+    eq('a selling unit is saved', (await put(parle.id, { ...parleBody, defaultUnit: 'pack', sellUnit: 'PC' })).status, 200);
+    const ps = (await link('/items?q=parle')).body.items[0];
+    check('the selling unit comes first and is named', ps.units.map((u) => u.code).join() === 'pc,pack' && ps.sellUnit === 'pc', JSON.stringify(ps));
     await put(parle.id, parleBody);
     eq('with no default, the first unit leads again', (await link('/items?q=parle')).body.items[0].units[0].code, 'pc');
 

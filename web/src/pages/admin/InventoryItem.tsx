@@ -193,18 +193,30 @@ function ItemDetails({
             )}
           </p>
           <label className="field" data-tour="item-default-unit">
-            <span>{bi('Default unit', 'ಮೊದಲ ಆಯ್ಕೆಯ ಘಟಕ')}</span>
+            <span>{bi('Count stock in', 'ಸ್ಟಾಕ್ ಎಣಿಸುವ ಘಟಕ')}</span>
             <Select
               value={unitChoices.some((u) => u.code === form.defaultUnit) ? form.defaultUnit : base}
               onChange={(defaultUnit) => set({ defaultUnit, ...(form.lowQty.trim() === '' ? { lowUnit: defaultUnit } : {}) })}
-              aria-label={bi('Default unit', 'ಮೊದಲ ಆಯ್ಕೆಯ ಘಟಕ')}
+              aria-label={bi('Count stock in', 'ಸ್ಟಾಕ್ ಎಣಿಸುವ ಘಟಕ')}
               options={unitChoices.map((u) => ({ value: u.code, label: (lang === 'kn' && u.labelKn) || u.label || u.code }))}
+            />
+          </label>
+          <label className="field">
+            <span>{bi('Sell in', 'ಮಾರುವ ಘಟಕ')}</span>
+            <Select
+              value={unitChoices.some((u) => u.code === form.sellUnit) ? form.sellUnit : ''}
+              onChange={(sellUnit) => set({ sellUnit })}
+              aria-label={bi('Sell in', 'ಮಾರುವ ಘಟಕ')}
+              options={[
+                { value: '', label: bi('Same as counting', 'ಎಣಿಸುವ ಘಟಕವೇ') },
+                ...unitChoices.map((u) => ({ value: u.code, label: (lang === 'kn' && u.labelKn) || u.label || u.code })),
+              ]}
             />
           </label>
           <p className="muted">
             {bi(
-              'Stock is shown in it, and counting, moving, buying and billing start with it.',
-              'ಸ್ಟಾಕ್ ಇದರಲ್ಲಿ ಕಾಣುತ್ತದೆ; ಎಣಿಕೆ, ಸಾಗಣೆ, ಖರೀದಿ, ಬಿಲ್ ಇದರಿಂದ ಶುರು.',
+              'Stock is shown in the counting unit, and counting, moving and buying start with it. Billing starts with the selling unit: rice counted in bags and sold by the kg.',
+              'ಸ್ಟಾಕ್ ಎಣಿಸುವ ಘಟಕದಲ್ಲಿ ಕಾಣುತ್ತದೆ; ಎಣಿಕೆ, ಸಾಗಣೆ, ಖರೀದಿ ಇದರಿಂದ ಶುರು. ಬಿಲ್ ಮಾರುವ ಘಟಕದಿಂದ ಶುರು: ಅಕ್ಕಿ ಚೀಲದಲ್ಲಿ ಎಣಿಕೆ, ಕೆಜಿಯಲ್ಲಿ ಮಾರಾಟ.',
             )}
           </p>
           {form.units.map((u, i) => (

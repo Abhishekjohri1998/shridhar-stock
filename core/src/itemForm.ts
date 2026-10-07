@@ -1,5 +1,5 @@
 import { lowAtOf, lowAtPlaceOf } from './stockTotals';
-import { defaultUnitOf } from './units';
+import { defaultUnitOf, sellUnitOf } from './units';
 import type { Item, ItemInput } from './types';
 
 /**
@@ -34,6 +34,8 @@ export interface ItemForm {
   lowPlace: Record<string, { qty: string; unit: string }>;
   /** The unit shown and offered first; empty means the first unit. */
   defaultUnit: string;
+  /** The unit billing offers first; empty means the default unit. */
+  sellUnit: string;
   /** Supplier ids the shop added by hand. */
   suppliers: string[];
 }
@@ -53,7 +55,7 @@ export function blankUnit(base: boolean): UnitForm {
 }
 
 export function blankItemForm(): ItemForm {
-  return { nameEn: '', nameKn: '', category: '', units: [blankUnit(true)], aliases: '', racks: {}, lowQty: '', lowUnit: 'pc', lowPlace: {}, defaultUnit: '', suppliers: [] };
+  return { nameEn: '', nameKn: '', category: '', units: [blankUnit(true)], aliases: '', racks: {}, lowQty: '', lowUnit: 'pc', lowPlace: {}, defaultUnit: '', sellUnit: '', suppliers: [] };
 }
 
 const text = (n: number | undefined) => (n == null ? '' : String(n));
@@ -81,6 +83,7 @@ export function itemToForm(item: Item): ItemForm {
     lowUnit: lowAtOf(item)?.unit ?? defaultUnitOf(item).code,
     lowPlace: Object.fromEntries(Object.entries(lowAtPlaceOf(item)).map(([loc, l]) => [loc, { qty: String(l.qty), unit: l.unit }])),
     defaultUnit: defaultUnitOf(item).code,
+    sellUnit: item.sellUnit ? sellUnitOf(item).code : '',
     suppliers: [...(item.suppliers ?? [])],
   };
 }
@@ -113,6 +116,7 @@ export function formToInput(f: ItemForm, active?: boolean): ItemInput {
       }),
     racks: f.racks,
     ...(f.defaultUnit.trim() && f.units.some((u) => u.code === f.defaultUnit) ? { defaultUnit: f.defaultUnit } : {}),
+    ...(f.sellUnit.trim() && f.units.some((u) => u.code === f.sellUnit) ? { sellUnit: f.sellUnit } : {}),
     ...(f.suppliers.length ? { suppliers: f.suppliers } : {}),
     // A unit that was removed from the item falls back to the base unit.
     ...(f.lowQty.trim() !== ''

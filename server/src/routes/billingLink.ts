@@ -11,7 +11,8 @@ import {
   priceFor,
   rateRange,
   retiredRoleMessage,
-  unitsDefaultFirst,
+  sellUnitOf,
+  unitsSellFirst,
 } from '@stock/core';
 import { issueToken } from '../auth';
 import { verifyPin } from '../pin';
@@ -58,8 +59,9 @@ billingLinkRoutes.get(
         nameEn: i.nameEn,
         nameKn: i.nameKn,
         // The base rate before slabs; cost never leaves stock.
-        // The default unit first, so billing's suggestion chips lead with it.
-        units: unitsDefaultFirst(i).map((u) => ({
+        // The unit it is sold in first (else the default unit), so billing's chips lead with it.
+        sellUnit: sellUnitOf(i).code,
+        units: unitsSellFirst(i).map((u) => ({
           code: u.code,
           label: u.label,
           labelKn: u.labelKn,

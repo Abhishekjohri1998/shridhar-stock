@@ -572,6 +572,25 @@ async function ledger() {
   check('with no places given the file is as it was', !C.itemsToCsv([item], 'loc_shop').includes('low_shop'));
 }
 
+// ---------------------------------------------------------------- selling unit vs counting unit
+{
+  const units = [
+    { code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price: 50 },
+    { code: 'bag', label: 'Bag', labelKn: '', perBase: 25, price: 1200 },
+  ];
+  check('no selling unit: the default unit sells', C.sellUnitOf({ units, defaultUnit: 'bag' }).code === 'bag');
+  check('a selling unit wins over the default', C.sellUnitOf({ units, defaultUnit: 'bag', sellUnit: 'KG' }).code === 'kg');
+  check('a selling unit the item lost falls back', C.sellUnitOf({ units, defaultUnit: 'bag', sellUnit: 'crate' }).code === 'bag');
+  check('units sell-first', C.unitsSellFirst({ units, defaultUnit: 'bag', sellUnit: 'kg' }).map((u) => u.code).join() === 'kg,bag');
+  const base = { nameEn: 'Rice', nameKn: '', units, aliases: [], racks: {} };
+  const r = C.checkItem({ ...base, defaultUnit: 'bag', sellUnit: ' KG ' });
+  check('checkItem keeps the selling unit, spelt as the item spells it', r.ok && r.value.sellUnit === 'kg' && r.value.defaultUnit === 'bag');
+  check('a selling unit the item does not have is dropped', C.checkItem({ ...base, sellUnit: 'crate' }).ok && !('sellUnit' in C.checkItem({ ...base, sellUnit: 'crate' }).value));
+  const f = C.itemToForm({ id: 'r', ...base, defaultUnit: 'bag', sellUnit: 'kg', active: true, updatedAt: '' });
+  check('the form holds both units', f.defaultUnit === 'bag' && f.sellUnit === 'kg' && C.formToInput(f).sellUnit === 'kg');
+  check('an item with no selling unit leaves it empty in the form', C.itemToForm({ id: 'r', ...base, active: true, updatedAt: '' }).sellUnit === '' && !('sellUnit' in C.formToInput(C.blankItemForm())));
+}
+
 // ---------------------------------------------------------------- rack suggestions
 {
   const its = [

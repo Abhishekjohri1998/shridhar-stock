@@ -130,6 +130,9 @@ export function checkItem(input: ItemInput): Checked<ItemInput> {
   // A default unit the item does not have is dropped: the item then reads its first unit.
   const du = String(input.defaultUnit ?? '').trim();
   const defaultUnit = du ? units.find((u) => unitKey(u.code) === unitKey(du))?.code : undefined;
+  // The same for the unit billing sells in.
+  const su = String(input.sellUnit ?? '').trim();
+  const sellUnit = su ? units.find((u) => unitKey(u.code) === unitKey(su))?.code : undefined;
   const suppliers: string[] = [];
   for (const s of input.suppliers ?? []) {
     const id = String(s ?? '').trim();
@@ -146,6 +149,7 @@ export function checkItem(input: ItemInput): Checked<ItemInput> {
       ...(String(input.category ?? '').trim() ? { category: String(input.category).trim() } : {}),
       units,
       ...(defaultUnit ? { defaultUnit } : {}),
+      ...(sellUnit ? { sellUnit } : {}),
       ...(suppliers.length ? { suppliers } : {}),
       aliases,
       racks,
