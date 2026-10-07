@@ -287,7 +287,7 @@ for (const [path, col] of [
  */
 roleRoutes.get(
   '/worker/bills',
-  requireRole('worker', 'admin'),
+  requireRole('worker', 'godown', 'admin'),
   handler(async (_req, res) => {
     const repo = getRepo();
     const today = istToday();
@@ -369,7 +369,7 @@ roleRoutes.get(
 
 roleRoutes.post(
   '/worker/bills/:no/lines/:i/fetched',
-  requireRole('worker', 'admin'),
+  requireRole('worker', 'godown', 'admin'),
   handler(async (req, res) => {
     const { fetched } = z.object({ fetched: z.boolean() }).parse(req.body);
     const repo = getRepo();
@@ -390,7 +390,7 @@ roleRoutes.post(
 /** Select all, or select none: every line of one bill ticked or unticked at once. */
 roleRoutes.post(
   '/worker/bills/:no/fetched',
-  requireRole('worker', 'admin'),
+  requireRole('worker', 'godown', 'admin'),
   handler(async (req, res) => {
     const { fetched } = z.object({ fetched: z.boolean() }).parse(req.body);
     const repo = getRepo();
@@ -408,7 +408,7 @@ roleRoutes.post(
 /** The same two ticks on a bill still being written. Billing reads them back with its next draft. */
 roleRoutes.post(
   '/worker/drafts/:id/lines/:i/fetched',
-  requireRole('worker', 'admin'),
+  requireRole('worker', 'godown', 'admin'),
   handler(async (req, res) => {
     const { fetched } = z.object({ fetched: z.boolean() }).parse(req.body);
     if (!tickDraft(String(req.params.id), Number(req.params.i), fetched)) throw new HttpError(404, 'No such draft line');
@@ -418,7 +418,7 @@ roleRoutes.post(
 
 roleRoutes.post(
   '/worker/drafts/:id/fetched',
-  requireRole('worker', 'admin'),
+  requireRole('worker', 'godown', 'admin'),
   handler(async (req, res) => {
     const { fetched } = z.object({ fetched: z.boolean() }).parse(req.body);
     if (!tickDraft(String(req.params.id), null, fetched)) throw new HttpError(404, 'No such draft');
@@ -434,7 +434,7 @@ roleRoutes.post(
  */
 roleRoutes.get(
   '/vehicles',
-  requireRole('admin', 'godown'),
+  requireRole('admin', 'worker', 'godown'),
   handler(async (_req, res) => {
     const all = await getRepo().listDocs<Vehicle>('vehicles');
     res.json(all.filter((v) => v.active).sort((a, b) => a.number.localeCompare(b.number)).map((v) => ({ number: v.number, type: v.type, driverName: v.driverName })));
@@ -443,17 +443,32 @@ roleRoutes.get(
 
 // ---------------------------------------------------------------- godown
 
-function myGodown(req: import('express').Request): string {
-  const id = req.person!.linkedId;
-  if (!id) throw new HttpError(403, 'You are not linked to a godown yet. Ask the admin.');
-  return id;
+/**
+ * The godown the Godown tab is showing: the one asked for (?g=), else an old godown login's own,
+ * else the first. Any worker may work any godown.
+ */
+async function myGodown(req: import('express').Request): Promise<string> {
+  const godowns = placeOrder((await getRepo().listLocations()).filter((l) => l.active && l.kind === 'godown'));
+  if (!godowns.length) throw new HttpError(404, 'There is no godown yet. Ask the admin to add one under Setup.');
+  const want = String(req.query.g ?? '') || req.person!.linkedId || '';
+  return (godowns.find((l) => l.id === want) ?? godowns[0]!).id;
 }
+
+/** The godowns, for the picker on the Godown tab. */
+roleRoutes.get(
+  '/godown/places',
+  requireRole('worker', 'godown', 'admin'),
+  handler(async (req, res) => {
+    const godowns = placeOrder((await getRepo().listLocations()).filter((l) => l.active && l.kind === 'godown'));
+    res.json(godowns.map((l) => ({ id: l.id, name: l.name, nameKn: l.nameKn })));
+  }),
+);
 
 roleRoutes.get(
   '/godown/transfers',
-  requireRole('godown'),
+  requireRole('worker', 'godown', 'admin'),
   handler(async (req, res) => {
-    const g = myGodown(req);
+    const g = await myGodown(req);
     const all = await getRepo().listDocs<Transfer>('transfers');
     res.json(all.filter((t) => t.from === g || t.to === g).sort(byNoDesc));
   }),
@@ -461,9 +476,9 @@ roleRoutes.get(
 
 roleRoutes.get(
   '/godown/stock',
-  requireRole('godown'),
+  requireRole('worker', 'godown', 'admin'),
   handler(async (req, res) => {
-    const g = myGodown(req);
+    const g = await myGodown(req);
     const repo = getRepo();
     const [items, stock] = await Promise.all([repo.listItems(), repo.listStock()]);
     const here = new Map(stock.filter((s) => s.locationId === g).map((s) => [s.itemId, s.qty]));
@@ -478,9 +493,9 @@ roleRoutes.get(
 /** Names of the items on a godown's transfers, which the godown needs and may see. */
 roleRoutes.get(
   '/godown/items',
-  requireRole('godown'),
+  requireRole('worker', 'godown', 'admin'),
   handler(async (req, res) => {
-    const g = myGodown(req);
+    const g = await myGodown(req);
     const items = await getRepo().listItems();
     res.json(items.map((i) => ({ id: i.id, nameEn: i.nameEn, nameKn: i.nameKn, units: i.units.map((u) => ({ code: u.code, label: u.label, labelKn: u.labelKn, perBase: u.perBase, price: 0 })), rack: i.racks[g] ?? '' })));
   }),

@@ -55,7 +55,7 @@ waits for the client's explicit yes. That covers:
 - **W6 done:** suppliers, purchase orders from the buy list, receive with actual quantity and cost (`web/src/roles/admin/Buying.tsx`).
 - **W7 (deliveries): removed**, with the customer, delivery and owner logins. Their records are kept; those logins are refused with a clear message. Vehicles stay under Setup.
 - **W8 done:** reports (`server/src/routes/reports.ts`, `web/src/roles/Reports.tsx`), under Home → Reports.
-- **Simpler layout:** roles are Admin, Shop worker, Godown. Admin menu is 5 places with tabs (`web/src/App.tsx`). Guided tours: `web/src/components/Tour.tsx`, `web/src/tours/*.ts` (`npm run tourtest` checks every `data-tour` target exists), and `/help`.
+- **Simpler layout:** roles are Admin and Worker (the godown job is the Worker screen's Godown tab; old godown logins sign in as workers). Admin menu is 5 places with tabs (`web/src/App.tsx`). Guided tours: `web/src/components/Tour.tsx`, `web/src/tours/*.ts` (`npm run tourtest` checks every `data-tour` target exists), and `/help`.
 - **Next:** W9 (billing-side link, only on the owner's go) and W10 deploy; 
 - **Real handwriting for the demo:** export a billing backup to Downloads, then extract strokes
   only into the gitignored `scripts/demo-ink.json`.

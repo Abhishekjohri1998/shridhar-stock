@@ -53,7 +53,7 @@ const L = {
   pin: bi('PIN (4 to 6 digits)', 'ಪಿನ್ (4 ರಿಂದ 6 ಅಂಕೆ)'),
   newPin: bi('Set a new PIN', 'ಹೊಸ ಪಿನ್ ಕೊಡಿ'),
   admin: bi('Admin', 'ಆಡ್ಮಿನ್'),
-  worker: bi('Shop worker', 'ಅಂಗಡಿ ಕೆಲಸಗಾರ'),
+  worker: bi('Worker', 'ಕೆಲಸಗಾರ'),
   you: bi('You', 'ನೀವು'),
   bills: bi('Bills', 'ಬಿಲ್‌ಗಳು'),
   toConfirm: bi('To digitise', 'ಡಿಜಿಟೈಸ್ ಮಾಡಿ'),
@@ -65,7 +65,7 @@ const L = {
   reports: bi('Reports', 'ವರದಿ'),
   toSend: bi('To send', 'ಕಳುಹಿಸಬೇಕು'),
   comingIn: bi('Coming in', 'ಬರುತ್ತಿದೆ'),
-  myStock: bi('My stock', 'ನನ್ನ ಸ್ಟಾಕ್'),
+  myStock: bi('Stock here', 'ಇಲ್ಲಿನ ಸ್ಟಾಕ್'),
   markReceived: bi('Mark received', 'ಬಂದಿದೆ ಎಂದು ಗುರುತಿಸಿ'),
   pack: bi('Pack', 'ಪ್ಯಾಕ್'),
   // The tablet's sign-in (the billing app's own words).
@@ -125,8 +125,7 @@ function bigPicture(p: Pen, s: number) {
 
   const people: { role: Bi; does: Bi; icon: 'user' | 'receipt' | 'truck' }[] = [
     { role: L.admin, does: bi('Sees everything: Billing and Stock', 'ಎಲ್ಲವೂ ಕಾಣುತ್ತದೆ: ಬಿಲ್ಲಿಂಗ್ ಮತ್ತು ಸ್ಟಾಕ್'), icon: 'user' },
-    { role: L.worker, does: bi('Picks the goods for each bill', 'ಪ್ರತಿ ಬಿಲ್‌ನ ಸಾಮಾನು ತರುತ್ತಾರೆ'), icon: 'receipt' },
-    { role: L.godown, does: bi('Sends goods to the shop', 'ಅಂಗಡಿಗೆ ಸಾಮಾನು ಕಳುಹಿಸುತ್ತಾರೆ'), icon: 'truck' },
+    { role: L.worker, does: bi('Picks the goods for each bill, and does the godown job', 'ಪ್ರತಿ ಬಿಲ್‌ನ ಸಾಮಾನು ತರುತ್ತಾರೆ, ಗೋದಾಮಿನ ಕೆಲಸವೂ'), icon: 'receipt' },
   ];
   people.forEach((x, i) => {
     const a = prog(s, 4.2 + i * 0.7, 4.9 + i * 0.7);
@@ -204,19 +203,17 @@ function addPeople(p: Pen, s: number) {
     const pinX = lerp(r.x + 454, r.x + 20, g);
     const pinY = lerp(352, 432, g);
     p.input(pinX, pinY, 410, L.pin, typed('5307', s, 14.3, 15.0), { focus: s > 14.1 && s < 15.3, caret: s > 14.1 && s < 15.3, t: s });
-    p.alpha(g, () => p.select(r.x + 454, 352, 410, L.godown, L.mainGodown, { focus: s > 12.8 && s < 14.1 }));
     const by = lerp(432, 512, g);
     p.button(r.x + 20, by, 110, L.save, { primary: true, press: s - 15.6 });
     p.button(r.x + 142, by, 110, L.cancel);
-    p.select(r.x + 20, 352, 410, L.role, picked ? L.godown : L.worker, { open: vis(s, 11.0, 12.0, 0.2), options: [L.admin, L.worker, L.godown], hi: s > 11.5 ? 2 : 1 });
+    p.select(r.x + 20, 352, 410, L.role, L.worker, { open: vis(s, 11.0, 12.0, 0.2), options: [L.admin, L.worker], hi: 1 });
   });
-  p.ring(r.x + 454, 376, 410, 44, s, vis(s, 12.8, 14.1, 0.2));
   // The list, when no form is open.
   const listA = 1 - Math.max(A, B);
   p.alpha(listA, () => {
     listRow(p, r.x, 256, 884, 'Shridhar', '98860 00001', L.admin, 'plain');
     p.slide(prog(s, 7.4, 8.0), 0, 12, () => listRow(p, r.x, 324, 884, 'Ravi', '98450 12345', L.worker, 'plain'));
-    p.slide(prog(s, 16.0, 16.6), 0, 12, () => listRow(p, r.x, 392, 884, 'Manju', '99001 54321', L.godown, 'brand'));
+    p.slide(prog(s, 16.0, 16.6), 0, 12, () => listRow(p, r.x, 392, 884, 'Manju', '99001 54321', L.worker, 'brand'));
   });
   // The PIN note.
   const n = vis(s, 16.6, 99);
@@ -297,10 +294,10 @@ function signingIn(p: Pen, s: number) {
     });
   }
   if (phase === 5) {
-    p.tabletTop(sc, null, 'Manju · ' + p.tx(L.godown));
+    p.tabletTop(sc, null, 'Manju · ' + p.tx(L.worker));
     p.ctx.fillStyle = c.paper0;
     p.ctx.fillRect(sc.x, sc.y + 58, sc.w, sc.h - 58);
-    p.text(bi('My godown', 'ನನ್ನ ಗೋದಾಮು'), sc.x + 24, sc.y + 96, { size: 24, weight: 600, display: true, color: c.ink900 });
+    p.text(bi('Godown', 'ಗೋದಾಮು'), sc.x + 24, sc.y + 96, { size: 24, weight: 600, display: true, color: c.ink900 });
     let tx = sc.x + 24;
     [L.toSend, L.comingIn, L.myStock].forEach((t, i) => {
       const tw = p.measure(t, 16, 600) + 30;
@@ -320,8 +317,7 @@ function signingIn(p: Pen, s: number) {
   // On the right: who gets what.
   const roles: { role: Bi; gets: Bi; from: number }[] = [
     { role: L.admin, gets: bi('Billing + Stock', 'ಬಿಲ್ಲಿಂಗ್ + ಸ್ಟಾಕ್'), from: 4.2 },
-    { role: L.worker, gets: bi('Only the pick list', 'ಪಟ್ಟಿ ಮಾತ್ರ'), from: 7.2 },
-    { role: L.godown, gets: bi('Only To send / Coming in', 'ಕಳುಹಿಸಬೇಕು / ಬರುತ್ತಿದೆ ಮಾತ್ರ'), from: 10.2 },
+    { role: L.worker, gets: bi('Pick list · Godown · TV screen', 'ಪಟ್ಟಿ · ಗೋದಾಮು · ಟಿವಿ ಪರದೆ'), from: 7.2 },
   ];
   roles.forEach((x, i) => {
     const a = prog(s, x.from, x.from + 0.5);
@@ -543,8 +539,8 @@ function runningLow(p: Pen, s: number) {
   }
   if (s < 14.5) {
     const sc = p.tablet(300, 30, 680, 560);
-    p.tabletTop(sc, null, 'Manju · ' + p.tx(L.godown));
-    p.text(bi('My godown', 'ನನ್ನ ಗೋದಾಮು'), sc.x + 24, sc.y + 92, { size: 24, weight: 600, display: true, color: c.ink900 });
+    p.tabletTop(sc, null, 'Manju · ' + p.tx(L.worker));
+    p.text(bi('Godown', 'ಗೋದಾಮು'), sc.x + 24, sc.y + 92, { size: 24, weight: 600, display: true, color: c.ink900 });
     let tx = sc.x + 24;
     [L.toSend, L.comingIn, L.myStock].forEach((t, i) => {
       const tw = p.measure(t, 16, 600) + 30;
@@ -683,7 +679,7 @@ export const CHAPTERS: Chapter[] = [
     dur: 16,
     cues: [
       cue(0, 'One tablet, two apps: Billing at the counter, Stock for the goods.', 'ಒಂದೇ ಟ್ಯಾಬ್ಲೆಟ್, ಎರಡು ಆ್ಯಪ್: ಕೌಂಟರ್‌ಗೆ ಬಿಲ್ಲಿಂಗ್, ಸಾಮಾನಿಗೆ ಸ್ಟಾಕ್.'),
-      cue(4.2, 'Three kinds of people use it: Admin, Shop worker and Godown.', 'ಮೂರು ರೀತಿಯ ಜನರು ಬಳಸುತ್ತಾರೆ: ಆಡ್ಮಿನ್, ಅಂಗಡಿ ಕೆಲಸಗಾರ, ಗೋದಾಮು.'),
+      cue(4.2, 'Two kinds of people use it: Admin and Worker.', 'ಎರಡು ರೀತಿಯ ಜನರು ಬಳಸುತ್ತಾರೆ: ಆಡ್ಮಿನ್ ಮತ್ತು ಕೆಲಸಗಾರ.'),
       cue(8.6, 'Each one sees only their own work.', 'ಪ್ರತಿಯೊಬ್ಬರಿಗೂ ಅವರ ಕೆಲಸ ಮಾತ್ರ ಕಾಣುತ್ತದೆ.'),
     ],
     draw: bigPicture,
@@ -711,8 +707,8 @@ export const CHAPTERS: Chapter[] = [
     dur: 24,
     cues: [
       cue(0, 'Setup → People → “+ New person”.', 'ಸೆಟಪ್ → ಜನರು → “+ ಹೊಸ ವ್ಯಕ್ತಿ”.'),
-      cue(1.6, 'The shop worker: name, phone, role “Shop worker”, and a PIN. Save.', 'ಅಂಗಡಿ ಕೆಲಸಗಾರ: ಹೆಸರು, ಫೋನ್, ಕೆಲಸ “ಅಂಗಡಿ ಕೆಲಸಗಾರ”, ಪಿನ್. ಉಳಿಸಿ.'),
-      cue(8.2, 'The godown person: role “Godown”, then pick their godown.', 'ಗೋದಾಮಿನವರು: ಕೆಲಸ “ಗೋದಾಮು”, ನಂತರ ಅವರ ಗೋದಾಮು ಆರಿಸಿ.'),
+      cue(1.6, 'A worker: name, phone, role “Worker”, and a PIN. Save.', 'ಕೆಲಸಗಾರ: ಹೆಸರು, ಫೋನ್, ಕೆಲಸ “ಕೆಲಸಗಾರ”, ಪಿನ್. ಉಳಿಸಿ.'),
+      cue(8.2, 'Another worker the same way. Every worker can also do the godown job.', 'ಇನ್ನೊಬ್ಬ ಕೆಲಸಗಾರರನ್ನೂ ಹಾಗೆಯೇ. ಪ್ರತಿ ಕೆಲಸಗಾರರೂ ಗೋದಾಮಿನ ಕೆಲಸ ಮಾಡಬಹುದು.'),
       cue(16.4, 'The PIN is theirs: tell them privately. “Set a new PIN” changes it any time.', 'ಪಿನ್ ಅವರದ್ದು: ಖಾಸಗಿಯಾಗಿ ತಿಳಿಸಿ. “ಹೊಸ ಪಿನ್ ಕೊಡಿ” ಯಾವಾಗ ಬೇಕಾದರೂ ಬದಲಿಸುತ್ತದೆ.'),
     ],
     draw: addPeople,
@@ -727,8 +723,8 @@ export const CHAPTERS: Chapter[] = [
     cues: [
       cue(0, 'On the tablet, each person signs in with their own phone number and PIN.', 'ಟ್ಯಾಬ್ಲೆಟ್‌ನಲ್ಲಿ ಪ್ರತಿಯೊಬ್ಬರೂ ತಮ್ಮ ಫೋನ್ ಸಂಖ್ಯೆ ಮತ್ತು ಪಿನ್‌ನಿಂದ ಪ್ರವೇಶಿಸುತ್ತಾರೆ.'),
       cue(4.2, 'The Admin gets Billing and Stock.', 'ಆಡ್ಮಿನ್‌ಗೆ ಬಿಲ್ಲಿಂಗ್ ಮತ್ತು ಸ್ಟಾಕ್ ಎರಡೂ.'),
-      cue(7.2, 'A shop worker gets only the pick list.', 'ಅಂಗಡಿ ಕೆಲಸಗಾರರಿಗೆ ಪಟ್ಟಿ ಮಾತ್ರ.'),
-      cue(10.2, 'A godown person gets only To send and Coming in.', 'ಗೋದಾಮಿನವರಿಗೆ “ಕಳುಹಿಸಬೇಕು” ಮತ್ತು “ಬರುತ್ತಿದೆ” ಮಾತ್ರ.'),
+      cue(7.2, 'A worker gets three tabs: Pick list, Godown and TV screen.', 'ಕೆಲಸಗಾರರಿಗೆ ಮೂರು ಟ್ಯಾಬ್: ಪಟ್ಟಿ, ಗೋದಾಮು, ಟಿವಿ ಪರದೆ.'),
+      cue(10.2, 'On the Godown tab: To send and Coming in.', 'ಗೋದಾಮು ಟ್ಯಾಬ್‌ನಲ್ಲಿ: “ಕಳುಹಿಸಬೇಕು” ಮತ್ತು “ಬರುತ್ತಿದೆ”.'),
       cue(13.2, '“Switch user” hands the tablet over. “Sign in with shop PIN” is the backup.', '“ಬಳಕೆದಾರ ಬದಲಿಸಿ” ಟ್ಯಾಬ್ಲೆಟ್ ಬೇರೆಯವರಿಗೆ ಕೊಡುತ್ತದೆ. ಅಂಗಡಿಯ ಪಿನ್ ಬದಲಿ ದಾರಿ.'),
     ],
     draw: signingIn,

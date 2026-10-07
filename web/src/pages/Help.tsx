@@ -74,7 +74,7 @@ const SECTIONS: Section[] = [
   {
     tour: 'worker',
     roles: ['admin', 'worker'],
-    title: ['Pick list (shop worker)', 'ಪಟ್ಟಿ (ಅಂಗಡಿ ಕೆಲಸಗಾರ)'],
+    title: ['Pick list (worker)', 'ಪಟ್ಟಿ (ಕೆಲಸಗಾರ)'],
     body: ['Each bill grouped by rack. Tick “Fetched” as you pick: billing’s tick turns on too.', 'ಪ್ರತಿ ಬಿಲ್ ರ‍್ಯಾಕ್ ಪ್ರಕಾರ. ತರುವಾಗ “ತಂದೆ” ಟಿಕ್ ಮಾಡಿ: ಬಿಲ್ಲಿಂಗ್‌ನ ಟಿಕ್ ಕೂಡ ಬರುತ್ತದೆ.'],
   },
   {
@@ -85,9 +85,9 @@ const SECTIONS: Section[] = [
   },
   {
     tour: 'godown',
-    roles: ['godown'],
-    title: ['My godown', 'ನನ್ನ ಗೋದಾಮು'],
-    body: ['The shop’s requests with their racks. “Send to shop” when the vehicle leaves; “Mark received” for goods coming in.', 'ಅಂಗಡಿಯ ಬೇಡಿಕೆ, ರ‍್ಯಾಕ್ ಜೊತೆ. ವಾಹನ ಹೊರಟಾಗ “ಅಂಗಡಿಗೆ ಕಳುಹಿಸಿ”; ಬಂದ ಸಾಮಾನಿಗೆ “ಬಂದಿದೆ ಎಂದು ಗುರುತಿಸಿ”.'],
+    roles: ['admin', 'worker'],
+    title: ['Godown', 'ಗೋದಾಮು'],
+    body: ['A tab of the worker screen, for any worker. The shop’s requests with their racks. “Send to shop” when the vehicle leaves; “Mark received” for goods coming in.', 'ಅಂಗಡಿಯ ಬೇಡಿಕೆ, ರ‍್ಯಾಕ್ ಜೊತೆ. ವಾಹನ ಹೊರಟಾಗ “ಅಂಗಡಿಗೆ ಕಳುಹಿಸಿ”; ಬಂದ ಸಾಮಾನಿಗೆ “ಬಂದಿದೆ ಎಂದು ಗುರುತಿಸಿ”.'],
   },
 ];
 
@@ -106,7 +106,8 @@ export function HelpPage() {
   const { me } = useSession();
   const { start } = useTour();
   const nav = useNavigate();
-  const role = me?.role ?? 'admin';
+  // An old godown login is a worker now.
+  const role = me?.role === 'godown' ? 'worker' : (me?.role ?? 'admin');
   const mine = SECTIONS.filter((s) => s.roles.includes(role));
   const show = (id: string) => {
     nav(TOUR_HOME[id] ?? '/');

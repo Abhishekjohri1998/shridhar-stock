@@ -84,9 +84,8 @@ async function main() {
 
     const admin = await listen('admin');
     const worker = await listen('worker');
-    const godown = await listen('godown'); // main godown
     await wait(300);
-    check('every stream opens', [admin, worker, godown].every((s) => s.hello));
+    check('every stream opens', [admin, worker].every((s) => s.hello));
     const reset = () => streams.forEach((s) => (s.heard.length = 0));
 
     eq('a used ticket cannot open a second stream', (await fetch(base + '/api/events?ticket=' + admin.ticket)).status, 401);
@@ -98,29 +97,21 @@ async function main() {
     await wait(300);
     check('the admin hears a tick', admin.heard.includes('bills'));
     check('the worker hears it', worker.heard.includes('bills'));
-    check('a godown does not', !godown.heard.includes('bills'));
 
-    // A transfer from the main godown: that godown hears it, the worker does not.
+    // A worker sends a transfer on the Godown tab: the workers and the admin hear it.
     reset();
-    await call('/transfers/tr_3/send', godown.token, { vehicle: 'KA' });
+    await call('/transfers/tr_3/send', worker.token, { vehicle: 'KA' });
     await wait(300);
-    check('the godown hears its transfer', godown.heard.includes('transfers'));
-    check('and its stock changing', godown.heard.includes('stock'));
+    check('the worker hears the transfer', worker.heard.includes('transfers'));
+    check('and the stock changing', worker.heard.includes('stock'));
     check('the admin hears it', admin.heard.includes('transfers'));
-    check('the worker does not hear transfers', !worker.heard.includes('transfers'));
-
-    // A transfer to another godown's stock: the main godown hears nothing.
-    reset();
-    await call('/transfers/tr_2/receive', admin.token, {});
-    await wait(300);
-    check('the shop receiving from another godown is not the main godown\'s business', !godown.heard.includes('transfers'), godown.heard.join());
 
     // Purchase orders are the admin's alone.
     reset();
     await call('/admin/pos/po_4/cancel', admin.token, {});
     await wait(300);
     check('the admin hears an order change', admin.heard.includes('pos'));
-    check('nobody else does', [worker, godown].every((x) => !x.heard.includes('pos')));
+    check('nobody else does', [worker].every((x) => !x.heard.includes('pos')));
 
     // Confirming a handwritten line reaches the worker's pick list.
     reset();

@@ -18,9 +18,9 @@ export const workerTour = tour('worker', ['Pick list', 'ಪಟ್ಟಿ'], [
   ),
   step(
     'section-tabs',
-    ['Pick list · TV screen', 'ಪಟ್ಟಿ · ಟಿವಿ ಪರದೆ'],
-    ['Two views of the same bills.', 'ಅದೇ ಬಿಲ್‌ಗಳ ಎರಡು ನೋಟ.'],
-    ['The TV screen is large, for the second monitor at the counter.', 'ಟಿವಿ ಪರದೆ ದೊಡ್ಡದು, ಕೌಂಟರ್‌ನ ಎರಡನೇ ಮಾನಿಟರ್‌ಗೆ.'],
+    ['Pick list · Godown · TV screen', 'ಪಟ್ಟಿ · ಗೋದಾಮು · ಟಿವಿ ಪರದೆ'],
+    ['Three tabs: the bills to fetch, the godown job, and the big screen.', 'ಮೂರು ಟ್ಯಾಬ್: ತರಬೇಕಾದ ಬಿಲ್, ಗೋದಾಮಿನ ಕೆಲಸ, ದೊಡ್ಡ ಪರದೆ.'],
+    ['Godown is what the shop asks a godown to send, and what is coming in. The TV screen is large, for the second monitor at the counter.', 'ಗೋದಾಮು: ಅಂಗಡಿ ಕಳುಹಿಸಲು ಕೇಳಿದ್ದು ಮತ್ತು ಬರುತ್ತಿರುವುದು. ಟಿವಿ ಪರದೆ ದೊಡ್ಡದು, ಕೌಂಟರ್‌ನ ಎರಡನೇ ಮಾನಿಟರ್‌ಗೆ.'],
     ['That view opens.', 'ಆ ನೋಟ ತೆರೆಯುತ್ತದೆ.'],
   ),
   step(
@@ -121,19 +121,19 @@ export const tvTour = tour('tv', ['TV screen', 'ಟಿವಿ ಪರದೆ'], [
   helpStep,
 ]);
 
-export const godownTour = tour('godown', ['My godown', 'ನನ್ನ ಗೋದಾಮು'], [
+export const godownTour = tour('godown', ['Godown', 'ಗೋದಾಮು'], [
   step(
     undefined,
-    ['Your godown', 'ನಿಮ್ಮ ಗೋದಾಮು'],
-    ['What the shop asks you to send, and what is coming to you.', 'ಅಂಗಡಿ ಕಳುಹಿಸಲು ಕೇಳಿದ್ದು, ಮತ್ತು ನಿಮಗೆ ಬರುತ್ತಿರುವುದು.'],
+    ['The godown job', 'ಗೋದಾಮಿನ ಕೆಲಸ'],
+    ['What the shop asks the godown to send, and what is coming to it. Any worker can do it; with more than one godown, choose which at the top.', 'ಅಂಗಡಿ ಗೋದಾಮಿನಿಂದ ಕಳುಹಿಸಲು ಕೇಳಿದ್ದು, ಮತ್ತು ಅಲ್ಲಿಗೆ ಬರುತ್ತಿರುವುದು. ಯಾವ ಕೆಲಸಗಾರರೂ ಮಾಡಬಹುದು; ಒಂದಕ್ಕಿಂತ ಹೆಚ್ಚು ಗೋದಾಮು ಇದ್ದರೆ ಮೇಲೆ ಆರಿಸಿ.'],
     ['Requests appear here by themselves, the moment the shop sends them.', 'ಅಂಗಡಿ ಕಳುಹಿಸಿದ ಕ್ಷಣ ಬೇಡಿಕೆಗಳು ಇಲ್ಲಿ ತಾನಾಗಿ ಬರುತ್ತವೆ.'],
     ['Tap Next to see each part.', 'ಪ್ರತಿ ಭಾಗ ನೋಡಲು ಮುಂದೆ ಒತ್ತಿ.'],
   ),
   step(
     'godown-tabs',
-    ['To send · Coming in · My stock', 'ಕಳುಹಿಸಬೇಕು · ಬರುತ್ತಿದೆ · ನನ್ನ ಸ್ಟಾಕ್'],
+    ['To send · Coming in · Stock here', 'ಕಳುಹಿಸಬೇಕು · ಬರುತ್ತಿದೆ · ಇಲ್ಲಿನ ಸ್ಟಾಕ್'],
     ['Three tabs. The number is how many are waiting.', 'ಮೂರು ಟ್ಯಾಬ್. ಸಂಖ್ಯೆ ಎಷ್ಟು ಬಾಕಿ ಎಂದು.'],
-    ['To send is the shop’s requests; Coming in is goods sent to you.', 'ಕಳುಹಿಸಬೇಕು ಅಂಗಡಿಯ ಬೇಡಿಕೆ; ಬರುತ್ತಿದೆ ನಿಮಗೆ ಕಳುಹಿಸಿದ ಸಾಮಾನು.'],
+    ['To send is the shop’s requests; Coming in is goods sent to this godown.', 'ಕಳುಹಿಸಬೇಕು ಅಂಗಡಿಯ ಬೇಡಿಕೆ; ಬರುತ್ತಿದೆ ಈ ಗೋದಾಮಿಗೆ ಕಳುಹಿಸಿದ ಸಾಮಾನು.'],
     ['That tab opens.', 'ಆ ಟ್ಯಾಬ್ ತೆರೆಯುತ್ತದೆ.'],
   ),
   step(
@@ -161,20 +161,20 @@ export const godownTour = tour('godown', ['My godown', 'ನನ್ನ ಗೋದ�
     'godown-send',
     ['Send to shop', 'ಅಂಗಡಿಗೆ ಕಳುಹಿಸಿ'],
     ['Press it when the vehicle leaves.', 'ವಾಹನ ಹೊರಟಾಗ ಒತ್ತಿ.'],
-    ['Your godown’s stock goes down by what you sent.', 'ನೀವು ಕಳುಹಿಸಿದಷ್ಟು ಗೋದಾಮಿನ ಸ್ಟಾಕ್ ಕಡಿಮೆಯಾಗುತ್ತದೆ.'],
+    ['The godown’s stock goes down by what you sent.', 'ನೀವು ಕಳುಹಿಸಿದಷ್ಟು ಗೋದಾಮಿನ ಸ್ಟಾಕ್ ಕಡಿಮೆಯಾಗುತ್ತದೆ.'],
     ['One line says what left; the shop sees it on the way.', 'ಏನು ಹೊರಟಿತು ಎಂದು ಒಂದು ಸಾಲು; ಅಂಗಡಿಗೆ ದಾರಿಯಲ್ಲಿದೆ ಎಂದು ಕಾಣುತ್ತದೆ.'],
   ),
   step(
     'godown-receive',
     ['Mark received', 'ಬಂದಿದೆ ಎಂದು ಗುರುತಿಸಿ'],
-    ['In Coming in, for goods sent to your godown.', 'ಬರುತ್ತಿದೆ ಟ್ಯಾಬ್‌ನಲ್ಲಿ, ನಿಮ್ಮ ಗೋದಾಮಿಗೆ ಕಳುಹಿಸಿದ ಸಾಮಾನಿಗೆ.'],
+    ['In Coming in, for goods sent to this godown.', 'ಬರುತ್ತಿದೆ ಟ್ಯಾಬ್‌ನಲ್ಲಿ, ಈ ಗೋದಾಮಿಗೆ ಕಳುಹಿಸಿದ ಸಾಮಾನಿಗೆ.'],
     ['Type what actually arrived if it is short.', 'ಕಡಿಮೆ ಬಂದಿದ್ದರೆ ನಿಜವಾಗಿ ಬಂದದ್ದನ್ನು ಟೈಪ್ ಮಾಡಿ.'],
-    ['Your stock rises by that much, and one line says so.', 'ಅಷ್ಟು ನಿಮ್ಮ ಸ್ಟಾಕ್ ಹೆಚ್ಚುತ್ತದೆ, ಒಂದು ಸಾಲು ಹೇಳುತ್ತದೆ.'],
+    ['The godown’s stock rises by that much, and one line says so.', 'ಅಷ್ಟು ಗೋದಾಮಿನ ಸ್ಟಾಕ್ ಹೆಚ್ಚುತ್ತದೆ, ಒಂದು ಸಾಲು ಹೇಳುತ್ತದೆ.'],
   ),
   step(
     'godown-stock',
-    ['My stock', 'ನನ್ನ ಸ್ಟಾಕ್'],
-    ['Everything in your godown, with its rack.', 'ನಿಮ್ಮ ಗೋದಾಮಿನಲ್ಲಿರುವುದೆಲ್ಲ, ರ‍್ಯಾಕ್ ಜೊತೆ.'],
+    ['Stock here', 'ಇಲ್ಲಿನ ಸ್ಟಾಕ್'],
+    ['Everything in this godown, with its rack.', 'ಈ ಗೋದಾಮಿನಲ್ಲಿರುವುದೆಲ್ಲ, ರ‍್ಯಾಕ್ ಜೊತೆ.'],
     ['Search to find one item fast.', 'ಒಂದು ಸಾಮಾನು ಬೇಗ ಹುಡುಕಲು ಹುಡುಕಿ.'],
     ['The keyboard opens. Nothing changes.', 'ಕೀಬೋರ್ಡ್ ತೆರೆಯುತ್ತದೆ. ಏನೂ ಬದಲಾಗುವುದಿಲ್ಲ.'],
   ),

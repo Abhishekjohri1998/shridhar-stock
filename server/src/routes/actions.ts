@@ -200,12 +200,11 @@ async function loadTransfer(id: string): Promise<Transfer> {
   return t;
 }
 
-/** Who may act on a transfer: the admin, or the godown it leaves from / arrives at. */
-function mayAct(req: import('express').Request, place: string) {
+/** Who may send or receive a transfer: the admin or any worker (the godown job is part of Worker). */
+function mayAct(req: import('express').Request, _place: string) {
   const p = req.person!;
-  if (p.role === 'admin') return;
-  if (p.role === 'godown' && p.linkedId === place) return;
-  throw new HttpError(403, 'This transfer is not for your godown');
+  if (p.role === 'admin' || p.role === 'worker' || p.role === 'godown') return;
+  throw new HttpError(403, 'This is not open to your role');
 }
 
 actionRoutes.post(
@@ -224,7 +223,7 @@ actionRoutes.post(
 
 actionRoutes.post(
   '/transfers/:id/send',
-  requireRole('admin', 'godown'),
+  requireRole('admin', 'worker', 'godown'),
   handler(async (req, res) => {
     const body = z
       .object({ vehicle: z.string().max(40).optional(), driver: z.string().max(40).optional(), note: z.string().max(200).optional(), noteInk: inkBody, sent: z.record(z.string(), z.number().min(0).max(1e6)).optional() })
@@ -254,7 +253,7 @@ actionRoutes.post(
 
 actionRoutes.post(
   '/transfers/:id/receive',
-  requireRole('admin', 'godown'),
+  requireRole('admin', 'worker', 'godown'),
   handler(async (req, res) => {
     const body = z.object({ received: z.record(z.string(), z.number().min(0).max(1e6)).optional(), note: z.string().max(200).optional() }).parse(req.body);
     const t = await loadTransfer(String(req.params.id));

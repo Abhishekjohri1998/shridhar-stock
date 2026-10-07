@@ -24,12 +24,12 @@ export function tourForPath(path: string): string | null {
   if (['/admin/places', '/admin/people', '/admin/vehicles', '/admin/files', '/admin/settings'].includes(p)) return 'setup';
   if (p === '/worker') return 'worker';
   if (p === '/worker/screen') return 'tv';
-  if (p === '/godown') return 'godown';
+  if (p === '/worker/godown' || p === '/godown') return 'godown';
   return null;
 }
 
 /** The tour a person gets by themselves the first time they sign in, for their role. */
-export const FIRST_TOUR: Partial<Record<Role, string>> = { admin: 'home', worker: 'worker', godown: 'godown' };
+export const FIRST_TOUR: Partial<Record<Role, string>> = { admin: 'home', worker: 'worker', godown: 'worker' };
 
 /** Where each tour's screen is, for "Show me" on the help page. */
 export const TOUR_HOME: Record<string, string> = {
@@ -45,5 +45,5 @@ export const TOUR_HOME: Record<string, string> = {
   setup: '/admin/places',
   worker: '/worker',
   tv: '/worker/screen',
-  godown: '/godown',
+  godown: '/worker/godown',
 };

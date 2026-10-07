@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { isActiveRole, ROLES, pickName, type MsgKey, type Person, type Role } from '@stock/core';
+import { isActiveRole, PEOPLE_ROLES, ROLES, pickName, type MsgKey, type Person, type Role } from '@stock/core';
 import { api, http } from '../../lib/api';
 import { useLoad, useSession } from '../../lib/session';
 import { Select, Table, useBi } from '../../components/ui';
@@ -78,7 +78,6 @@ function PersonForm({
   const [name, setName] = useState(person?.name ?? '');
   const [phone, setPhone] = useState(person?.phone ?? '');
   const [role, setRole] = useState<Role>(person?.role ?? 'worker');
-  const [linkedId, setLinkedId] = useState(person?.linkedId ?? '');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
 
@@ -94,10 +93,7 @@ function PersonForm({
 
   const save = (e: FormEvent) => {
     e.preventDefault();
-    const link = role === 'godown' ? { linkedId: linkedId || godowns[0]?.id } : {};
-    run(() =>
-      person ? api.updatePerson(person.id, { name, role, ...link }) : api.addPerson({ name, phone, role, pin, ...link }),
-    );
+    run(() => (person ? api.updatePerson(person.id, { name, role }) : api.addPerson({ name, phone, role, pin })));
   };
 
   return (
@@ -114,12 +110,12 @@ function PersonForm({
         </label>
         <label className="field">
           <span>{t('people.role')}</span>
-          {/* Only the roles that sign in, plus a removed role for someone who still has it. */}
+          {/* Admin and Worker, plus an old role for someone who still has it. */}
           <Select
             value={role}
             onChange={setRole}
             aria-label={t('people.role')}
-            options={ROLES.filter((r) => isActiveRole(r) || person?.role === r).map((r) => ({ value: r, label: t(('role.' + r) as MsgKey) }))}
+            options={ROLES.filter((r) => (PEOPLE_ROLES as readonly string[]).includes(r) || person?.role === r).map((r) => ({ value: r, label: t(('role.' + r) as MsgKey) }))}
           />
         </label>
         {role === 'vendor' && (
@@ -130,14 +126,13 @@ function PersonForm({
         )}
         {role !== 'vendor' && !isActiveRole(role) && (
           <p className="muted field">
-            {bi('This login is no longer used, so this person cannot sign in. Choose Admin, Shop worker or Godown to let them in again.', 'ಈ ಲಾಗಿನ್ ಈಗ ಬಳಕೆಯಲ್ಲಿಲ್ಲ, ಹಾಗಾಗಿ ಇವರು ಒಳಗೆ ಬರಲಾಗದು. ಮತ್ತೆ ಒಳಗೆ ಬರಲು ಆಡ್ಮಿನ್, ಅಂಗಡಿ ಕೆಲಸಗಾರ ಅಥವಾ ಗೋದಾಮು ಆರಿಸಿ.')}
+            {bi('This login is no longer used, so this person cannot sign in. Choose Admin or Worker to let them in again.', 'ಈ ಲಾಗಿನ್ ಈಗ ಬಳಕೆಯಲ್ಲಿಲ್ಲ, ಹಾಗಾಗಿ ಇವರು ಒಳಗೆ ಬರಲಾಗದು. ಮತ್ತೆ ಒಳಗೆ ಬರಲು ಆಡ್ಮಿನ್ ಅಥವಾ ಕೆಲಸಗಾರ ಆರಿಸಿ.')}
           </p>
         )}
         {role === 'godown' && (
-          <label className="field">
-            <span>{t('people.link')}</span>
-            <Select value={linkedId || godowns[0]?.id || ''} onChange={setLinkedId} aria-label={t('people.link')} options={godowns.map((g) => ({ value: g.id, label: pickName(g.name, g.nameKn, lang) }))} />
-          </label>
+          <p className="muted field">
+            {bi('An old godown login: it signs in as a worker. The godown job is the Godown tab of the worker screen now.', 'ಹಳೆಯ ಗೋದಾಮು ಲಾಗಿನ್: ಕೆಲಸಗಾರರಾಗಿ ಒಳಗೆ ಬರುತ್ತಾರೆ. ಗೋದಾಮಿನ ಕೆಲಸ ಈಗ ಕೆಲಸಗಾರರ ಪರದೆಯ ಗೋದಾಮು ಟ್ಯಾಬ್.')}
+          </p>
         )}
         <label className="field">
           <span>{person ? t('people.resetPin') : t('people.pin')}</span>

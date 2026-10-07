@@ -118,8 +118,9 @@ async function main() {
     eq('a worker is added', w.status, 201);
     eq('the same phone twice is refused', (await addP({ name: 'X', phone: '09222222222', role: 'worker', pin: '1111' })).status, 409);
     eq('a short PIN is refused', (await addP({ name: 'X', phone: '9333333333', role: 'worker', pin: '11' })).status, 400);
-    eq('a godown person needs a godown', (await addP({ name: 'G', phone: '9444444444', role: 'godown', pin: '2222' })).status, 400);
-    eq('with one it is fine', (await addP({ name: 'G', phone: '9444444444', role: 'godown', pin: '2222', linkedId: godown })).status, 201);
+    // The godown job is part of Worker: nobody new is given the old godown role.
+    eq('the godown role is not offered any more', (await addP({ name: 'G', phone: '9444444444', role: 'godown', pin: '2222', linkedId: godown })).status, 400);
+    eq('a second worker is fine', (await addP({ name: 'G', phone: '9444444444', role: 'worker', pin: '2222' })).status, 201);
 
     let worker = (await login('9222222222', '1111')).body.token;
     eq('a worker can sign in', (await call('/me', { token: worker })).body.name, 'Ravi');

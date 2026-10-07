@@ -82,8 +82,8 @@ const ADMIN: Place[] = [
 /** The phone's bottom bar: these, then "More" for the rest. */
 const PRIMARY = ['/admin', '/admin/bills', '/admin/inventory'];
 
-/** The worker's two views, as tabs; the godown has one screen and no tabs. */
-const WORKER_TABS: Tab[] = [tab('/worker', 'Pick list', 'ಪಟ್ಟಿ'), tab('/worker/screen', 'TV screen', 'ಟಿವಿ ಪರದೆ')];
+/** The worker's three views, as tabs. The godown job is the middle one. */
+const WORKER_TABS: Tab[] = [tab('/worker', 'Pick list', 'ಪಟ್ಟಿ'), tab('/worker/godown', 'Godown', 'ಗೋದಾಮು'), tab('/worker/screen', 'TV screen', 'ಟಿವಿ ಪರದೆ')];
 
 const inTab = (path: string, t: Tab) => path === t.to || (t.to === '/admin/inventory' && path.startsWith('/admin/inventory/'));
 const placeOf = (path: string) => ADMIN.find((p) => p.tabs.some((t) => inTab(path, t)));
@@ -393,8 +393,9 @@ function Shell() {
         <RecordPage />
       </Suspense>
     );
-  const home = ROLE_HOME[me.role];
-  const r: Role = me.role;
+  // An old godown login works as a worker: the godown job is a tab of the worker screen.
+  const r: Role = me.role === 'godown' ? 'worker' : me.role;
+  const home = ROLE_HOME[r];
   const hasNav = r === 'admin';
   const tabs = r === 'admin' ? (placeOf(loc.pathname)?.tabs ?? []) : r === 'worker' ? WORKER_TABS : [];
   return (
@@ -439,10 +440,11 @@ function Shell() {
             {(r === 'worker' || r === 'admin') && (
               <>
                 <Route path="/worker" element={<WorkerHome />} />
+                <Route path="/worker/godown" element={<GodownHome />} />
                 <Route path="/worker/screen" element={<WorkerHome screen />} />
+                <Route path="/godown" element={<Navigate to="/worker/godown" replace />} />
               </>
             )}
-            {r === 'godown' && <Route path="/godown" element={<GodownHome />} />}
             <Route path="*" element={<Navigate to={home} replace />} />
           </Routes>
           </Suspense>

@@ -511,7 +511,7 @@ export const setupTour = tour('setup', ['Setup', 'ಸೆಟಪ್'], [
   step(
     'people-new',
     ['People', 'ಜನರು'],
-    ['Who signs in: Admin, Shop worker or Godown.', 'ಯಾರು ಒಳಗೆ ಬರುತ್ತಾರೆ: ಆಡ್ಮಿನ್, ಅಂಗಡಿ ಕೆಲಸಗಾರ ಅಥವಾ ಗೋದಾಮು.'],
+    ['Who signs in: Admin or Worker. A worker also does the godown job.', 'ಯಾರು ಒಳಗೆ ಬರುತ್ತಾರೆ: ಆಡ್ಮಿನ್ ಅಥವಾ ಕೆಲಸಗಾರ. ಕೆಲಸಗಾರರು ಗೋದಾಮಿನ ಕೆಲಸವನ್ನೂ ಮಾಡುತ್ತಾರೆ.'],
     ['Each signs in with their phone and the PIN you give them.', 'ಪ್ರತಿಯೊಬ್ಬರೂ ಫೋನ್ ಮತ್ತು ನೀವು ಕೊಟ್ಟ ಪಿನ್‌ನಿಂದ ಒಳಗೆ ಬರುತ್ತಾರೆ.'],
     ['“+ New person” opens a form. Tapping a person changes their role, PIN, or switches them off.', '“+ ಹೊಸ ವ್ಯಕ್ತಿ” ಫಾರ್ಮ್ ತೆರೆಯುತ್ತದೆ. ವ್ಯಕ್ತಿ ಒತ್ತಿದರೆ ಪಾತ್ರ, ಪಿನ್ ಬದಲಿಸಬಹುದು, ಅಥವಾ ನಿಲ್ಲಿಸಬಹುದು.'],
   ),

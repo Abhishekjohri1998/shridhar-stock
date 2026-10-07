@@ -147,7 +147,9 @@ async function main() {
     const wb = await fetch(on.base + '/api/worker/bills', { headers: { Authorization: 'Bearer ' + a2.body.token } });
     eq('whose session opens the worker screen', wb.status, 200);
     const a3 = await auth('+91 91111 00022', '2468');
-    check('a godown person, phone written any way', a3.status === 200 && a3.body.role === 'godown', JSON.stringify(a3));
+    check('an old godown login, phone written any way', a3.status === 200 && a3.body.role === 'godown', JSON.stringify(a3));
+    eq('opens the worker screen', (await fetch(on.base + '/api/worker/bills', { headers: { Authorization: 'Bearer ' + a3.body.token } })).status, 200);
+    eq('and the Godown tab', (await fetch(on.base + '/api/godown/places', { headers: { Authorization: 'Bearer ' + a3.body.token } })).status, 200);
     const a4 = await auth('9111100021', '0000');
     check('a wrong PIN is 401 with a message', a4.status === 401 && a4.body.error && !a4.body.token, JSON.stringify(a4));
     eq('an unknown phone is 401', (await auth('9999999999', '2468')).status, 401);

@@ -33,7 +33,6 @@ export const DEMO_PIN = '1111';
 export const DEMO_PEOPLE: { id: string; name: string; phone: string; role: Role; linkedId?: string }[] = [
   { id: 'p_admin', name: 'Shridhar (admin)', phone: '9000000001', role: 'admin' },
   { id: 'p_worker', name: 'Ravi (shop)', phone: '9000000003', role: 'worker' },
-  { id: 'p_godown', name: 'Manju (main godown)', phone: '9000000004', role: 'godown', linkedId: 'loc_g1' },
 ];
 
 type U = [code: string, label: string, labelKn: string, perBase: number, price: number, cost?: number];

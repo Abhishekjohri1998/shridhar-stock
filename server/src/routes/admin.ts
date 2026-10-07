@@ -28,8 +28,7 @@ import {
   type ItemInput,
   type Location,
   type Role,
-  type Vehicle,
-} from '@stock/core';
+  type Vehicle, PEOPLE_ROLES } from '@stock/core';
 import { anyone, publicPerson, requireRole } from '../auth';
 import { handler, HttpError } from '../http';
 import { hashPin } from '../pin';
@@ -63,17 +62,15 @@ const personBody = z.object({
 });
 
 /**
- * A godown person must be tied to a godown that exists. A vendor, from when suppliers signed in,
- * keeps whatever supplier they were tied to.
+ * A vendor, from when suppliers signed in, keeps whatever supplier they were tied to, and an old
+ * godown login its godown.
  */
+const isPeopleRole = (r: string) => (PEOPLE_ROLES as readonly string[]).includes(r);
+
 async function checkLink(role: Role, linkedId: string | undefined): Promise<string | undefined> {
-  if (role === 'vendor') return linkedId;
-  if (role !== 'godown') return undefined;
-  const locs = await getRepo().listLocations();
-  if (!linkedId || !locs.some((l) => l.id === linkedId && l.kind === 'godown')) {
-    throw new HttpError(400, 'Choose which godown this person works at');
-  }
-  return linkedId;
+  // An old godown login keeps its godown, which its Godown tab opens first; nobody new gets one.
+  if (role === 'vendor' || role === 'godown') return linkedId;
+  return undefined;
 }
 
 adminRoutes.post(
@@ -82,7 +79,7 @@ adminRoutes.post(
   handler(async (req, res) => {
     const body = personBody.parse(req.body);
     if (body.role === 'vendor') throw new HttpError(400, NO_VENDORS);
-    if (!isActiveRole(body.role)) throw new HttpError(400, RETIRED_ROLE);
+    if (!isPeopleRole(body.role)) throw new HttpError(400, RETIRED_ROLE);
     const phone = normalisePhone(body.phone);
     if (phone.length !== 10) throw new HttpError(400, 'The phone number should be 10 digits');
     const bad = checkPin(body.pin);
@@ -105,7 +102,7 @@ adminRoutes.post(
 );
 
 const NO_VENDORS = 'Suppliers do not sign in any more. Add them under Purchases, Suppliers.';
-const RETIRED_ROLE = 'That login is no longer used. Choose Admin, Shop worker or Godown.';
+const RETIRED_ROLE = 'Choose Admin or Worker. The godown job is part of Worker now.';
 
 const personPatch = z.object({
   name: z.string().trim().min(1).max(60).optional(),
@@ -125,7 +122,7 @@ adminRoutes.put(
     const role = patch.role ?? p.role;
     const active = patch.active ?? p.active;
     if (role === 'vendor' && p.role !== 'vendor') throw new HttpError(400, NO_VENDORS);
-    if (role !== p.role && !isActiveRole(role)) throw new HttpError(400, RETIRED_ROLE);
+    if (role !== p.role && !isPeopleRole(role)) throw new HttpError(400, RETIRED_ROLE);
     // The shop must never be left with nobody able to run it.
     if (p.role === 'admin' && (role !== 'admin' || !active)) {
       const admins = (await repo.listPeople()).filter((x) => x.role === 'admin' && x.active);

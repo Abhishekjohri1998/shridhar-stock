@@ -153,19 +153,31 @@ interface GItem {
   qty: number;
 }
 
+/**
+ * The worker's Godown tab: what the shop asks a godown to send, and what is coming in. Any worker
+ * may do it; with more than one godown, a picker chooses which.
+ */
 export function GodownHome() {
   const bi = useBi();
   const { lang, me } = useSession();
   const [tab, setTab] = useState<'requests' | 'incoming' | 'stock'>('requests');
   const [version, setVersion] = useState(0);
   const live = useLive('transfers', 'stock', 'items');
+  const places = useLoad(() => http.get<{ id: string; name: string; nameKn?: string }[]>('/godown/places'), []);
+  const [picked, setPicked] = useState('');
+  const godowns = places.value ?? [];
+  // An old godown login opens on its own godown; everyone else on the first.
+  const g = godowns.find((x) => x.id === picked)?.id ?? godowns.find((x) => x.id === me?.linkedId)?.id ?? godowns[0]?.id ?? '';
   const { value, error } = useLoad(async () => {
-    const [transfers, stock] = await Promise.all([http.get<Transfer[]>('/godown/transfers'), http.get<GItem[]>('/godown/stock')]);
+    if (!g) return null;
+    const q = '?g=' + encodeURIComponent(g);
+    const [transfers, stock] = await Promise.all([http.get<Transfer[]>('/godown/transfers' + q), http.get<GItem[]>('/godown/stock' + q)]);
     return { transfers, stock };
-  }, [version, live]);
+  }, [version, live, g]);
   const [q, setQ] = useState('');
   const [note, setNote] = useState('');
-  if (error) return <div className="msg err">{error}</div>;
+  if (places.error || error) return <div className="msg err">{places.error || error}</div>;
+  if (places.value && !godowns.length) return <Empty>{bi('There is no godown yet. The admin adds one under Setup → Places.', 'ಇನ್ನೂ ಗೋದಾಮು ಇಲ್ಲ. ಆಡ್ಮಿನ್ ಸೆಟಪ್ → ಸ್ಥಳಗಳಲ್ಲಿ ಸೇರಿಸುತ್ತಾರೆ.')}</Empty>;
   if (!value) return <Loading />;
   const byId = new Map(value.stock.map((s) => [s.itemId, s]));
   const nm = (id: string) => {
@@ -177,7 +189,6 @@ export function GodownHome() {
     const s = byId.get(id);
     return s ? describeQty({ units: s.units as ItemUnit[] }, qty, lang) : String(qty);
   };
-  const g = me!.linkedId!;
   const outgoing = value.transfers.filter((t) => t.from === g && t.status === 'requested');
   const incoming = value.transfers.filter((t) => t.to === g && t.status === 'sent');
   const history = value.transfers.filter((t) => t.status === 'received' || (t.from === g && t.status === 'sent'));
@@ -188,7 +199,12 @@ export function GodownHome() {
   };
   return (
     <>
-      <h1 className="title">{bi('My godown', 'ನನ್ನ ಗೋದಾಮು')}</h1>
+      <h1 className="title">{bi('Godown', 'ಗೋದಾಮು')}</h1>
+      {godowns.length > 1 && (
+        <div className="mb-10" data-tour="godown-pick">
+          <Select value={g} onChange={setPicked} aria-label={bi('Which godown', 'ಯಾವ ಗೋದಾಮು')} options={godowns.map((x) => ({ value: x.id, label: pickName(x.name, x.nameKn ?? '', lang) }))} />
+        </div>
+      )}
       {note && <div className="msg ok">{note}</div>}
       <div data-tour="godown-tabs">
       <Tabs
@@ -197,7 +213,7 @@ export function GodownHome() {
         tabs={[
           { key: 'requests', label: bi('To send', 'ಕಳುಹಿಸಬೇಕು') + (outgoing.length ? ' (' + outgoing.length + ')' : '') },
           { key: 'incoming', label: bi('Coming in', 'ಬರುತ್ತಿದೆ') + (incoming.length ? ' (' + incoming.length + ')' : '') },
-          { key: 'stock', label: bi('My stock', 'ನನ್ನ ಸ್ಟಾಕ್') },
+          { key: 'stock', label: bi('Stock here', 'ಇಲ್ಲಿನ ಸ್ಟಾಕ್') },
         ]}
       />
       </div>

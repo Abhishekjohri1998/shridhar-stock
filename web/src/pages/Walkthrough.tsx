@@ -7,8 +7,7 @@ import { useBi } from '../components/ui';
 
 const ROLE_WHAT: Partial<Record<Role, [string, string]>> = {
   admin: ['Runs everything: bills, digitising written lines, inventory, bringing from the godown, purchases, setup.', 'ಎಲ್ಲವನ್ನೂ ನಡೆಸುತ್ತಾರೆ: ಬಿಲ್, ಬರೆದ ಸಾಲು ಡಿಜಿಟೈಸ್ ಮಾಡುವುದು, ಸಾಮಾನು, ಗೋದಾಮಿನಿಂದ ತರಿಸುವುದು, ಖರೀದಿ, ಸೆಟಪ್.'],
-  worker: ['Sees each bill as a pick list by rack, ticks what was fetched. The TV screen shows it big.', 'ಪ್ರತಿ ಬಿಲ್ ಅನ್ನು ರ‍್ಯಾಕ್ ಪ್ರಕಾರ ನೋಡಿ, ತಂದದ್ದನ್ನು ಟಿಕ್ ಮಾಡುತ್ತಾರೆ. ಟಿವಿ ಪರದೆ ದೊಡ್ಡದಾಗಿ ತೋರಿಸುತ್ತದೆ.'],
-  godown: ['Sends what the shop asks for, receives what comes in.', 'ಅಂಗಡಿ ಕೇಳಿದ್ದನ್ನು ಕಳುಹಿಸುತ್ತಾರೆ, ಬಂದದ್ದನ್ನು ಸ್ವೀಕರಿಸುತ್ತಾರೆ.'],
+  worker: ['Sees each bill as a pick list by rack and ticks what was fetched; on the Godown tab sends what the shop asks for and receives what comes in. The TV screen shows bills big.', 'ಪ್ರತಿ ಬಿಲ್ ಅನ್ನು ರ‍್ಯಾಕ್ ಪ್ರಕಾರ ನೋಡಿ ತಂದದ್ದನ್ನು ಟಿಕ್ ಮಾಡುತ್ತಾರೆ; ಗೋದಾಮು ಟ್ಯಾಬ್‌ನಲ್ಲಿ ಅಂಗಡಿ ಕೇಳಿದ್ದನ್ನು ಕಳುಹಿಸಿ, ಬಂದದ್ದನ್ನು ಸ್ವೀಕರಿಸುತ್ತಾರೆ. ಟಿವಿ ಪರದೆ ದೊಡ್ಡದಾಗಿ ತೋರಿಸುತ್ತದೆ.'],
 };
 
 const STORY: { role: Role; to: string; en: string; kn: string }[] = [
@@ -19,16 +18,16 @@ const STORY: { role: Role; to: string; en: string; kn: string }[] = [
   { role: 'worker', to: '/worker/screen', en: 'The TV screen: the same bill, big, for the second monitor at the counter.', kn: 'ಟಿವಿ ಪರದೆ: ಅದೇ ಬಿಲ್, ದೊಡ್ಡದಾಗಿ, ಕೌಂಟರ್‌ನ ಎರಡನೇ ಮಾನಿಟರ್‌ಗೆ.' },
   { role: 'admin', to: '/admin/inventory?low=1', en: 'Inventory: coffee and toor dal are low with the shop and godowns added up. An item’s page corrects its count in boxes.', kn: 'ಸಾಮಾನು: ಅಂಗಡಿ ಮತ್ತು ಗೋದಾಮು ಸೇರಿಸಿ ಕಾಫಿ, ತೊಗರಿ ಬೇಳೆ ಕಡಿಮೆ. ಸಾಮಾನಿನ ಪುಟದಲ್ಲಿ ಬಾಕ್ಸ್‌ನಲ್ಲಿ ಎಣಿಕೆ ಸರಿಪಡಿಸಬಹುದು.' },
   { role: 'admin', to: '/admin/refill', en: 'Inventory · Bring from godown: one trip from the main godown brings everything that is low. Tap “Send request”.', kn: 'ಸಾಮಾನು · ಗೋದಾಮಿನಿಂದ ತರಿಸಿ: ಮುಖ್ಯ ಗೋದಾಮಿನಿಂದ ಒಂದೇ ಓಡಾಟ. “ಬೇಡಿಕೆ ಕಳುಹಿಸಿ” ಒತ್ತಿ.' },
-  { role: 'godown', to: '/godown', en: 'The godown sees the request with its racks, fills in what it is actually sending, vehicle and driver, and taps “Send to shop”.', kn: 'ಗೋದಾಮು ಬೇಡಿಕೆ ನೋಡಿ, ಕಳುಹಿಸುವ ಪ್ರಮಾಣ, ವಾಹನ, ಚಾಲಕ ತುಂಬಿ “ಅಂಗಡಿಗೆ ಕಳುಹಿಸಿ” ಒತ್ತುತ್ತದೆ.' },
+  { role: 'worker', to: '/worker/godown', en: 'Worker · Godown: the worker sees the request with its racks, fills in what it is actually sending, vehicle and driver, and taps “Send to shop”.', kn: 'ಗೋದಾಮು ಬೇಡಿಕೆ ನೋಡಿ, ಕಳುಹಿಸುವ ಪ್ರಮಾಣ, ವಾಹನ, ಚಾಲಕ ತುಂಬಿ “ಅಂಗಡಿಗೆ ಕಳುಹಿಸಿ” ಒತ್ತುತ್ತದೆ.' },
   { role: 'admin', to: '/admin/transfers', en: 'Buy & move · Transfers: at the shop, “Mark received”. A shortfall shows in red; stock goes up in the shop.', kn: 'ಖರೀದಿ ಮತ್ತು ಸಾಗಣೆ · ಸಾಗಣೆ: ಅಂಗಡಿಯಲ್ಲಿ “ಬಂದಿದೆ ಎಂದು ಗುರುತಿಸಿ”. ಕೊರತೆ ಕೆಂಪಿನಲ್ಲಿ; ಅಂಗಡಿಯ ಸ್ಟಾಕ್ ಹೆಚ್ಚುತ್ತದೆ.' },
   { role: 'admin', to: '/admin/purchases', en: 'Buy & move · Purchases: order from a supplier in one short form. When the goods arrive, “Mark received”: stock goes up where they were put.', kn: 'ಖರೀದಿ: ಒಂದೇ ಚಿಕ್ಕ ಫಾರ್ಮ್‌ನಲ್ಲಿ ಆರ್ಡರ್. ಸಾಮಾನು ಬಂದಾಗ “ಬಂದಿದೆ ಎಂದು ಗುರುತಿಸಿ”: ಸ್ಟಾಕ್ ಹೆಚ್ಚುತ್ತದೆ.' },
-  { role: 'admin', to: '/admin/places', en: 'Setup: places, people (Admin, Shop worker, Godown), vehicles, Excel and settings.', kn: 'ಸೆಟಪ್: ಸ್ಥಳಗಳು, ಜನರು (ಆಡ್ಮಿನ್, ಅಂಗಡಿ ಕೆಲಸಗಾರ, ಗೋದಾಮು), ವಾಹನಗಳು, ಎಕ್ಸೆಲ್, ಸೆಟ್ಟಿಂಗ್ಸ್.' },
+  { role: 'admin', to: '/admin/places', en: 'Setup: places, people (Admin, Worker), vehicles, Excel and settings.', kn: 'ಸೆಟಪ್: ಸ್ಥಳಗಳು, ಜನರು (ಆಡ್ಮಿನ್, ಕೆಲಸಗಾರ), ವಾಹನಗಳು, ಎಕ್ಸೆಲ್, ಸೆಟ್ಟಿಂಗ್ಸ್.' },
   { role: 'admin', to: '/help', en: 'How it all works: one picture of the flow, and “Show me” for every screen’s tour.', kn: 'ಇದೆಲ್ಲ ಹೇಗೆ ಕೆಲಸ ಮಾಡುತ್ತದೆ: ಒಂದು ಚಿತ್ರ, ಮತ್ತು ಪ್ರತಿ ಪುಟದ ಪರಿಚಯಕ್ಕೆ “ತೋರಿಸಿ”.' },
 ];
 
 /**
  * The guided tour, only in demo mode. One button per role signs in as that role's demo person;
- * the story walks one day at the shop through the three roles in order.
+ * the story walks one day at the shop through the two roles in order.
  */
 export function WalkthroughPage() {
   const bi = useBi();

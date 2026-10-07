@@ -12,6 +12,11 @@ export const ROLES = ['admin', 'owner', 'worker', 'godown', 'vendor', 'delivery'
 /** The roles that still sign in. The others are kept only so old records read. */
 export const ACTIVE_ROLES = ['admin', 'worker', 'godown'] as const satisfies readonly Role[];
 export type ActiveRole = (typeof ACTIVE_ROLES)[number];
+/**
+ * The roles the admin can give someone: the godown job is part of Worker now. An old godown login
+ * still signs in and works as a worker.
+ */
+export const PEOPLE_ROLES = ['admin', 'worker'] as const satisfies readonly Role[];
 export type Role = (typeof ROLES)[number];
 
 /**

@@ -31,15 +31,15 @@ const clients = new Set<Client>();
 function wants(p: PersonRecord, a: Audience): boolean {
   if (p.role === 'admin') return true;
   if (a.roles && !a.roles.includes(p.role)) return false;
-  if (p.role === 'godown' && a.locationIds && !a.locationIds.includes(p.linkedId ?? '')) return false;
   return true;
 }
 
 /** Who each kind of change matters to, before narrowing by place, supplier or person. */
 const DEFAULT_ROLES: Record<EventKind, Role[]> = {
-  bills: ['worker'],
-  stock: ['godown'],
-  transfers: ['godown'],
+  // The godown job is part of Worker: an old godown login is a worker too.
+  bills: ['worker', 'godown'],
+  stock: ['worker', 'godown'],
+  transfers: ['worker', 'godown'],
   pos: [],
   items: ['worker', 'godown'],
   link: [],

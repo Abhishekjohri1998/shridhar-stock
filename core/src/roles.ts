@@ -4,7 +4,8 @@ import { ACTIVE_ROLES, type Role } from './types';
 export const ROLE_HOME: Record<Role, string> = {
   admin: '/admin',
   worker: '/worker',
-  godown: '/godown',
+  // The godown job is a tab of the worker screen now.
+  godown: '/worker',
   owner: '/',
   vendor: '/',
   delivery: '/',

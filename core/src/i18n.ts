@@ -43,8 +43,8 @@ const EN = {
 
   'role.admin': 'Admin',
   'role.owner': 'Owner',
-  'role.worker': 'Shop worker',
-  'role.godown': 'Godown',
+  'role.worker': 'Worker',
+  'role.godown': 'Worker (old godown login)',
   'role.vendor': 'Vendor',
   'role.delivery': 'Delivery',
   'role.customer': 'Customer',
@@ -198,8 +198,8 @@ const KN: Record<MsgKey, string> = {
 
   'role.admin': 'ಆಡ್ಮಿನ್',
   'role.owner': 'ಮಾಲೀಕರು',
-  'role.worker': 'ಅಂಗಡಿ ಕೆಲಸಗಾರ',
-  'role.godown': 'ಗೋದಾಮು',
+  'role.worker': 'ಕೆಲಸಗಾರ',
+  'role.godown': 'ಕೆಲಸಗಾರ (ಹಳೆಯ ಗೋದಾಮು ಲಾಗಿನ್)',
   'role.vendor': 'ಸರಬರಾಜುದಾರ',
   'role.delivery': 'ಡೆಲಿವರಿ',
   'role.customer': 'ಗ್ರಾಹಕ',

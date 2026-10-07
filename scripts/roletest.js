@@ -75,7 +75,7 @@ async function main() {
     };
     const as = async (role) => (await call('/demo/login-as', null, { role })).body.token;
     const T = {};
-    for (const r of ['admin', 'worker', 'godown']) T[r] = await as(r);
+    for (const r of ['admin', 'worker']) T[r] = await as(r);
     check('every role that signs in has a demo person', Object.values(T).every(Boolean));
     eq('suppliers have no demo login', (await call('/demo/login-as', null, { role: 'vendor' })).status, 404);
     eq('a vendor from before cannot sign in', (await call('/auth/login', null, { phone: '9111100009', pin: '2468' })).status, 403);
@@ -101,12 +101,13 @@ async function main() {
     for (const p of ['/delivery/mine', '/customer/bills', '/customer/catalogue', '/customer/orders', '/admin/deliveries', '/admin/orders']) {
       eq(p + ' is gone', (await call(p, T.admin)).status, 404);
     }
-    eq('demo PIN works like a real login', (await call('/auth/login', null, { phone: '9000000004', pin: '1111' })).status, 200);
+    eq('demo PIN works like a real login', (await call('/auth/login', null, { phone: '9000000003', pin: '1111' })).status, 200);
+    eq('the demo has no godown login: two roles', (await call('/demo/login-as', null, { role: 'godown' })).status, 404);
 
     // ---- who sees what
     const summary = (await call('/admin/summary', T.admin)).body;
     check('the admin sees lines to confirm', summary.toConfirm >= 3, JSON.stringify(summary));
-    for (const r of ['worker', 'godown']) {
+    for (const r of ['worker']) {
       eq(r + ' cannot read the admin summary', (await call('/admin/summary', T[r])).status, 403);
     }
 
@@ -191,9 +192,12 @@ async function main() {
     // ---- a trip: requested, sent short by the godown, received at the shop
     const g0 = await (async () => ((await call('/stock', T.admin)).body.find((s) => s.itemId === 'it_clinic' && s.locationId === 'loc_g1')).qty)();
     const s0 = await shopQty('it_clinic');
-    eq('a godown cannot send another godown\'s transfer', (await call('/transfers/tr_2/send', T.godown, {})).status, 403);
-    eq('the godown sends transfer 3, 8 Clinic Plus short', (await call('/transfers/tr_3/send', T.godown, { vehicle: 'KA-17', sent: { it_clinic: 120 } })).status, 200);
-    eq('sending twice is refused', (await call('/transfers/tr_3/send', T.godown, {})).status, 409);
+    const gp = (await call('/godown/places', T.worker)).body;
+    check('a worker gets the godowns for the picker', gp.length === 2 && gp.some((g) => g.id === 'loc_g1'), JSON.stringify(gp));
+    const gt = (await call('/godown/transfers?g=loc_g1', T.worker)).body;
+    check('and a godown\'s transfers', gt.some((t) => t.id === 'tr_3') && gt.every((t) => t.from === 'loc_g1' || t.to === 'loc_g1'));
+    eq('a worker sends transfer 3, 8 Clinic Plus short', (await call('/transfers/tr_3/send', T.worker, { vehicle: 'KA-17', sent: { it_clinic: 120 } })).status, 200);
+    eq('sending twice is refused', (await call('/transfers/tr_3/send', T.worker, {})).status, 409);
     const g1 = ((await call('/stock', T.admin)).body.find((s) => s.itemId === 'it_clinic' && s.locationId === 'loc_g1')).qty;
     eq('the godown loses what it sent', g1, g0 - 120);
     eq('the shop receives it', (await call('/transfers/tr_3/receive', T.admin, {})).status, 200);
@@ -208,15 +212,14 @@ async function main() {
     eq('the same place twice is refused', (await call('/admin/transfers', T.admin, { from: 'loc_g1', to: 'loc_g1', lines: [{ itemId: 'it_rice', qty: 1 }] })).status, 400);
     eq('an item that does not exist is refused', (await call('/admin/transfers', T.admin, { from: 'loc_g1', to: 'loc_shop', lines: [{ itemId: 'it_nope', qty: 1 }] })).status, 400);
     eq('an item twice is refused', (await call('/admin/transfers', T.admin, { from: 'loc_g1', to: 'loc_shop', lines: [{ itemId: 'it_rice', qty: 1 }, { itemId: 'it_rice', qty: 2 }] })).status, 400);
-    eq('a godown cannot ask for transfers', (await call('/admin/transfers', T.godown, { from: 'loc_g1', to: 'loc_shop', lines: [{ itemId: 'it_rice', qty: 1 }] })).status, 403);
+    eq('a worker cannot ask for transfers', (await call('/admin/transfers', T.worker, { from: 'loc_g1', to: 'loc_shop', lines: [{ itemId: 'it_rice', qty: 1 }] })).status, 403);
     const id = g2g.body.id;
-    eq('sending more than was asked for is refused', (await call('/transfers/' + id + '/send', T.godown, { sent: { it_rice: 30 } })).status, 400);
-    eq('sending nothing is refused (cancel instead)', (await call('/transfers/' + id + '/send', T.godown, { sent: { it_rice: 0 } })).status, 400);
+    eq('sending more than was asked for is refused', (await call('/transfers/' + id + '/send', T.worker, { sent: { it_rice: 30 } })).status, 400);
+    eq('sending nothing is refused (cancel instead)', (await call('/transfers/' + id + '/send', T.worker, { sent: { it_rice: 0 } })).status, 400);
     const r0g1 = await gq('it_rice', 'loc_g1');
     const r0g2 = await gq('it_rice', 'loc_g2');
-    eq('the main godown sends 20 of the 25', (await call('/transfers/' + id + '/send', T.godown, { sent: { it_rice: 20 }, vehicle: 'Tempo' })).status, 200);
+    eq('the main godown sends 20 of the 25', (await call('/transfers/' + id + '/send', T.worker, { sent: { it_rice: 20 }, vehicle: 'Tempo' })).status, 200);
     eq('it cannot be cancelled once on the way', (await call('/transfers/' + id + '/cancel', T.admin, {})).status, 409);
-    eq('the main godown cannot receive at the other godown', (await call('/transfers/' + id + '/receive', T.godown, {})).status, 403);
     eq('receiving more than was sent is refused', (await call('/transfers/' + id + '/receive', T.admin, { received: { it_rice: 21 } })).status, 400);
     eq('19 arrive at the other godown', (await call('/transfers/' + id + '/receive', T.admin, { received: { it_rice: 19 } })).status, 200);
     eq('the main godown lost 20', await gq('it_rice', 'loc_g1'), r0g1 - 20);
@@ -227,7 +230,7 @@ async function main() {
     eq('and in the ledger', shortMove && shortMove.note, '1 short');
     const c = await call('/admin/transfers', T.admin, { from: 'loc_g1', to: 'loc_shop', lines: [{ itemId: 'it_rice', qty: 5 }] });
     eq('a request can be cancelled before it leaves', (await call('/transfers/' + c.body.id + '/cancel', T.admin, {})).status, 200);
-    eq('and then cannot be sent', (await call('/transfers/' + c.body.id + '/send', T.godown, {})).status, 409);
+    eq('and then cannot be sent', (await call('/transfers/' + c.body.id + '/send', T.worker, {})).status, 409);
 
     // ---- purchase
     const cof = async () => ((await call('/stock', T.admin)).body.find((s) => s.itemId === 'it_coffee' && s.locationId === 'loc_g2') ?? { qty: 0 }).qty;
@@ -291,7 +294,6 @@ async function main() {
     check('a line on a shop rack says it is in the shop', shopLine && shopLine.place === 'Shop' && shopLine.placeOrder === 0, JSON.stringify(shopLine));
 
     const b54 = wb.find((b) => b.no === 54);
-    eq('a godown cannot tick a bill', (await call('/worker/bills/54/fetched', T.godown, { fetched: true })).status, 403);
     eq('the worker selects all', (await call('/worker/bills/54/fetched', T.worker, { fetched: true })).body.lines, b54.lines.length);
     check('every line is ticked', (await call('/worker/bills', T.worker)).body.find((b) => b.no === 54).lines.every((l) => l.fetched));
     eq('and selects none', (await call('/worker/bills/54/fetched', T.worker, { fetched: false })).status, 200);
@@ -301,14 +303,13 @@ async function main() {
     // ---- vehicles
     const vlist = (await call('/admin/vehicles', T.admin)).body;
     eq('the demo has two vehicles', vlist.length, 2);
-    for (const r of ['worker', 'godown']) {
+    for (const r of ['worker']) {
       eq(r + ' cannot manage vehicles', (await call('/admin/vehicles', T[r])).status, 403);
     }
-    eq('a godown cannot add one', (await call('/admin/vehicles', T.godown, { number: 'KA-01 X 1' })).status, 403);
-    const pick = await call('/vehicles', T.godown);
-    check('the godown gets the pick list', pick.status === 200 && pick.body.length === 2);
+    eq('a worker cannot add one', (await call('/admin/vehicles', T.worker, { number: 'KA-01 X 1' })).status, 403);
+    const pick = await call('/vehicles', T.worker);
+    check('a worker gets the pick list, for the Godown tab', pick.status === 200 && pick.body.length === 2);
     check('without drivers\' phones', !JSON.stringify(pick.body).includes('9000000011'));
-    eq('a worker does not', (await call('/vehicles', T.worker)).status, 403);
     const nv = await call('/admin/vehicles', T.admin, { number: 'KA-17 Z 99', type: 'Auto', driverName: 'Raju', driverPhone: '98450 12345' });
     check('the admin adds a vehicle', nv.status === 201 && nv.body.driverPhone === '9845012345', JSON.stringify(nv.body));
     eq('the same number again is refused', (await call('/admin/vehicles', T.admin, { number: 'ka17z99' })).status, 409);
@@ -316,7 +317,7 @@ async function main() {
     eq('a bad phone is refused', (await call('/admin/vehicles', T.admin, { number: 'KA-1', driverPhone: '123' })).status, 400);
     const ed = await send('PUT', '/admin/vehicles/' + nv.body.id, T.admin, { number: 'KA-17 Z 99', type: 'Auto', driverName: 'Raju', active: false });
     check('the admin switches it off', ed.status === 200 && ed.body.active === false);
-    check('and it leaves the pick list', !(await call('/vehicles', T.godown)).body.some((v) => v.number === 'KA-17 Z 99'));
+    check('and it leaves the pick list', !(await call('/vehicles', T.worker)).body.some((v) => v.number === 'KA-17 Z 99'));
     eq('the admin removes it', (await send('DELETE', '/admin/vehicles/' + nv.body.id, T.admin)).status, 200);
     eq('it is gone', (await call('/admin/vehicles', T.admin)).body.length, 2);
     eq('removing it twice', (await send('DELETE', '/admin/vehicles/' + nv.body.id, T.admin)).status, 404);
