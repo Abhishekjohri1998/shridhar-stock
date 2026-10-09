@@ -49,6 +49,8 @@ export const env = {
    */
   geocodeUrl: str('GEOCODE_URL', 'https://nominatim.openstreetmap.org'),
   geocodeContact: str('GEOCODE_CONTACT', ''),
+  /** The road route on the admin's live map: the public OSRM server, asked at most once a second. */
+  routeUrl: str('ROUTE_URL', 'https://router.project-osrm.org'),
 };
 
 export function warnAboutDefaults(): void {

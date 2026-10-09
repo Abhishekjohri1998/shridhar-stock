@@ -6,7 +6,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
  * asked for, which keeps within OSM's fair use; the credit OSM asks for is always shown.
  *
  * Moving markers (a worker on the way) glide from where they were to where they are now, eased,
- * and draw a fading trail behind them.
+ * and draw their trail behind them; a delivery can also carry the road still ahead, dashed.
+ *
+ * Once a person has moved the map (drag, wheel, pinch, ±), it stays where they put it: the live
+ * page re-renders every second and every position, and none of that may pull the view back. Only
+ * ⤢, or the caller changing fitKey, fits it again.
  */
 export interface LatLng {
   lat: number;
@@ -22,6 +26,8 @@ export interface MapMarker extends LatLng {
   moving?: boolean;
   /** The route so far, oldest first. */
   trail?: LatLng[];
+  /** The road still ahead (from the server's router), drawn dashed beneath the trail. */
+  route?: LatLng[];
   /** A quieter marker, for something already over. */
   faded?: boolean;
 }
@@ -110,11 +116,17 @@ export function LiveMap({
     if (v) setView(v);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(fitPoints.map((p) => [p.lat, p.lng])), size.w, size.h]);
-  // The first time there is something to show, and whenever the caller asks.
+  // The first time there is something to show, and whenever the caller asks (a new fitKey) —
+  // but never over a view the person has moved themselves.
   const fitted = useRef(false);
+  const userMoved = useRef(false);
+  const lastFitKey = useRef(fitKey);
   useEffect(() => {
     if (!size.w) return;
-    if (!view || !fitted.current || fitKey !== undefined) {
+    const asked = fitKey !== lastFitKey.current;
+    lastFitKey.current = fitKey;
+    if (asked) userMoved.current = false;
+    if (!view || asked || (!fitted.current && !userMoved.current)) {
       refit();
       if (fitPoints.length) fitted.current = true;
     }
@@ -171,7 +183,8 @@ export function LiveMap({
   );
   /** Zoom by dz keeping the point under (x, y) where it is. */
   const zoomAt = useCallback(
-    (x: number, y: number, dz: number) =>
+    (x: number, y: number, dz: number) => {
+      userMoved.current = true;
       setView((v) => {
         if (!v) return v;
         const z = clampZ(v.z + dz);
@@ -179,11 +192,18 @@ export function LiveMap({
         const cx = worldX(p.lng, z) - (x - size.w / 2);
         const cy = worldY(p.lat, z) - (y - size.h / 2);
         return { z, lng: lngOf(cx, z), lat: latOf(cy, z) };
-      }),
+      });
+    },
     [toLatLng, size.w, size.h],
   );
-  const panBy = (dx: number, dy: number) =>
+  const panBy = (dx: number, dy: number) => {
+    userMoved.current = true;
     setView((v) => (v ? { z: v.z, lng: lngOf(worldX(v.lng, v.z) - dx, v.z), lat: latOf(worldY(v.lat, v.z) - dy, v.z) } : v));
+  };
+  const showAll = () => {
+    userMoved.current = false;
+    refit();
+  };
 
   useEffect(() => {
     const el = box.current;
@@ -198,7 +218,15 @@ export function LiveMap({
   }, [zoomAt]);
 
   const down = (e: React.PointerEvent) => {
-    box.current?.setPointerCapture?.(e.pointerId);
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    // A new gesture starts with its primary pointer: forget any finger whose "up" never came
+    // (a lost capture, a cancelled touch), or the next one-finger drag would be read as a pinch.
+    if (e.isPrimary) pointers.current.clear();
+    try {
+      box.current?.setPointerCapture?.(e.pointerId);
+    } catch {
+      /* the pointer is already gone; the drag still works while it is over the map */
+    }
     pointers.current.set(e.pointerId, local(e));
     if (pointers.current.size === 1) moved.current = 0;
   };
@@ -269,25 +297,20 @@ export function LiveMap({
       onPointerMove={move}
       onPointerUp={up}
       onPointerCancel={up}
+      onLostPointerCapture={(e) => pointers.current.delete(e.pointerId)}
     >
       <div className="map-tiles">{tiles}</div>
       <svg className="map-trails" width={size.w} height={size.h} aria-hidden>
-        {markers.map((m) => {
-          if (!m.trail || m.trail.length < 1) return null;
-          const pts = [...m.trail, shown(m)].map(pos);
-          const segs = pts.length - 1;
-          return pts.slice(1).map((p, i) => (
-            <line
-              key={m.id + i}
-              x1={pts[i]!.x}
-              y1={pts[i]!.y}
-              x2={p.x}
-              y2={p.y}
-              className="map-trail"
-              style={{ opacity: 0.12 + 0.78 * ((i + 1) / segs) }}
-            />
-          ));
-        })}
+        {markers.map((m) =>
+          m.route && m.route.length > 1 ? (
+            <polyline key={'r-' + m.id} className="map-route" points={m.route.map(pos).map((p) => p.x + ',' + p.y).join(' ')} />
+          ) : null,
+        )}
+        {markers.map((m) =>
+          m.trail && m.trail.length ? (
+            <polyline key={'t-' + m.id} className="map-trail" points={[...m.trail, shown(m)].map(pos).map((p) => p.x + ',' + p.y).join(' ')} />
+          ) : null,
+        )}
       </svg>
       {markers.map((m) => {
         const p = pos(shown(m));
@@ -305,7 +328,7 @@ export function LiveMap({
         <button type="button" className="icon-btn" aria-label="Zoom out" onClick={() => zoomAt(size.w / 2, size.h / 2, -1)}>
           −
         </button>
-        <button type="button" className="icon-btn" aria-label="Show all" onClick={refit}>
+        <button type="button" className="icon-btn" aria-label="Show all" onClick={showAll}>
           ⤢
         </button>
       </div>

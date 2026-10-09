@@ -15,6 +15,7 @@ import { requireRole } from '../auth';
 import { emit } from '../events';
 import { geocoder } from '../geocode';
 import { handler, HttpError } from '../http';
+import { roadRouter } from '../route';
 import { settingsOf } from '../setup';
 import { getRepo } from '../store';
 import { newId, type InvRepo, type PersonRecord } from '../store/types';
@@ -36,6 +37,8 @@ const worker = requireRole('worker', 'godown', 'admin');
 
 /** Positions closer together in time than this are dropped: the phone sends one every ~10 s. */
 export const MIN_POSITION_GAP_MS = 3000;
+/** A phone fix less sure than this (metres) stays off the trail. */
+export const MAX_ACCURACY_M = 100;
 /** Finished deliveries stay on the admin's list this long. */
 const RECENT_MS = 24 * 3600_000;
 
@@ -229,6 +232,28 @@ deliveryRoutes.get(
   }),
 );
 
+/**
+ * The road still ahead for a delivery: from the worker's latest position (or the shop, before
+ * Start) to the home, through the server's router (see route.ts). Empty when there is no road to
+ * show: no pin, no start point, or the router is not answering.
+ */
+deliveryRoutes.get(
+  '/admin/deliveries/:id/route',
+  admin,
+  handler(async (req, res) => {
+    const repo = getRepo();
+    const d = await repo.getDoc<Delivery>('deliveries', String(req.params.id));
+    if (!d) throw new HttpError(404, 'No such delivery');
+    const empty = { points: [], km: null, minutes: null };
+    if (!isActiveDelivery(d.status) || d.lat == null || d.lng == null) return res.json(empty);
+    const settings = await settingsOf(repo);
+    const from = d.status === 'out' && d.pos ? d.pos : settings.shopLat != null && settings.shopLng != null ? { lat: settings.shopLat, lng: settings.shopLng } : null;
+    if (!from) return res.json(empty);
+    const r = await roadRouter().route({ lat: from.lat, lng: from.lng }, { lat: d.lat, lng: d.lng });
+    res.json(r ?? empty);
+  }),
+);
+
 /** The address search for the pin, through the server: see geocode.ts. */
 deliveryRoutes.get(
   '/admin/geocode',
@@ -283,7 +308,7 @@ deliveryRoutes.post(
   '/worker/deliveries/:id/position',
   worker,
   handler(async (req, res) => {
-    const b = z.object({ ...latLng }).parse(req.body);
+    const b = z.object({ ...latLng, accuracy: z.number().min(0).optional() }).parse(req.body);
     const repo = getRepo();
     const d = await ownDelivery(repo, String(req.params.id), req.person!);
     // Only while on the way: nothing is kept before Start or after it is over.
@@ -291,8 +316,12 @@ deliveryRoutes.post(
     const at = now();
     if (d.pos && Date.parse(at) - Date.parse(d.pos.at) < MIN_POSITION_GAP_MS) return res.json({ kept: false });
     const p = { lat: b.lat, lng: b.lng, at };
+    // A fix worse than 100 m (indoors, the GPS just waking) would zig-zag the trail: it is not
+    // drawn, and it moves the live position only when there is none better yet.
+    const rough = b.accuracy != null && b.accuracy > MAX_ACCURACY_M;
+    if (rough && d.pos) return res.json({ kept: false });
     d.pos = p;
-    d.track = addTrackPoint(d.track, p);
+    if (!rough) d.track = addTrackPoint(d.track, p);
     await repo.putDoc('deliveries', d);
     // Positions go to the admin's map only.
     emit('delivery', { roles: [] }, d.id);

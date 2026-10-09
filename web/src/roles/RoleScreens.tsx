@@ -430,7 +430,7 @@ function useSharePosition(id: string | null, onProblem: (msg: string) => void) {
     if (!id) return;
     let stopped = false;
     let watch: number | null = null;
-    let latest: { lat: number; lng: number } | null = null;
+    let latest: { lat: number; lng: number; accuracy?: number } | null = null;
     let sentKey = '';
     let lock: { release: () => Promise<void> } | null = null;
     const send = () => {
@@ -457,7 +457,7 @@ function useSharePosition(id: string | null, onProblem: (msg: string) => void) {
       let first = true;
       watch = navigator.geolocation.watchPosition(
         (p) => {
-          latest = { lat: p.coords.latitude, lng: p.coords.longitude };
+          latest = { lat: p.coords.latitude, lng: p.coords.longitude, accuracy: Number.isFinite(p.coords.accuracy) ? Math.round(p.coords.accuracy) : undefined };
           setSending(true);
           onProblem('');
           if (first) {

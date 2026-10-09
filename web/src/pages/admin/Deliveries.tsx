@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { distanceKm, distanceText, formatRupees, isActiveDelivery, type CustomerProfile, type Delivery, type VehicleKind } from '@stock/core';
 import { http } from '../../lib/api';
@@ -35,6 +35,40 @@ function useNow(ms = 1000): number {
   return n;
 }
 
+type Road = { points: LatLng[]; km: number | null; minutes: number | null };
+/** Ask for the road again after this long, or sooner once the worker has moved this far. */
+const ROAD_EVERY_MS = 30_000;
+const ROAD_MOVED_KM = 0.2;
+
+/**
+ * The road still ahead for each delivery on the way, from the server's router. Asked when one
+ * starts, then at most every 30 s or when the worker has moved 200 m; a failure just means no road.
+ */
+function useRoads(rows: Row[] | undefined, nowMs: number): Map<string, Road> {
+  const [roads, setRoads] = useState(() => new Map<string, Road>());
+  const asked = useRef(new Map<string, { at: number; from: LatLng }>());
+  const tick = Math.floor(nowMs / ROAD_EVERY_MS);
+  useEffect(() => {
+    if (!rows) return;
+    const out = rows.filter((d) => d.status === 'out' && d.pos && d.lat != null && d.lng != null);
+    for (const d of out) {
+      const pos = { lat: d.pos!.lat, lng: d.pos!.lng };
+      const last = asked.current.get(d.id);
+      if (last && Date.now() - last.at < ROAD_EVERY_MS && distanceKm(last.from, pos) < ROAD_MOVED_KM) continue;
+      asked.current.set(d.id, { at: Date.now(), from: pos });
+      http
+        .get<Road>('/admin/deliveries/' + d.id + '/route')
+        .then((r) => setRoads((m) => new Map(m).set(d.id, r)))
+        .catch(() => undefined);
+    }
+    // Forget the ones no longer on the way.
+    const ids = new Set(out.map((d) => d.id));
+    for (const id of [...asked.current.keys()]) if (!ids.has(id)) asked.current.delete(id);
+    setRoads((m) => ([...m.keys()].some((id) => !ids.has(id)) ? new Map([...m].filter(([id]) => ids.has(id))) : m));
+  }, [rows, tick]);
+  return roads;
+}
+
 /**
  * Buy & move → Deliveries: the live map (the shop, each home, each worker on the way gliding as
  * their phone reports), the list beside it, and the form that sends a new delivery.
@@ -48,6 +82,7 @@ export function DeliveriesPage() {
   const live = useSettled(useLive('delivery'), 1000);
   const { value, error, reload } = useLoad(() => http.get<Live>('/admin/deliveries'), [live]);
   const now = useNow();
+  const roads = useRoads(value?.deliveries, now);
   const [err, setErr] = useState('');
 
   useEffect(() => {
@@ -64,7 +99,7 @@ export function DeliveriesPage() {
     const active = isActiveDelivery(d.status);
     markers.push({ id: 'to-' + d.id, lat: d.lat, lng: d.lng, icon: d.status === 'delivered' ? '✅' : '📍', label: d.name, faded: !active });
     if (d.status === 'out' && d.pos) {
-      markers.push({ id: 'go-' + d.id, lat: d.pos.lat, lng: d.pos.lng, icon: VEHICLE_ICON[d.vehicleKind ?? 'bike'], label: d.personName, moving: true, trail: (d.track ?? []).slice(0, -1) });
+      markers.push({ id: 'go-' + d.id, lat: d.pos.lat, lng: d.pos.lng, icon: VEHICLE_ICON[d.vehicleKind ?? 'bike'], label: d.personName, moving: true, trail: (d.track ?? []).slice(0, -1), route: roads.get(d.id)?.points });
     }
   }
   const fit = markers.filter((m) => !m.faded);
@@ -107,7 +142,13 @@ export function DeliveriesPage() {
           {value.deliveries.map((d) => {
             const active = isActiveDelivery(d.status);
             const from = d.status === 'out' && d.pos ? d.pos : value.shop;
-            const left = active && from && d.lat != null && d.lng != null ? distanceText(distanceKm(from, { lat: d.lat, lng: d.lng })) : '';
+            const road = d.status === 'out' ? roads.get(d.id) : undefined;
+            const left =
+              road && road.km != null && road.minutes != null
+                ? distanceText(road.km) + bi(' by road · ', ' ರಸ್ತೆಯಲ್ಲಿ · ') + road.minutes + bi(' min', ' ನಿ.')
+                : active && from && d.lat != null && d.lng != null
+                  ? distanceText(distanceKm(from, { lat: d.lat, lng: d.lng }))
+                  : '';
             return (
               <div key={d.id} className={'card delivery-card' + (active ? '' : ' faded')}>
                 <div className="bar between m-0">

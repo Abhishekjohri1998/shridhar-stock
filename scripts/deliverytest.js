@@ -43,6 +43,7 @@ const eq = (name, got, want) => check(name, got === want, 'got ' + JSON.stringif
   const tr = C.trimTrack(pts);
   check('an ended route keeps only start and end', tr.length === 2 && tr[0].lat === 0 && tr[1].lat === 7);
   eq('an empty route stays empty', C.trimTrack(undefined).length, 0);
+  eq('a whole trip fits on the trail (500 points)', C.TRACK_MAX, 500);
   check('0,0 is not a position', !C.validLatLng(0, 0) && C.validLatLng(12.9, 77.6));
 }
 
@@ -79,8 +80,42 @@ async function geocodeTests() {
   eq('a day later the answer is asked for again', calls.length, 4);
 }
 
+// ---------------------------------------------------------------- the road route, with a pretend OSRM
+async function routeTests() {
+  const { createRouter, downsample, routeKey } = require(path.join(out, 'route.js'));
+  let clock = 5_000_000;
+  const calls = [];
+  const line = Array.from({ length: 1000 }, (_, i) => [75.13 - i * 0.00001, 15.35 + i * 0.00002]);
+  const r = createRouter({
+    baseUrl: 'https://osrm.example/',
+    now: () => clock,
+    sleep: async (ms) => {
+      clock += ms;
+    },
+    fetch: async (url) => {
+      calls.push({ url, at: clock });
+      if (url.includes('75.5')) return { ok: false, status: 500, json: async () => ({}) };
+      if (url.includes('75.6')) throw new Error('down');
+      return { ok: true, status: 200, json: async () => ({ code: 'Ok', routes: [{ distance: 3456, duration: 610, geometry: { coordinates: line } }] }) };
+    },
+  });
+  const a = await r.route({ lat: 15.35, lng: 75.13 }, { lat: 15.37, lng: 75.12 });
+  check('a road comes back with km and minutes', a && a.km === 3.5 && a.minutes === 10, JSON.stringify(a && { km: a.km, minutes: a.minutes }));
+  check('its points are cut down to 300, keeping both ends', a.points.length === 300 && a.points[0].lng === 75.13 && a.points[299].lat === line[999][1], a.points.length);
+  check('OSRM is asked lng,lat;lng,lat with the full geometry', calls[0].url === 'https://osrm.example/route/v1/driving/75.13,15.35;75.12,15.37?overview=full&geometries=geojson', calls[0].url);
+  await r.route({ lat: 15.35004, lng: 75.13004 }, { lat: 15.37, lng: 75.12 });
+  eq('a few metres away is answered from the cache', calls.length, 1);
+  eq('the cache key rounds to about 100 m', routeKey({ lat: 15.35004, lng: 75.13 }, { lat: 1, lng: 2 }), '15.350,75.130,1.000,2.000');
+  await Promise.all([r.route({ lat: 15.4, lng: 75.2 }, { lat: 15.37, lng: 75.12 }), r.route({ lat: 15.41, lng: 75.2 }, { lat: 15.37, lng: 75.12 })]);
+  check('each request is at least a second after the one before', calls.every((c, i) => i === 0 || c.at - calls[i - 1].at >= 1000), JSON.stringify(calls.map((c) => c.at)));
+  eq('a router error is no road', await r.route({ lat: 15.35, lng: 75.5 }, { lat: 15.37, lng: 75.12 }), null);
+  eq('a router that throws is no road', await r.route({ lat: 15.35, lng: 75.6 }, { lat: 15.37, lng: 75.12 }), null);
+  eq('a short line is left alone', downsample([1, 2, 3], 300).length, 3);
+}
+
 async function main() {
   await geocodeTests();
+  await routeTests();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-deliv-'));
   {
     const repo = await require(path.join(out, 'store', 'file.js')).createFileRepo(dir);
@@ -90,7 +125,7 @@ async function main() {
   const port = 4600 + Math.floor(Math.random() * 300);
   const base = 'http://localhost:' + port;
   const proc = spawn(process.execPath, [path.join(out, 'index.js')], {
-    env: { ...process.env, MONGO_URI: '', DEMO: '1', PORT: String(port), DATA_DIR: dir, JWT_SECRET: 'deliverytest', GEOCODE_URL: 'http://127.0.0.1:9' },
+    env: { ...process.env, MONGO_URI: '', DEMO: '1', PORT: String(port), DATA_DIR: dir, JWT_SECRET: 'deliverytest', GEOCODE_URL: 'http://127.0.0.1:9', ROUTE_URL: 'http://127.0.0.1:9' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let log = '';
@@ -177,6 +212,12 @@ async function main() {
     eq('the next is kept', (await post('/worker/deliveries/' + d.id + '/position', W, { lat: 15.36, lng: 75.125 })).body.kept, true);
     await new Promise((r) => setTimeout(r, 3100));
     await post('/worker/deliveries/' + d.id + '/position', W, { lat: 15.369, lng: 75.121 });
+    await new Promise((r) => setTimeout(r, 3100));
+    eq('a rough fix (over 100 m) is not drawn', (await post('/worker/deliveries/' + d.id + '/position', W, { lat: 15.5, lng: 75.5, accuracy: 900 })).body.kept, false);
+    const rt = await get('/admin/deliveries/' + d.id + '/route', A);
+    check('the road route, with the router not answering, is empty and not an error', rt.status === 200 && Array.isArray(rt.body.points) && rt.body.points.length === 0, JSON.stringify(rt));
+    eq('a worker cannot ask for the road', (await get('/admin/deliveries/' + d.id + '/route', W)).status, 403);
+    eq('nor is there a road for no delivery', (await get('/admin/deliveries/nope/route', A)).status, 404);
     const live = (await get('/admin/deliveries', A)).body;
     const ld = live.deliveries.find((x) => x.id === d.id);
     check('the admin sees it moving, with the trail', ld.status === 'out' && ld.pos.lat === 15.369 && ld.track.length === 3, JSON.stringify(ld));
