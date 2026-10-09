@@ -504,6 +504,20 @@ export const transfersTour = tour('transfers', ['Transfers', 'ಸಾಗಣೆ'],
     ['The live map shows each worker on the way, gliding as their phone reports.', 'ದಾರಿಯಲ್ಲಿರುವ ಕೆಲಸಗಾರರನ್ನು ನಕ್ಷೆ ನೇರವಾಗಿ ತೋರಿಸುತ್ತದೆ.'],
     ['“+ New delivery” opens the form; a bill’s “🏠 Deliver” fills it.', '“+ ಹೊಸ ಡೆಲಿವರಿ” ಫಾರ್ಮ್ ತೆರೆಯುತ್ತದೆ; ಬಿಲ್‌ನ “🏠 ಡೆಲಿವರಿ” ತುಂಬಿಸುತ್ತದೆ.'],
   ),
+  step(
+    'deliveries-share',
+    ['Share tracking', 'ಟ್ರ್ಯಾಕಿಂಗ್ ಕಳುಹಿಸಿ'],
+    ['Sends the customer a live tracking link on WhatsApp.', 'ಗ್ರಾಹಕರಿಗೆ ವಾಟ್ಸಾಪ್‌ನಲ್ಲಿ ನೇರ ಟ್ರ್ಯಾಕಿಂಗ್ ಲಿಂಕ್ ಕಳುಹಿಸುತ್ತದೆ.'],
+    ['They see the worker coming, the arrival time and each step, with no app or sign-in.', 'ಕೆಲಸಗಾರ ಬರುವುದು, ಸಮಯ ಮತ್ತು ಪ್ರತಿ ಹಂತ ಕಾಣುತ್ತದೆ; ಆ್ಯಪ್ ಅಥವಾ ಲಾಗಿನ್ ಬೇಡ.'],
+    ['WhatsApp opens with the message ready: press send.', 'ಸಂದೇಶ ಸಿದ್ಧವಾಗಿ ವಾಟ್ಸಾಪ್ ತೆರೆಯುತ್ತದೆ: ಕಳುಹಿಸಿ ಒತ್ತಿ.'],
+  ),
+  step(
+    'deliveries-otp',
+    ['Door code', 'ಬಾಗಿಲ ಕೋಡ್'],
+    ['Each delivery has a 4-digit code the customer tells the worker.', 'ಪ್ರತಿ ಡೆಲಿವರಿಗೆ 4 ಅಂಕಿಯ ಕೋಡ್; ಗ್ರಾಹಕರು ಕೆಲಸಗಾರರಿಗೆ ಹೇಳುತ್ತಾರೆ.'],
+    ['The worker can mark it delivered only with the right code: proof it reached the door.', 'ಸರಿಯಾದ ಕೋಡ್‌ನಿಂದ ಮಾತ್ರ ತಲುಪಿಸಿದೆ ಎನ್ನಬಹುದು: ಬಾಗಿಲಿಗೆ ತಲುಪಿದ ಪುರಾವೆ.'],
+    ['Tick “no phone” for a customer who cannot get the code.', 'ಕೋಡ್ ಸಿಗದ ಗ್ರಾಹಕರಿಗೆ “ಫೋನ್ ಇಲ್ಲ” ಗುರುತಿಸಿ.'],
+  ),
   helpStep,
 ]);
 

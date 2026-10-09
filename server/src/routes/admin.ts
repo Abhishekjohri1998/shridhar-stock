@@ -530,6 +530,8 @@ adminRoutes.put(
         bikeMaxAmount: z.number().min(0).max(10_000_000).optional(),
         shopLat: z.number().min(-90).max(90).optional(),
         shopLng: z.number().min(-180).max(180).optional(),
+        // The phone customers see on the tracking page; '' clears it.
+        shopPhone: z.string().trim().max(20).optional(),
       })
       .parse(req.body);
     const repo = getRepo();
@@ -540,6 +542,12 @@ adminRoutes.put(
     if (body.shopLat != null && body.shopLng != null) {
       next.shopLat = body.shopLat;
       next.shopLng = body.shopLng;
+    }
+    if (body.shopPhone != null) {
+      const ph = normalisePhone(body.shopPhone);
+      if (body.shopPhone && ph.length !== 10) throw new HttpError(400, 'The shop phone should be 10 digits');
+      if (ph) next.shopPhone = ph;
+      else delete next.shopPhone;
     }
     await repo.putDoc('meta', { id: 'settings', ...next });
     // Every screen showing a bill total shows it rounded the new way.

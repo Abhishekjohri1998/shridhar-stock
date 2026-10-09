@@ -47,3 +47,50 @@ export const isActiveDelivery = (s: DeliveryStatus) => s === 'pending' || s === 
 /** Whether a reported position is a real place on the earth. */
 export const validLatLng = (lat: unknown, lng: unknown): boolean =>
   typeof lat === 'number' && typeof lng === 'number' && Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && !(lat === 0 && lng === 0);
+
+/** Within this many metres of the home the worker is "Nearby". */
+export const NEARBY_M = 300;
+
+/** Whether a position is within NEARBY_M of the home. */
+export function isNearby(pos: { lat: number; lng: number } | undefined | null, home: { lat?: number; lng?: number }): boolean {
+  if (!pos || home.lat == null || home.lng == null) return false;
+  return distanceKm(pos, { lat: home.lat, lng: home.lng }) * 1000 <= NEARBY_M;
+}
+
+/** A 4-digit code for the door, from a random source (0..1). */
+export function makeOtp(rand: () => number = Math.random): string {
+  return String(Math.floor(rand() * 10000) % 10000).padStart(4, '0');
+}
+
+/** Wrong codes allowed before the worker must call the shop. */
+export const OTP_MAX_TRIES = 5;
+
+export type DeliveryStepKey = 'packed' | 'picked' | 'onway' | 'nearby' | 'delivered';
+export interface DeliveryStep {
+  key: DeliveryStepKey;
+  /** When it happened, if it has. */
+  at?: string;
+  done: boolean;
+  /** The step happening now. */
+  active: boolean;
+}
+
+/**
+ * The customer's timeline: Order packed → Picked up → On the way → Nearby → Delivered, from the
+ * times already kept. "Picked up" and "On the way" both happen at Start.
+ */
+export function deliverySteps(d: { status: DeliveryStatus; times: Partial<Record<DeliveryStatus, string>>; nearbyAt?: string }): DeliveryStep[] {
+  const t = d.times;
+  const ats: [DeliveryStepKey, string | undefined][] = [
+    ['packed', t.pending],
+    ['picked', t.out],
+    ['onway', t.out],
+    ['nearby', d.nearbyAt],
+    ['delivered', t.delivered],
+  ];
+  let active = -1;
+  if (d.status === 'pending') active = 0;
+  else if (d.status === 'out') active = d.nearbyAt ? 3 : 2;
+  const over = d.status === 'delivered';
+  return ats.map(([key, at], i) => ({ key, ...(at ? { at } : {}), done: over ? i < 4 || !!at : i < active, active: i === active }));
+}

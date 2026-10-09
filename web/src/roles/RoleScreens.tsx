@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
-import { describeQty, formatRupees, groupPick, itemMatches, pickName, type Delivery, type Ink, type ItemUnit, type OrderRequest, type Transfer } from '@stock/core';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { describeQty, formatRupees, groupPick, itemMatches, PAID_BY, pickName, type Delivery, type Ink, type ItemUnit, type OrderRequest, type PaidBy, type Transfer } from '@stock/core';
+import { LiveMap, type MapMarker } from '../components/LiveMap';
+import { openLink, paidWord, trackMessage, waLink } from '../lib/share';
 import { http } from '../lib/api';
 import { useLive } from '../lib/live';
 import { useLoad, useSession } from '../lib/session';
@@ -393,7 +395,70 @@ function ReceiveCard({ t, nm, dq, onDone }: { t: Transfer; nm: (id: string) => s
 
 // ---------------------------------------------------------------- deliveries (any worker)
 
-type WorkerDelivery = Omit<Delivery, 'track'>;
+type WorkerDelivery = Omit<Delivery, 'track' | 'otp' | 'otpTries'> & { links?: { track: string } };
+
+/**
+ * A photo from the camera, made small in the browser before it is sent: at most 1024 px on the
+ * long side, JPEG at 0.7 — about 100 KB, inside the normal JSON request.
+ */
+export async function shrinkPhoto(file: File, max = 1024, quality = 0.7): Promise<string> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = () => reject(new Error('Could not read the photo'));
+      i.src = url;
+    });
+    const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(img.naturalWidth * k));
+    c.height = Math.max(1, Math.round(img.naturalHeight * k));
+    c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', quality);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** Four big boxes for the door code; typing moves to the next box. Shakes when `wrong` changes. */
+function OtpBoxes({ value, onChange, wrong }: { value: string; onChange: (v: string) => void; wrong: number }) {
+  const refs = useRef<(HTMLInputElement | null)[]>([]);
+  const digits = value.padEnd(4, ' ').slice(0, 4).split('');
+  const set = (i: number, ch: string) => {
+    const d = ch.replace(/\D/g, '');
+    if (d.length > 1) {
+      // A pasted code.
+      onChange(d.slice(0, 4));
+      refs.current[Math.min(3, d.length)]?.focus();
+      return;
+    }
+    const next = digits.map((x, j) => (j === i ? d || ' ' : x)).join('').trimEnd();
+    onChange(next.replace(/ /g, ''));
+    if (d && i < 3) refs.current[i + 1]?.focus();
+  };
+  return (
+    <div key={wrong} className={'otp-boxes' + (wrong ? ' shake' : '')} data-tour="worker-otp">
+      {digits.map((c, i) => (
+        <input
+          key={i}
+          ref={(el) => {
+            refs.current[i] = el;
+          }}
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          maxLength={4}
+          aria-label={'Digit ' + (i + 1)}
+          value={c.trim()}
+          onChange={(e) => set(i, e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Backspace' && !c.trim() && i > 0) refs.current[i - 1]?.focus();
+          }}
+        />
+      ))}
+    </div>
+  );
+}
 
 /**
  * Inside the tablet/phone app the stock screen is a WebView: the app asks Android for location
@@ -514,6 +579,12 @@ export function DeliveriesHome() {
   const [closing, setClosing] = useState<{ id: string; ok: boolean } | null>(null);
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
+  const [otp, setOtp] = useState('');
+  const [wrong, setWrong] = useState(0);
+  const [locked, setLocked] = useState(false);
+  const [paidBy, setPaidBy] = useState<PaidBy | ''>('');
+  const [photo, setPhoto] = useState('');
+  const [busy, setBusy] = useState(false);
   const onWay = value?.find((d) => d.status === 'out') ?? null;
   const sending = useSharePosition(onWay?.id ?? null, setProblem);
 
@@ -522,14 +593,45 @@ export function DeliveriesHome() {
 
   const act = async (fn: () => Promise<unknown>) => {
     setMsg('');
+    setBusy(true);
     try {
       await fn();
       setClosing(null);
       reload();
     } catch (e) {
+      const m = (e as Error).message;
+      setMsg(m);
+      // A wrong door code shakes the boxes; too many and only the shop can help.
+      if (/code/i.test(m)) {
+        setWrong((w) => w + 1);
+        setOtp('');
+      }
+      if (/Call the shop/i.test(m)) setLocked(true);
+    }
+    setBusy(false);
+  };
+  const openClose = (d: WorkerDelivery) => {
+    setClosing({ id: d.id, ok: true });
+    setAmount(String(d.amountDue || ''));
+    setOtp('');
+    setWrong(0);
+    setLocked(false);
+    setPaidBy(d.amountDue > 0 ? '' : 'paid');
+    setPhoto('');
+    setMsg('');
+  };
+  const takePhoto = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      setPhoto(await shrinkPhoto(file));
+    } catch (e) {
       setMsg((e as Error).message);
     }
   };
+
+  // The map: where to go, and ◎ for where the worker is now.
+  const target = onWay ?? value.find((d) => d.status === 'pending' && d.lat != null) ?? null;
+  const mapMarkers: MapMarker[] = target && target.lat != null && target.lng != null ? [{ id: 'to-' + target.id, lat: target.lat, lng: target.lng, icon: '🏠', label: target.name }] : [];
 
   return (
     <>
@@ -544,7 +646,8 @@ export function DeliveriesHome() {
         </div>
       )}
       {problem && <div className="msg err">{problem}</div>}
-      {msg && <div className="msg err">{msg}</div>}
+      {msg && !closing && <div className="msg err">{msg}</div>}
+      {mapMarkers.length > 0 && <LiveMap className="map-small" markers={mapMarkers} locate locateLabel={bi('Show where I am', 'ನಾನು ಎಲ್ಲಿದ್ದೇನೆ')} />}
       {value.length === 0 && <Empty tour="worker-deliveries">{bi('No deliveries for you right now. The shop assigns them; they appear here by themselves.', 'ಈಗ ನಿಮಗೆ ಡೆಲಿವರಿ ಇಲ್ಲ. ಅಂಗಡಿ ಕೊಟ್ಟಾಗ ಇಲ್ಲಿ ತಾನಾಗಿ ಬರುತ್ತದೆ.')}</Empty>}
       {value.map((d) => {
         const active = d.status === 'pending' || d.status === 'out';
@@ -568,6 +671,7 @@ export function DeliveriesHome() {
                 </>
               )}
               {d.collected != null && ' · ' + bi('Collected', 'ಪಡೆದದ್ದು') + ' ' + formatRupees(d.collected)}
+              {d.paidBy && ' · ' + paidWord(d.paidBy, bi)}
               {d.reason && ' · “' + d.reason + '”'}
             </p>
             {active && (
@@ -580,10 +684,16 @@ export function DeliveriesHome() {
                 <a className="btn" href={mapsLink(d)} target="_blank" rel="noreferrer" data-tour="worker-maps">
                   🧭 {bi('Open in Maps', 'ನಕ್ಷೆಯಲ್ಲಿ ತೆರೆಯಿರಿ')}
                 </a>
+                {d.links && d.phone && (
+                  <button className="btn" data-tour="worker-share-tracking" onClick={() => openLink(waLink(d.phone, trackMessage('', d.links!.track)))}>
+                    💬 {bi('Share tracking', 'ಟ್ರ್ಯಾಕಿಂಗ್ ಕಳುಹಿಸಿ')}
+                  </button>
+                )}
+                {d.lat == null && <span className="muted">{bi('Waiting for the customer’s location', 'ಗ್ರಾಹಕರ ಸ್ಥಳಕ್ಕಾಗಿ ಕಾಯುತ್ತಿದೆ')}</span>}
                 {d.status === 'pending' && (
                   <button
                     className="btn primary"
-                    disabled={!!onWay}
+                    disabled={!!onWay || d.lat == null}
                     onClick={() => {
                       setProblem('');
                       void act(() => http.post('/worker/deliveries/' + d.id + '/start', {}));
@@ -597,10 +707,7 @@ export function DeliveriesHome() {
                   <>
                     <button
                       className="btn primary"
-                      onClick={() => {
-                        setClosing({ id: d.id, ok: true });
-                        setAmount(String(d.amountDue || ''));
-                      }}
+                      onClick={() => openClose(d)}
                     >
                       ✓ {bi('Delivered', 'ತಲುಪಿಸಿದೆ')}
                     </button>
@@ -618,14 +725,59 @@ export function DeliveriesHome() {
               </div>
             )}
             {closing?.id === d.id && closing.ok && (
-              <div className="bar">
-                <label className="field grow">
-                  <span>{bi('Amount collected ₹', 'ಪಡೆದ ಮೊತ್ತ ₹')}</span>
-                  <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
-                </label>
-                <button className="btn primary" onClick={() => act(() => http.post('/worker/deliveries/' + d.id + '/delivered', { collected: Math.max(0, Number(amount) || 0) }))}>
-                  {bi('Save', 'ಉಳಿಸಿ')}
-                </button>
+              <div className="deliver-close">
+                {!d.otpSkipped && (
+                  <div className="field">
+                    <span>{bi('Ask the customer for the 4-digit code', 'ಗ್ರಾಹಕರಿಂದ 4 ಅಂಕಿಯ ಕೋಡ್ ಕೇಳಿ')}</span>
+                    {locked ? <div className="msg err">{bi('Too many wrong codes. Call the shop.', 'ತುಂಬಾ ತಪ್ಪು ಕೋಡ್. ಅಂಗಡಿಗೆ ಕರೆ ಮಾಡಿ.')}</div> : <OtpBoxes value={otp} onChange={setOtp} wrong={wrong} />}
+                  </div>
+                )}
+                <div className="grid2">
+                  <label className="field">
+                    <span>{bi('Amount collected ₹', 'ಪಡೆದ ಮೊತ್ತ ₹')}</span>
+                    <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
+                  </label>
+                  <div className="field">
+                    <span>{bi('Photo at the door (optional)', 'ಬಾಗಿಲಲ್ಲಿ ಫೋಟೋ (ಬೇಕಿದ್ದರೆ)')}</span>
+                    <label className="btn photo-btn">
+                      📷 {photo ? bi('Retake', 'ಮತ್ತೆ ತೆಗೆಯಿರಿ') : bi('Take photo', 'ಫೋಟೋ ತೆಗೆಯಿರಿ')}
+                      <input type="file" accept="image/*" capture="environment" hidden onChange={(e) => void takePhoto(e.target.files?.[0])} />
+                    </label>
+                    {photo && <img className="photo-preview" src={photo} alt="" />}
+                  </div>
+                </div>
+                <div className="field" data-tour="worker-paid-by">
+                  <span>{bi('How did they pay?', 'ಹೇಗೆ ಪಾವತಿಸಿದರು?')}</span>
+                  <div className="chips">
+                    {PAID_BY.map((p) => (
+                      <button type="button" key={p} className={'chip' + (paidBy === p ? ' on' : '')} onClick={() => setPaidBy(p)}>
+                        {paidWord(p, bi)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {msg && <div className="msg err">{msg}</div>}
+                <div className="bar">
+                  <button
+                    className="btn primary"
+                    disabled={busy || locked || (!d.otpSkipped && otp.length !== 4) || !paidBy}
+                    onClick={() =>
+                      act(() =>
+                        http.post('/worker/deliveries/' + d.id + '/delivered', {
+                          collected: Math.max(0, Number(amount) || 0),
+                          ...(d.otpSkipped ? {} : { otp }),
+                          ...(paidBy ? { paidBy } : {}),
+                          ...(photo ? { photo } : {}),
+                        }),
+                      )
+                    }
+                  >
+                    ✓ {bi('Save', 'ಉಳಿಸಿ')}
+                  </button>
+                  <button className="btn ghost" onClick={() => setClosing(null)}>
+                    {bi('Cancel', 'ರದ್ದು')}
+                  </button>
+                </div>
               </div>
             )}
             {closing?.id === d.id && !closing.ok && (

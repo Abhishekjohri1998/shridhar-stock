@@ -2,7 +2,12 @@ import { Router } from 'express';
 import { z } from 'zod';
 import {
   addTrackPoint,
+  distanceKm,
   isActiveDelivery,
+  isNearby,
+  makeOtp,
+  OTP_MAX_TRIES,
+  PAID_BY,
   normalisePhone,
   suggestVehicle,
   trimTrack,
@@ -12,11 +17,12 @@ import {
   type Vehicle,
 } from '@stock/core';
 import { requireRole } from '../auth';
-import { emit } from '../events';
+import { emit, type EventExtra } from '../events';
+import { linkPaths } from '../links';
 import { geocoder } from '../geocode';
 import { handler, HttpError } from '../http';
 import { roadRouter } from '../route';
-import { settingsOf } from '../setup';
+import { settingsOf, shopOf } from '../setup';
 import { getRepo } from '../store';
 import { newId, type InvRepo, type PersonRecord } from '../store/types';
 
@@ -48,9 +54,31 @@ const isWorker = (p: PersonRecord) => p.active && (p.role === 'worker' || p.role
 /** Lines that are goods: a delivery charge or a note is not an item to carry. */
 const itemLines = (b: BillMirror) => b.lines.filter((l) => l.state !== 'not-item').length;
 
-function tell(d: Delivery): void {
+function tell(d: Delivery, what?: EventExtra['what']): void {
   // The admin always; the worker only for their own (never every position).
-  emit('delivery', d.personId ? { personId: d.personId } : { roles: [] }, d.id);
+  emit('delivery', d.personId ? { personId: d.personId } : { roles: [] }, d.id, what ? { what } : {});
+}
+
+/** Ask for the road (and so the arrival time) again after this long, or once moved this far. */
+export const ETA_EVERY_MS = 30_000;
+export const ETA_MOVED_KM = 0.2;
+/** With no road router answering: straight line, a little longer for the roads, at town speed. */
+const fallbackMinutes = (km: number, kind: Delivery['vehicleKind']) => Math.max(1, Math.round(((km * 1.4) / (kind === 'car' ? 18 : 22)) * 60));
+
+/** The arrival time from a position: the road router's minutes, or a straight-line guess. */
+export async function etaFrom(d: Delivery, from: { lat: number; lng: number }): Promise<number | null> {
+  if (d.lat == null || d.lng == null) return null;
+  const r = await roadRouter().route(from, { lat: d.lat, lng: d.lng });
+  return r ? Math.max(1, Math.round(r.minutes)) : fallbackMinutes(distanceKm(from, { lat: d.lat, lng: d.lng }), d.vehicleKind);
+}
+
+/** A photo as the phone sends it: a JPEG data URL, at most about 300 KB. */
+export const MAX_PHOTO_CHARS = 400_000;
+
+/** What the worker may see of a delivery: never the door code (the customer tells it). */
+function forWorker(d: Delivery): Omit<Delivery, 'otp' | 'otpTries'> {
+  const { otp: _o, otpTries: _n, ...shown } = d;
+  return shown;
 }
 
 async function ownDelivery(repo: InvRepo, id: string, me: PersonRecord): Promise<Delivery> {
@@ -123,7 +151,9 @@ const createBody = z.object({
   phone: z.string().trim().max(20).default(''),
   address: z.string().trim().min(1, 'Give the address').max(300),
   landmark: z.string().trim().max(120).optional(),
-  ...latLng,
+  // No pin yet is allowed: the customer can send their own location through their link.
+  lat: latLng.lat.optional(),
+  lng: latLng.lng.optional(),
   itemCount: z.number().int().min(0).max(10_000),
   amount: z.number().min(0).max(10_000_000).default(0),
   amountDue: z.number().min(0).max(10_000_000).default(0),
@@ -131,6 +161,8 @@ const createBody = z.object({
   vehicle: z.string().trim().max(40).optional(),
   personId: z.string().min(1, 'Pick a worker'),
   note: z.string().trim().max(300).optional(),
+  /** The customer has no phone to get the code on: delivered without it. */
+  otpSkipped: z.boolean().optional(),
 });
 
 deliveryRoutes.post(
@@ -138,6 +170,7 @@ deliveryRoutes.post(
   admin,
   handler(async (req, res) => {
     const b = createBody.parse(req.body);
+    if ((b.lat == null) !== (b.lng == null)) throw new HttpError(400, 'Give both parts of the pin');
     const repo = getRepo();
     const person = await repo.getPerson(b.personId);
     if (!person || !isWorker(person)) throw new HttpError(400, 'Pick a worker who signs in');
@@ -153,8 +186,7 @@ deliveryRoutes.post(
       phone,
       address: b.address,
       ...(b.landmark ? { landmark: b.landmark } : {}),
-      lat: b.lat,
-      lng: b.lng,
+      ...(b.lat != null && b.lng != null ? { lat: b.lat, lng: b.lng } : {}),
       itemCount: b.itemCount,
       vehicleKind: b.vehicleKind ?? suggestVehicle({ itemCount: b.itemCount, amount: b.amount }, settings),
       ...(b.vehicle ? { vehicle: b.vehicle } : {}),
@@ -165,11 +197,13 @@ deliveryRoutes.post(
       at,
       times: { pending: at },
       by: req.person!.id,
+      otp: makeOtp(),
+      ...(b.otpSkipped ? { otpSkipped: true } : {}),
     };
     await repo.putDoc('deliveries', d);
     // The pin is kept on the customer, for next time.
     const key = d.customerKey;
-    if (key) {
+    if (key && b.lat != null && b.lng != null) {
       const c = await repo.getDoc<CustomerProfile>('customers', 'c_' + key);
       await repo.putDoc<CustomerProfile>('customers', {
         ...(c ?? { id: 'c_' + key, key, name: b.name, balance: 0 }),
@@ -179,8 +213,8 @@ deliveryRoutes.post(
         lng: b.lng,
       });
     }
-    tell(d);
-    res.status(201).json(d);
+    tell(d, 'assigned');
+    res.status(201).json({ ...d, links: linkPaths(d.id) });
   }),
 );
 
@@ -189,7 +223,7 @@ deliveryRoutes.put(
   '/admin/deliveries/:id',
   admin,
   handler(async (req, res) => {
-    const b = z.object({ vehicleKind: z.enum(['bike', 'car']).optional(), vehicle: z.string().trim().max(40).optional(), personId: z.string().optional() }).parse(req.body);
+    const b = z.object({ vehicleKind: z.enum(['bike', 'car']).optional(), vehicle: z.string().trim().max(40).optional(), personId: z.string().optional(), otpSkipped: z.boolean().optional() }).parse(req.body);
     const repo = getRepo();
     const d = await repo.getDoc<Delivery>('deliveries', String(req.params.id));
     if (!d) throw new HttpError(404, 'No such delivery');
@@ -203,8 +237,9 @@ deliveryRoutes.put(
     }
     if (b.vehicleKind) d.vehicleKind = b.vehicleKind;
     if (b.vehicle != null) d.vehicle = b.vehicle || undefined;
+    if (b.otpSkipped != null) d.otpSkipped = b.otpSkipped;
     await repo.putDoc('deliveries', d);
-    tell(d);
+    tell(d, was && was !== d.personId ? 'assigned' : undefined);
     if (was && was !== d.personId) emit('delivery', { personId: was }, d.id);
     res.json(d);
   }),
@@ -217,16 +252,18 @@ deliveryRoutes.get(
   handler(async (_req, res) => {
     const repo = getRepo();
     const since = new Date(Date.now() - RECENT_MS).toISOString();
-    const [active, recent, people, settings] = await Promise.all([
+    const [active, recent, people, settings, shopLoc] = await Promise.all([
       repo.listDocs<Delivery>('deliveries', { status: ['pending', 'out'] }),
       repo.listDocs<Delivery>('deliveries', { filter: { status: ['delivered', 'failed'], at: { gte: since } }, sort: { at: -1 }, limit: 50 }),
       repo.listPeople(),
       settingsOf(repo),
+      shopOf(repo),
     ]);
     const nameOf = new Map(people.map((p) => [p.id, p.name]));
-    const list = [...active.sort((a, b) => b.at.localeCompare(a.at)), ...recent].map((d) => ({ ...d, personName: d.personId ? (nameOf.get(d.personId) ?? '') : '' }));
+    const list = [...active.sort((a, b) => b.at.localeCompare(a.at)), ...recent].map((d) => ({ ...d, personName: d.personId ? (nameOf.get(d.personId) ?? '') : '', links: linkPaths(d.id) }));
     res.json({
       shop: settings.shopLat != null && settings.shopLng != null ? { lat: settings.shopLat, lng: settings.shopLng } : null,
+      shopName: shopLoc.name,
       deliveries: list,
     });
   }),
@@ -282,7 +319,8 @@ deliveryRoutes.get(
       .filter((d) => isActiveDelivery(d.status) || d.at >= since)
       .sort((a, b) => Number(isActiveDelivery(b.status)) - Number(isActiveDelivery(a.status)) || b.at.localeCompare(a.at))
       // The worker needs the job, not the route the server keeps.
-      .map(({ track: _t, by: _b, ...d }) => d);
+      // Nor the door code: the customer tells it, so it proves the worker was there.
+      .map(({ track: _t, by: _b, ...d }) => ({ ...forWorker(d as Delivery), ...(isActiveDelivery(d.status) ? { links: { track: linkPaths(d.id).track } } : {}) }));
     res.json(shown);
   }),
 );
@@ -293,14 +331,15 @@ deliveryRoutes.post(
   handler(async (req, res) => {
     const repo = getRepo();
     const d = await ownDelivery(repo, String(req.params.id), req.person!);
-    if (d.status === 'out') return res.json(d);
+    if (d.status === 'out') return res.json(forWorker(d));
     if (d.status !== 'pending') throw new HttpError(409, 'This delivery is already over');
+    if (d.lat == null || d.lng == null) throw new HttpError(409, 'There is no pin for the home yet. Wait for the customer’s location, or ask the shop.');
     d.status = 'out';
     d.times.out = now();
     d.track = [];
     await repo.putDoc('deliveries', d);
-    tell(d);
-    res.json(d);
+    tell(d, 'started');
+    res.json(forWorker(d));
   }),
 );
 
@@ -322,17 +361,29 @@ deliveryRoutes.post(
     if (rough && d.pos) return res.json({ kept: false });
     d.pos = p;
     if (!rough) d.track = addTrackPoint(d.track, p);
+    // Nearby: once, the first time within 300 m of the home.
+    const nearNow = !d.nearbyAt && !rough && isNearby(p, d);
+    if (nearNow) d.nearbyAt = at;
+    // The arrival time, asked again every 30 s or once moved 200 m.
+    const e = d.eta;
+    const stale = !e || Date.parse(at) - Date.parse(e.at) >= ETA_EVERY_MS || !e.from || distanceKm(e.from, p) >= ETA_MOVED_KM;
+    if (stale) {
+      const minutes = await etaFrom(d, p);
+      if (minutes != null) d.eta = { minutes, at, from: { lat: p.lat, lng: p.lng } };
+    }
     await repo.putDoc('deliveries', d);
-    // Positions go to the admin's map only.
-    emit('delivery', { roles: [] }, d.id);
-    res.json({ kept: true });
+    if (nearNow) tell(d, 'nearby');
+    // Positions go to the admin's map (and the customer's page) only.
+    else emit('delivery', { roles: [] }, d.id);
+    res.json({ kept: true, ...(d.eta ? { eta: d.eta.minutes } : {}), ...(d.nearbyAt ? { nearby: true } : {}) });
   }),
 );
 
-async function finish(req: import('express').Request, status: 'delivered' | 'failed', patch: Partial<Delivery>): Promise<Delivery> {
+async function finish(req: import('express').Request, status: 'delivered' | 'failed', patch: Partial<Delivery>, check?: (d: Delivery, repo: InvRepo) => Promise<void>) {
   const repo = getRepo();
   const d = await ownDelivery(repo, String(req.params.id), req.person!);
   if (!isActiveDelivery(d.status)) throw new HttpError(409, 'This delivery is already over');
+  if (check) await check(d, repo);
   Object.assign(d, patch);
   d.status = status;
   d.times[status] = now();
@@ -340,16 +391,38 @@ async function finish(req: import('express').Request, status: 'delivered' | 'fai
   d.track = trimTrack(d.track);
   delete d.pos;
   await repo.putDoc('deliveries', d);
-  tell(d);
-  return d;
+  tell(d, status);
+  return forWorker(d);
 }
 
 deliveryRoutes.post(
   '/worker/deliveries/:id/delivered',
   worker,
   handler(async (req, res) => {
-    const b = z.object({ collected: z.number().min(0).max(10_000_000).default(0) }).parse(req.body);
-    res.json(await finish(req, 'delivered', { collected: b.collected }));
+    const b = z
+      .object({
+        collected: z.number().min(0).max(10_000_000).default(0),
+        otp: z.string().trim().max(8).optional(),
+        paidBy: z.enum(PAID_BY as unknown as [string, ...string[]]).optional(),
+        photo: z.string().max(MAX_PHOTO_CHARS, 'The photo is too big').optional(),
+      })
+      .parse(req.body);
+    if (b.photo && !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(b.photo)) throw new HttpError(400, 'That is not a photo');
+    const photoId = b.photo ? newId('ph') : undefined;
+    const patch: Partial<Delivery> = { collected: b.collected, ...(b.paidBy ? { paidBy: b.paidBy as Delivery['paidBy'] } : {}), ...(photoId ? { photoId } : {}) };
+    const d = await finish(req, 'delivered', patch, async (d, repo) => {
+      // The door code: needed unless the admin let it go (or the delivery is older than codes).
+      if (!d.otp || d.otpSkipped) return;
+      if ((d.otpTries ?? 0) >= OTP_MAX_TRIES) throw new HttpError(429, 'Too many wrong codes. Call the shop.');
+      if (b.otp !== d.otp) {
+        d.otpTries = (d.otpTries ?? 0) + 1;
+        await repo.putDoc('deliveries', d);
+        const left = OTP_MAX_TRIES - d.otpTries;
+        throw new HttpError(left > 0 ? 400 : 429, left > 0 ? 'Wrong code. ' + left + (left === 1 ? ' try left.' : ' tries left.') : 'Too many wrong codes. Call the shop.');
+      }
+      if (photoId) await repo.putDoc('deliveryPhotos', { id: photoId, deliveryId: d.id, data: b.photo! });
+    });
+    res.json(d);
   }),
 );
 
@@ -359,6 +432,29 @@ deliveryRoutes.post(
   handler(async (req, res) => {
     const b = z.object({ reason: z.string().trim().min(1, 'Say why it could not be delivered').max(200) }).parse(req.body);
     res.json(await finish(req, 'failed', { reason: b.reason }));
+  }),
+);
+
+/** The proof photo: the admin any, a worker only their own delivery's. */
+async function sendPhoto(d: Delivery, res: import('express').Response): Promise<void> {
+  const ph = d.photoId ? await getRepo().getDoc<{ id: string; deliveryId: string; data: string }>('deliveryPhotos', d.photoId) : null;
+  if (!ph || ph.deliveryId !== d.id) throw new HttpError(404, 'No photo');
+  res.json({ data: ph.data });
+}
+deliveryRoutes.get(
+  '/admin/deliveries/:id/photo',
+  admin,
+  handler(async (req, res) => {
+    const d = await getRepo().getDoc<Delivery>('deliveries', String(req.params.id));
+    if (!d) throw new HttpError(404, 'No such delivery');
+    await sendPhoto(d, res);
+  }),
+);
+deliveryRoutes.get(
+  '/worker/deliveries/:id/photo',
+  worker,
+  handler(async (req, res) => {
+    await sendPhoto(await ownDelivery(getRepo(), String(req.params.id), req.person!), res);
   }),
 );
 

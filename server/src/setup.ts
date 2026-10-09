@@ -58,6 +58,7 @@ export async function settingsOf(repo: InvRepo): Promise<ShopSettings> {
     out.shopLat = doc.shopLat;
     out.shopLng = doc.shopLng;
   }
+  if (typeof doc?.shopPhone === 'string' && doc.shopPhone) out.shopPhone = doc.shopPhone;
   return out;
 }
 

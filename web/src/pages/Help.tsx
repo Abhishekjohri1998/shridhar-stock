@@ -57,7 +57,7 @@ const SECTIONS: Section[] = [
     tour: 'transfers',
     roles: ['admin'],
     title: ['Transfers', 'ಸಾಗಣೆ'],
-    body: ['Goods between the shop and godowns, with vehicle and driver. Asked, then sent by the godown, then received at the shop. Deliveries: a bill’s “🏠 Deliver” sends it home with a worker, 🏍 or 🚚, and the live map shows them on the way.', 'ಅಂಗಡಿ ಮತ್ತು ಗೋದಾಮುಗಳ ನಡುವೆ ಸಾಮಾನು, ವಾಹನ ಮತ್ತು ಚಾಲಕ ಜೊತೆ. ಕೇಳಿದ್ದು, ಗೋದಾಮು ಕಳುಹಿಸಿದ್ದು, ಅಂಗಡಿಗೆ ಬಂದದ್ದು. ಡೆಲಿವರಿ: ಬಿಲ್‌ನ “🏠 ಡೆಲಿವರಿ” ಕೆಲಸಗಾರರ ಮೂಲಕ ಮನೆಗೆ, 🏍 ಅಥವಾ 🚚; ನಕ್ಷೆ ದಾರಿಯಲ್ಲಿ ತೋರಿಸುತ್ತದೆ.'],
+    body: ['Goods between the shop and godowns, with vehicle and driver. Asked, then sent by the godown, then received at the shop. Deliveries: a bill’s “🏠 Deliver” sends it home with a worker, 🏍 or 🚚, and the live map shows them on the way. “💬 Share tracking on WhatsApp” sends the customer a live link (no app needed) with a 4-digit door code; the worker marks it delivered only with that code, plus a photo and how they paid. No pin? “📍 Ask customer for location” sends them a one-tap link.', 'ಅಂಗಡಿ ಮತ್ತು ಗೋದಾಮುಗಳ ನಡುವೆ ಸಾಮಾನು, ವಾಹನ ಮತ್ತು ಚಾಲಕ ಜೊತೆ. ಕೇಳಿದ್ದು, ಗೋದಾಮು ಕಳುಹಿಸಿದ್ದು, ಅಂಗಡಿಗೆ ಬಂದದ್ದು. ಡೆಲಿವರಿ: ಬಿಲ್‌ನ “🏠 ಡೆಲಿವರಿ” ಕೆಲಸಗಾರರ ಮೂಲಕ ಮನೆಗೆ, 🏍 ಅಥವಾ 🚚; ನಕ್ಷೆ ದಾರಿಯಲ್ಲಿ ತೋರಿಸುತ್ತದೆ. “💬 ವಾಟ್ಸಾಪ್‌ನಲ್ಲಿ ಟ್ರ್ಯಾಕಿಂಗ್” ಗ್ರಾಹಕರಿಗೆ ನೇರ ಲಿಂಕ್ ಮತ್ತು 4 ಅಂಕಿಯ ಬಾಗಿಲ ಕೋಡ್ ಕಳುಹಿಸುತ್ತದೆ; ಆ ಕೋಡ್‌ನಿಂದ ಮಾತ್ರ ಕೆಲಸಗಾರರು ತಲುಪಿಸಿದೆ ಎನ್ನಬಹುದು, ಫೋಟೋ ಮತ್ತು ಪಾವತಿ ವಿಧಾನದೊಂದಿಗೆ. ಪಿನ್ ಇಲ್ಲವೇ? “📍 ಗ್ರಾಹಕರ ಸ್ಥಳ ಕೇಳಿ” ಒಂದೇ ಒತ್ತಿನ ಲಿಂಕ್ ಕಳುಹಿಸುತ್ತದೆ.'],
   },
   {
     tour: 'setup',

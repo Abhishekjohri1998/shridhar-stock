@@ -10,7 +10,7 @@ export type LiveKind = 'bills' | 'stock' | 'transfers' | 'pos' | 'items' | 'link
  * drops (a phone going to sleep, the shop's internet blinking) it reconnects with a fresh ticket,
  * and every screen re-reads on reconnect, so nothing that happened meanwhile is missed.
  */
-type Listener = (kind: LiveKind | 'reconnect', id?: string) => void;
+type Listener = (kind: LiveKind | 'reconnect', id?: string, what?: string) => void;
 const listeners = new Set<Listener>();
 let source: EventSource | null = null;
 let retry: ReturnType<typeof setTimeout> | null = null;
@@ -35,8 +35,8 @@ async function connect() {
     });
     es.addEventListener('change', (e) => {
       try {
-        const { kind, id } = JSON.parse((e as MessageEvent).data) as { kind: LiveKind; id?: string };
-        listeners.forEach((f) => f(kind, id));
+        const { kind, id, what } = JSON.parse((e as MessageEvent).data) as { kind: LiveKind; id?: string; what?: string };
+        listeners.forEach((f) => f(kind, id, what));
       } catch {
         /* ignore a garbled event */
       }
@@ -115,12 +115,12 @@ export function useSettled(n: number, ms = 2000): number {
 }
 
 /** Calls `fn` with the id of each `kind` event as it arrives, for a toast rather than a re-read. */
-export function useLiveEvent(kind: LiveKind, fn: (id: string) => void): void {
+export function useLiveEvent(kind: LiveKind, fn: (id: string, what?: string) => void): void {
   const ref = useRef(fn);
   ref.current = fn;
   useEffect(() => {
-    const f: Listener = (k, id) => {
-      if (k === kind && id) ref.current(id);
+    const f: Listener = (k, id, what) => {
+      if (k === kind && id) ref.current(id, what);
     };
     listeners.add(f);
     void connect();

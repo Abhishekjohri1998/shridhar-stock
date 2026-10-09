@@ -101,8 +101,8 @@ export function SettingsPage() {
   const { lang } = useSession();
   const [version, setVersion] = useState(0);
   const [syncMsg, setSyncMsg] = useState('');
-  const { value: settings } = useLoad(() => http.get<{ roundTo: number; bikeMaxItems: number; bikeMaxAmount: number; shopLat?: number; shopLng?: number }>('/admin/settings'), [version]);
-  const saveSettings = async (patch: Record<string, number>) => {
+  const { value: settings } = useLoad(() => http.get<{ roundTo: number; bikeMaxItems: number; bikeMaxAmount: number; shopLat?: number; shopLng?: number; shopPhone?: string }>('/admin/settings'), [version]);
+  const saveSettings = async (patch: Record<string, number | string>) => {
     try {
       await http.put('/admin/settings', patch);
     } catch (e) {
@@ -185,8 +185,9 @@ export function useItemsName() {
 // ---------------------------------------------------------------- settings: home deliveries
 
 /** The Bike / 4-wheeler rule and the shop's place on the map. */
-function DeliverySettings({ s, save }: { s: { bikeMaxItems: number; bikeMaxAmount: number; shopLat?: number; shopLng?: number }; save: (patch: Record<string, number>) => Promise<void> }) {
+function DeliverySettings({ s, save }: { s: { bikeMaxItems: number; bikeMaxAmount: number; shopLat?: number; shopLng?: number; shopPhone?: string }; save: (patch: Record<string, number | string>) => Promise<void> }) {
   const bi = useBi();
+  const [phone, setPhone] = useState(s.shopPhone ?? '');
   const [items, setItems] = useState(String(s.bikeMaxItems));
   const [amount, setAmount] = useState(String(s.bikeMaxAmount));
   const [pinOpen, setPinOpen] = useState(false);
@@ -214,6 +215,15 @@ function DeliverySettings({ s, save }: { s: { bikeMaxItems: number; bikeMaxAmoun
         </button>
       </div>
       {pinOpen && <PinPicker value={shop} icon="🏪" onChange={(p) => void save({ shopLat: p.lat, shopLng: p.lng })} />}
+      <div className="bar">
+        <label className="field grow">
+          <span>{bi('Shop phone, for customers (on the tracking page)', 'ಗ್ರಾಹಕರಿಗೆ ಅಂಗಡಿ ಫೋನ್ (ಟ್ರ್ಯಾಕಿಂಗ್ ಪುಟದಲ್ಲಿ)')}</span>
+          <input inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98XXXXXXXX" />
+        </label>
+        <button className="btn" onClick={() => void save({ shopPhone: phone })}>
+          {bi('Save', 'ಉಳಿಸಿ')}
+        </button>
+      </div>
     </div>
   );
 }

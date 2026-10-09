@@ -11,6 +11,9 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
  * Once a person has moved the map (drag, wheel, pinch, ±), it stays where they put it: the live
  * page re-renders every second and every position, and none of that may pull the view back. Only
  * ⤢, or the caller changing fitKey, fits it again.
+ *
+ * ◎ (when `locate` is on) asks the device where it is, flies the view there and shows a pulsing
+ * dot for "you"; `onLocate` gets the position too (PinPicker uses it to set the pin).
  */
 export interface LatLng {
   lat: number;
@@ -30,6 +33,8 @@ export interface MapMarker extends LatLng {
   route?: LatLng[];
   /** A quieter marker, for something already over. */
   faded?: boolean;
+  /** Just arrived (a customer's shared pin): drops in. */
+  fresh?: boolean;
 }
 
 const TILE = 256;
@@ -50,6 +55,9 @@ function latOf(y: number, z: number): number {
   return (180 / Math.PI) * Math.atan(Math.sinh(n));
 }
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
+/** How long the fly to "you" takes. */
+const FLY_MS = 700;
+const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 interface View extends LatLng {
   z: number;
@@ -82,6 +90,9 @@ export function LiveMap({
   className,
   children,
   fitKey,
+  locate,
+  onLocate,
+  locateLabel = 'Show where I am',
 }: {
   markers: MapMarker[];
   /** What to show when the map first opens (and on ⤢). Defaults to every marker. */
@@ -92,6 +103,12 @@ export function LiveMap({
   children?: ReactNode;
   /** Change it to fit the view again, e.g. after a search result is picked. */
   fitKey?: string;
+  /** Show the ◎ button: centre on the device's own position. */
+  locate?: boolean;
+  /** Called with the device's position after ◎. */
+  onLocate?: (p: LatLng & { accuracy?: number }) => void;
+  /** The ◎ button's name, in the reader's language. */
+  locateLabel?: string;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -205,6 +222,40 @@ export function LiveMap({
     refit();
   };
 
+  // ---- ◎: where am I, with a short fly there
+  const [me, setMe] = useState<LatLng | null>(null);
+  const [finding, setFinding] = useState(false);
+  const fly = useRef(0);
+  const flyTo = (to: View) => {
+    cancelAnimationFrame(fly.current);
+    const from = view;
+    if (!from || reducedMotion()) return setView(to);
+    const start = performance.now();
+    const step = () => {
+      const k = ease(Math.min(1, (performance.now() - start) / FLY_MS));
+      setView({ lat: from.lat + (to.lat - from.lat) * k, lng: from.lng + (to.lng - from.lng) * k, z: from.z + (to.z - from.z) * k });
+      if (k < 1) fly.current = requestAnimationFrame(step);
+    };
+    fly.current = requestAnimationFrame(step);
+  };
+  useEffect(() => () => cancelAnimationFrame(fly.current), []);
+  const findMe = () => {
+    if (!navigator.geolocation || finding) return;
+    setFinding(true);
+    navigator.geolocation.getCurrentPosition(
+      (g) => {
+        setFinding(false);
+        const p = { lat: g.coords.latitude, lng: g.coords.longitude };
+        setMe(p);
+        userMoved.current = true;
+        flyTo({ ...p, z: Math.max(view?.z ?? 16, 16) });
+        onLocate?.({ ...p, ...(Number.isFinite(g.coords.accuracy) ? { accuracy: Math.round(g.coords.accuracy) } : {}) });
+      },
+      () => setFinding(false),
+      { enableHighAccuracy: true, timeout: 15_000, maximumAge: 10_000 },
+    );
+  };
+
   useEffect(() => {
     const el = box.current;
     if (!el) return;
@@ -312,10 +363,15 @@ export function LiveMap({
           ) : null,
         )}
       </svg>
+      {me && (
+        <div className="map-marker" style={{ transform: 'translate(' + pos(me).x + 'px,' + pos(me).y + 'px)' }} aria-label="You">
+          <span className="map-me" />
+        </div>
+      )}
       {markers.map((m) => {
         const p = pos(shown(m));
         return (
-          <div key={m.id} className={'map-marker' + (m.moving ? ' moving' : '') + (m.faded ? ' faded' : '')} style={{ transform: 'translate(' + p.x + 'px,' + p.y + 'px)' }}>
+          <div key={m.id} className={'map-marker' + (m.moving ? ' moving' : '') + (m.faded ? ' faded' : '') + (m.fresh ? ' fresh' : '')} style={{ transform: 'translate(' + p.x + 'px,' + p.y + 'px)' }}>
             <span className="map-icon">{m.icon}</span>
             {m.label && <span className="map-label">{m.label}</span>}
           </div>
@@ -331,6 +387,11 @@ export function LiveMap({
         <button type="button" className="icon-btn" aria-label="Show all" onClick={showAll}>
           ⤢
         </button>
+        {locate && (
+          <button type="button" className={'icon-btn' + (finding ? ' map-finding' : '')} aria-label={locateLabel} title={locateLabel} onClick={findMe} data-tour="map-locate">
+            ◎
+          </button>
+        )}
       </div>
       {children}
       <div className="map-credit" onPointerDown={(e) => e.stopPropagation()}>

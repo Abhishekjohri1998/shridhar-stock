@@ -12,6 +12,7 @@ import { billingLinkRoutes } from './routes/billingLink';
 import { demoRoutes } from './routes/demo';
 import { deliveryRoutes } from './routes/deliveries';
 import { liveRoutes } from './routes/live';
+import { publicRoutes } from './routes/public';
 import { reportRoutes } from './routes/reports';
 import { roleRoutes } from './routes/roles';
 import { startLink } from './billing/link';
@@ -52,6 +53,8 @@ async function main(): Promise<void> {
   );
   // Billing's server, with the shared key; not a person's login.
   api.use('/billing-link', billingLinkRoutes);
+  // The customer's tracking and location links: no sign-in, a signed token instead.
+  api.use(publicRoutes);
   api.use(authRoutes);
   api.use(liveRoutes);
   api.use(adminRoutes);

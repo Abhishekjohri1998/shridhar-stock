@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { distanceKm, distanceText, formatRupees, isActiveDelivery, type CustomerProfile, type Delivery, type VehicleKind } from '@stock/core';
+import { deliverySteps, distanceKm, distanceText, formatRupees, isActiveDelivery, type CustomerProfile, type Delivery, type PaidBy, type VehicleKind } from '@stock/core';
 import { http } from '../../lib/api';
 import { useLive, useSettled } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
@@ -8,9 +8,37 @@ import { statusWord } from '../../lib/words';
 import { Empty, Loading, Select, Status, SuggestInput, useBi } from '../../components/ui';
 import { LiveMap, type LatLng, type MapMarker } from '../../components/LiveMap';
 import { PinPicker } from '../../components/PinPicker';
+import { Timeline } from '../../components/Timeline';
+import { clockText, copyText, linkUrl, locateMessage, openLink, paidWord, trackMessage, waLink } from '../../lib/share';
 
-type Row = Delivery & { personName: string };
-type Live = { shop: LatLng | null; deliveries: Row[] };
+type Links = { track: string; locate: string };
+type Row = Delivery & { personName: string; links: Links };
+type Live = { shop: LatLng | null; shopName: string; deliveries: Row[] };
+
+/** "arrives ~4:40 pm", from the last arrival time worked out. */
+export function arrivesText(d: Pick<Delivery, 'eta' | 'status'>, bi: (en: string, kn: string) => string): string {
+  if (d.status !== 'out' || !d.eta) return '';
+  return bi('arrives ~', 'ಬರುವುದು ~') + clockText(new Date(Date.parse(d.eta.at) + d.eta.minutes * 60_000).toISOString());
+}
+
+/** The proof photo, fetched only when the row is shown (the list itself stays light). */
+function PhotoThumb({ id }: { id: string }) {
+  const bi = useBi();
+  const [src, setSrc] = useState('');
+  const [big, setBig] = useState(false);
+  useEffect(() => {
+    http
+      .get<{ data: string }>('/admin/deliveries/' + id + '/photo')
+      .then((r) => setSrc(r.data))
+      .catch(() => undefined);
+  }, [id]);
+  if (!src) return null;
+  return (
+    <button type="button" className={'photo-thumb' + (big ? ' big' : '')} onClick={() => setBig(!big)} title={bi('Proof photo', 'ಪುರಾವೆ ಫೋಟೋ')}>
+      <img src={src} alt={bi('Proof photo', 'ಪುರಾವೆ ಫೋಟೋ')} />
+    </button>
+  );
+}
 
 export const VEHICLE_ICON: Record<VehicleKind, string> = { bike: '🏍', car: '🚚' };
 export function vehicleWord(k: VehicleKind | undefined, bi: (en: string, kn: string) => string): string {
@@ -84,6 +112,7 @@ export function DeliveriesPage() {
   const now = useNow();
   const roads = useRoads(value?.deliveries, now);
   const [err, setErr] = useState('');
+  const [copied, setCopied] = useState('');
 
   useEffect(() => {
     if (bill) setAdding(true);
@@ -97,7 +126,8 @@ export function DeliveriesPage() {
   for (const d of value.deliveries) {
     if (d.lat == null || d.lng == null) continue;
     const active = isActiveDelivery(d.status);
-    markers.push({ id: 'to-' + d.id, lat: d.lat, lng: d.lng, icon: d.status === 'delivered' ? '✅' : '📍', label: d.name, faded: !active });
+    const fresh = !!d.locatedAt && now - Date.parse(d.locatedAt) < 15_000;
+    markers.push({ id: 'to-' + d.id + (fresh ? '-new' : ''), lat: d.lat, lng: d.lng, icon: d.status === 'delivered' ? '✅' : '📍', label: d.name, faded: !active, fresh });
     if (d.status === 'out' && d.pos) {
       markers.push({ id: 'go-' + d.id, lat: d.pos.lat, lng: d.pos.lng, icon: VEHICLE_ICON[d.vehicleKind ?? 'bike'], label: d.personName, moving: true, trail: (d.track ?? []).slice(0, -1), route: roads.get(d.id)?.points });
     }
@@ -111,6 +141,21 @@ export function DeliveriesPage() {
       reload();
     } catch (e) {
       setErr((e as Error).message);
+    }
+  };
+  const skipOtp = async (d: Row, on: boolean) => {
+    setErr('');
+    try {
+      await http.put('/admin/deliveries/' + d.id, { otpSkipped: on });
+      reload();
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
+  const copy = async (d: Row) => {
+    if (await copyText(linkUrl(d.links.track))) {
+      setCopied(d.id);
+      setTimeout(() => setCopied(''), 2000);
     }
   };
   const closeForm = () => {
@@ -128,14 +173,14 @@ export function DeliveriesPage() {
           + {bi('New delivery', 'ಹೊಸ ಡೆಲಿವರಿ')}
         </button>
       </div>
-      {adding && <DeliveryForm bill={bill ? Number(bill) : 0} shop={value.shop} onDone={closeForm} />}
+      {adding && <DeliveryForm bill={bill ? Number(bill) : 0} shop={value.shop} shopName={value.shopName} onDone={closeForm} />}
       {err && <div className="msg err">{err}</div>}
       {!value.shop && (
         <div className="msg">{bi('Tip: put the shop on the map in Setup → Settings, so distances start from the shop.', 'ಸಲಹೆ: ಸೆಟಪ್ → ಸೆಟ್ಟಿಂಗ್ಸ್‌ನಲ್ಲಿ ಅಂಗಡಿಯನ್ನು ನಕ್ಷೆಯಲ್ಲಿ ಇಡಿ.')}</div>
       )}
       <div className="deliveries-layout">
         <div data-tour="deliveries-map">
-          <LiveMap markers={markers} fit={fit.length ? fit : markers} />
+          <LiveMap markers={markers} fit={fit.length ? fit : markers} locate locateLabel={bi('Show where I am', 'ನಾನು ಎಲ್ಲಿದ್ದೇನೆ')} />
         </div>
         <div className="deliveries-list" data-tour="deliveries-list">
           {value.deliveries.length === 0 && <Empty>{bi('No deliveries today. Start one from a bill (🏠 Deliver) or with “+ New delivery”.', 'ಇಂದು ಡೆಲಿವರಿ ಇಲ್ಲ. ಬಿಲ್‌ನಿಂದ (🏠 ಡೆಲಿವರಿ) ಅಥವಾ “+ ಹೊಸ ಡೆಲಿವರಿ”.')}</Empty>}
@@ -159,6 +204,7 @@ export function DeliveriesPage() {
                   <Status s={d.status} label={d.status === 'pending' ? bi('Assigned', 'ನೇಮಿಸಲಾಗಿದೆ') : statusWord(d.status, lang)} />
                 </div>
                 <div className="muted">{[d.address, d.landmark].filter(Boolean).join(' · ')}</div>
+                {(active || d.status === 'delivered') && <Timeline steps={deliverySteps(d)} bi={bi} mini />}
                 <div className="delivery-meta">
                   {active ? (
                     <button className="chip on" title={bi('Switch the vehicle', 'ವಾಹನ ಬದಲಿಸಿ')} onClick={() => switchKind(d)}>
@@ -172,8 +218,42 @@ export function DeliveriesPage() {
                   {left && <span>↔ {left}</span>}
                   {d.amountDue > 0 && <span>{bi('Collect', 'ಪಡೆಯಬೇಕು')} {formatRupees(d.amountDue)}</span>}
                   {d.status === 'delivered' && d.collected != null && <span>{bi('Collected', 'ಪಡೆದದ್ದು')} {formatRupees(d.collected)}</span>}
+                  {arrivesText(d, bi) && <span className="eta-text">⏱ {arrivesText(d, bi)}</span>}
+                  {d.status === 'delivered' && d.paidBy && <span>· {paidWord(d.paidBy, bi)}</span>}
                   {d.status === 'failed' && d.reason && <span>“{d.reason}”</span>}
+                  {d.status === 'delivered' && d.otpSkipped && <span>· {bi('no code (skipped)', 'ಕೋಡ್ ಇಲ್ಲದೆ')}</span>}
                 </div>
+                {d.photoId && <PhotoThumb id={d.id} />}
+                {active && (d.lat == null || d.lng == null) && (
+                  <div className="waiting-pin">
+                    <span className="share-dot" aria-hidden /> {bi('Waiting for the customer’s location', 'ಗ್ರಾಹಕರ ಸ್ಥಳಕ್ಕಾಗಿ ಕಾಯುತ್ತಿದೆ')}
+                    <button className="btn ghost" onClick={() => openLink(waLink(d.phone, locateMessage(value.shopName, d.links.locate)))}>
+                      📍 {bi('Ask again', 'ಮತ್ತೆ ಕೇಳಿ')}
+                    </button>
+                  </div>
+                )}
+                {active && (
+                  <div className="bar m-0 delivery-share">
+                    <button className="btn" data-tour="deliveries-share" title={bi('Share tracking on WhatsApp', 'ವಾಟ್ಸಾಪ್‌ನಲ್ಲಿ ಟ್ರ್ಯಾಕಿಂಗ್ ಕಳುಹಿಸಿ')} onClick={() => openLink(waLink(d.phone, trackMessage(value.shopName, d.links.track, d.otpSkipped ? undefined : d.otp)))}>
+                      📲 WhatsApp · {bi('Tracking', 'ಟ್ರ್ಯಾಕಿಂಗ್')}
+                    </button>
+                    <button className="btn ghost" onClick={() => void copy(d)}>
+                      {copied === d.id ? '✓ ' + bi('Copied', 'ನಕಲಾಯಿತು') : bi('Copy link', 'ಲಿಂಕ್ ನಕಲಿಸಿ')}
+                    </button>
+                  </div>
+                )}
+                {active && (
+                  <div className="delivery-meta" data-tour="deliveries-otp">
+                    {d.otp && !d.otpSkipped && (
+                      <span>
+                        {bi('Door code', 'ಬಾಗಿಲ ಕೋಡ್')} <b className="otp-inline">{d.otp}</b>
+                      </span>
+                    )}
+                    <label className="check-inline">
+                      <input type="checkbox" checked={!!d.otpSkipped} onChange={(e) => void skipOtp(d, e.target.checked)} /> {bi('Customer has no phone: no code', 'ಗ್ರಾಹಕರಿಗೆ ಫೋನ್ ಇಲ್ಲ: ಕೋಡ್ ಬೇಡ')}
+                    </label>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -200,7 +280,7 @@ interface Draft {
 }
 
 /** The New delivery form: who, where (the pin), what, which vehicle, which worker. */
-function DeliveryForm({ bill, shop, onDone }: { bill: number; shop: LatLng | null; onDone: () => void }) {
+function DeliveryForm({ bill, shop, shopName, onDone }: { bill: number; shop: LatLng | null; shopName: string; onDone: () => void }) {
   const bi = useBi();
   const nav = useNavigate();
   const [customer, setCustomer] = useState('');
@@ -216,6 +296,7 @@ function DeliveryForm({ bill, shop, onDone }: { bill: number; shop: LatLng | nul
   const [personId, setPersonId] = useState('');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
+  const [noCode, setNoCode] = useState(false);
 
   useEffect(() => {
     if (!draft) return;
@@ -232,31 +313,37 @@ function DeliveryForm({ bill, shop, onDone }: { bill: number; shop: LatLng | nul
   const shownKind = chosen ? kind : suggested;
   const ofKind = (vehicles ?? []).filter((v) => v.kind === shownKind);
 
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
+  /** askCustomer: send it with no pin, and open WhatsApp with the customer's "send my location" link. */
+  const submit = async (e: FormEvent | null, askCustomer = false) => {
+    e?.preventDefault();
     setMsg('');
-    if (!pin) return setMsg(bi('Drop the pin on the home first.', 'ಮೊದಲು ಮನೆಯ ಮೇಲೆ ಪಿನ್ ಇಡಿ.'));
+    if (!pin && !askCustomer) return setMsg(bi('Drop the pin on the home first, or ask the customer for their location.', 'ಮೊದಲು ಮನೆಯ ಮೇಲೆ ಪಿನ್ ಇಡಿ, ಅಥವಾ ಗ್ರಾಹಕರ ಸ್ಥಳ ಕೇಳಿ.'));
     if (!personId) return setMsg(bi('Pick a worker.', 'ಕೆಲಸಗಾರರನ್ನು ಆರಿಸಿ.'));
+    if (askCustomer && f.phone.replace(/\D/g, '').length < 10) return setMsg(bi('Give the customer’s phone to ask on WhatsApp.', 'ವಾಟ್ಸಾಪ್‌ನಲ್ಲಿ ಕೇಳಲು ಗ್ರಾಹಕರ ಫೋನ್ ಕೊಡಿ.'));
+    // Opened now, while the tap still counts, so the browser does not block it.
+    const tab = askCustomer ? window.open('', '_blank') : null;
     setBusy(true);
     try {
-      await http.post('/admin/deliveries', {
+      const made = await http.post<Delivery & { links: Links }>('/admin/deliveries', {
         billNo: f.billNo,
         customerKey: f.customerKey,
         name: f.name,
         phone: f.phone,
         address: f.address,
         ...(f.landmark ? { landmark: f.landmark } : {}),
-        lat: pin.lat,
-        lng: pin.lng,
+        ...(pin ? { lat: pin.lat, lng: pin.lng } : {}),
         itemCount: f.itemCount,
         amount: f.amount,
         amountDue: f.amountDue,
         vehicleKind: shownKind,
         ...(vehicle ? { vehicle } : {}),
         personId,
+        ...(noCode ? { otpSkipped: true } : {}),
       });
+      if (askCustomer) openLink(waLink(made.phone, locateMessage(shopName, made.links.locate)), tab);
       onDone();
     } catch (err) {
+      tab?.close();
       setMsg((err as Error).message);
     }
     setBusy(false);
@@ -353,11 +440,19 @@ function DeliveryForm({ bill, shop, onDone }: { bill: number; shop: LatLng | nul
           </button>
         </div>
       )}
+      <label className="check-inline">
+        <input type="checkbox" checked={noCode} onChange={(e) => setNoCode(e.target.checked)} /> {bi('Customer has no phone: deliver without the door code', 'ಗ್ರಾಹಕರಿಗೆ ಫೋನ್ ಇಲ್ಲ: ಬಾಗಿಲ ಕೋಡ್ ಇಲ್ಲದೆ ತಲುಪಿಸಿ')}
+      </label>
       {msg && <div className="msg err">{msg}</div>}
       <div className="bar">
         <button className="btn primary" disabled={busy} data-tour="delivery-send">
           {bi('Send for delivery', 'ಡೆಲಿವರಿಗೆ ಕಳುಹಿಸಿ')}
         </button>
+        {!pin && (
+          <button type="button" className="btn" disabled={busy} data-tour="delivery-ask-location" onClick={() => void submit(null, true)}>
+            📍 {bi('Ask customer for location', 'ಗ್ರಾಹಕರ ಸ್ಥಳ ಕೇಳಿ')}
+          </button>
+        )}
         <button type="button" className="btn" onClick={onDone}>
           {bi('Cancel', 'ರದ್ದು')}
         </button>

@@ -62,7 +62,16 @@ export function PinPicker({ value, onChange, search, near, icon = '📍' }: { va
           ))}
         </div>
       )}
-      <LiveMap className="map-small" markers={value ? [{ id: 'pin', ...value, icon }] : []} fit={fit} fitKey={fitKey} onPick={(p) => onChange(p)} />
+      <LiveMap
+        className="map-small"
+        markers={value ? [{ id: 'pin', ...value, icon }] : []}
+        fit={fit}
+        fitKey={fitKey}
+        onPick={(p) => onChange(p)}
+        locate
+        locateLabel={bi('Use my location', 'ನನ್ನ ಸ್ಥಳ ಬಳಸಿ')}
+        onLocate={(p) => onChange({ lat: p.lat, lng: p.lng })}
+      />
       <p className="muted">{value ? bi('Pin placed. Tap the map to move it.', 'ಪಿನ್ ಇಟ್ಟಾಯಿತು. ಸರಿಸಲು ನಕ್ಷೆಯ ಮೇಲೆ ಒತ್ತಿ.') : bi('Tap the map on the home to drop the pin.', 'ಮನೆಯ ಮೇಲೆ ನಕ್ಷೆ ಒತ್ತಿ ಪಿನ್ ಇಡಿ.')}</p>
     </div>
   );

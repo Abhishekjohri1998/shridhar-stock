@@ -15,6 +15,7 @@ import { DeliveriesHome, GodownHome, WorkerHome } from './roles/RoleScreens';
 import { InventoryPage } from './pages/admin/Inventory';
 import { InventoryItemPage } from './pages/admin/InventoryItem';
 import { LowToast } from './components/LowToast';
+import { DeliveryToast } from './components/DeliveryToast';
 import { firstTourSeen, markFirstTourSeen, TourButton, TourProvider, useTour } from './components/Tour';
 import { FIRST_TOUR, tourForPath } from './tours';
 import { ExplainerModal, explainerOffered, markExplainerOffered } from './explainer/entry';
@@ -37,6 +38,9 @@ const VehiclesPage = named(() => import('./pages/admin/Vehicles'), 'VehiclesPage
 const Inventory3DPage = named(() => import('./pages/admin/Inventory3D'), 'Inventory3DPage');
 const DeliveriesPage = named(() => import('./pages/admin/Deliveries'), 'DeliveriesPage');
 const RecordPage = named(() => import('./explainer/Record'), 'RecordPage');
+/** The customer's pages, opened from a WhatsApp link with no sign-in. */
+const TrackPage = named(() => import('./pages/public/Track'), 'TrackPage');
+const ShareLocationPage = named(() => import('./pages/public/ShareLocation'), 'ShareLocationPage');
 
 /** A screen inside one menu place, shown as a tab. */
 type Tab = { to: string; en: string; kn: string };
@@ -368,6 +372,17 @@ function Shell() {
   const [more, setMore] = useState(false);
   const closeMore = useCallback(() => setMore(false), []);
   useEffect(() => setMore(false), [loc.pathname]);
+  // A customer's link: no sign-in, no menu, whoever (if anyone) is signed in on this phone.
+  if (/^\/(t|l)\//.test(loc.pathname))
+    return (
+      <Suspense fallback={<Loading />}>
+        <Routes>
+          <Route path="/t/:id/:tok" element={<TrackPage />} />
+          <Route path="/l/:id/:tok" element={<ShareLocationPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
+    );
   if (!ready) return <div className="page muted">{t('common.loading')}</div>;
   if (loc.pathname === '/walkthrough') {
     return (
@@ -458,6 +473,8 @@ function Shell() {
       {hasNav && <TabBar onMore={() => setMore(!more)} moreOpen={more} />}
       {hasNav && more && <MoreSheet onClose={closeMore} />}
       {r === 'admin' && <LowToast />}
+      {r === 'admin' && <DeliveryToast role="admin" />}
+      {r === 'worker' && <DeliveryToast role="worker" />}
       <FirstTour />
     </div>
   );

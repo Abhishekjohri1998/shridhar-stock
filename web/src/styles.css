@@ -763,6 +763,70 @@ img, svg.ink { max-width: 100%; }
 .share-dot { flex: none; width: 14px; height: 14px; border-radius: var(--r-pill); background: var(--gold-600); }
 .share-banner.on .share-dot { background: var(--ok-700); animation: fade 1.2s var(--ease) infinite alternate; }
 
+/* ---- live delivery: ◎, timeline, door code, proof, the customer's pages ---- */
+@keyframes shake { 0%, 100% { transform: none; } 20%, 60% { transform: translateX(-8px); } 40%, 80% { transform: translateX(8px); } }
+@keyframes check-draw { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+@keyframes pin-drop { from { opacity: 0; transform: translate(-50%, -160%); } to { opacity: 1; transform: translate(-50%, -100%); } }
+.map-me { display: block; width: 16px; height: 16px; border-radius: var(--r-pill); background: var(--brand-600); border: 3px solid var(--paper-1); box-shadow: var(--focus), var(--sh-1); transform: translate(-50%, -50%); animation: pulse 1.6s var(--ease) infinite; }
+.map-buttons .icon-btn.map-finding { animation: pulse 1s var(--ease) infinite; }
+.map-marker.fresh .map-icon { animation: pin-drop var(--t-slow) var(--ease-pop); }
+.timeline { list-style: none; margin: var(--gap) 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.tl-step { display: flex; align-items: center; gap: var(--gap); color: var(--ink-400); }
+.tl-step.done, .tl-step.active { color: var(--ink-900); animation: pop var(--t-base) var(--ease); }
+.tl-dot { flex: none; width: 14px; height: 14px; border-radius: var(--r-pill); border: 2px solid var(--line-strong); background: var(--paper-1); transition: background var(--t-base) var(--ease), border-color var(--t-base) var(--ease); }
+.tl-step.done .tl-dot { background: var(--ok-700); border-color: var(--ok-700); }
+.tl-step.active .tl-dot { background: var(--brand-600); border-color: var(--brand-600); animation: pulse 1.4s var(--ease) infinite; }
+.timeline.mini { flex-direction: row; gap: 6px; margin: 6px 0 0; }
+.timeline.mini .tl-dot { width: 10px; height: 10px; }
+.otp-card { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--gap); padding: var(--pad); margin-bottom: var(--gap); border-radius: var(--r-md); background: var(--brand-wash); border: 1px solid var(--brand-edge); color: var(--ink-900); animation: pop var(--t-base) var(--ease); }
+.otp-digits { display: flex; gap: 6px; }
+.otp-digits b { display: inline-grid; place-items: center; width: var(--tap); height: var(--tap); border-radius: var(--r-sm); background: var(--paper-1); border: 1px solid var(--brand-edge); font-family: var(--font-display); font-size: 1.5rem; color: var(--brand-700); }
+.otp-inline { font-family: var(--font-display); letter-spacing: 0.2em; color: var(--brand-700); }
+.otp-boxes { display: flex; gap: 10px; margin-top: 6px; }
+.otp-boxes input { width: 56px; height: 64px; text-align: center; font-size: 1.8rem; font-family: var(--font-display); }
+.otp-boxes.shake { animation: shake var(--t-slow) var(--ease); }
+.otp-boxes.shake input { border-color: var(--danger-600); }
+.check-inline { display: inline-flex; align-items: center; gap: 8px; min-height: var(--tap); cursor: pointer; color: var(--ink-700); }
+.deliver-close { margin-top: var(--gap); padding-top: var(--gap); border-top: 1px solid var(--line); animation: enter var(--t-base) var(--ease); }
+.photo-btn { position: relative; cursor: pointer; }
+.photo-preview { display: block; max-width: 160px; max-height: 120px; margin-top: 8px; border-radius: var(--r-sm); border: 1px solid var(--line); animation: pop var(--t-base) var(--ease); }
+.photo-thumb { display: block; margin-top: 8px; padding: 0; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--paper-2); cursor: zoom-in; overflow: hidden; }
+.photo-thumb img { display: block; width: 72px; height: 72px; object-fit: cover; transition: width var(--t-base) var(--ease), height var(--t-base) var(--ease); }
+.photo-thumb.big { cursor: zoom-out; }
+.photo-thumb.big img { width: 100%; height: auto; max-height: 360px; object-fit: contain; }
+.waiting-pin { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; color: var(--ink-700); }
+.waiting-pin .share-dot { animation: pulse 1.4s var(--ease) infinite; }
+.delivery-share { margin-top: 8px; }
+.delivery-share .btn { white-space: normal; text-align: center; max-width: 100%; }
+.eta-text { color: var(--ink-900); font-weight: 600; }
+.delivery-toast { border-left-color: var(--brand-600); }
+.delivery-toast.delivered { border-left-color: var(--ok-700); }
+.delivery-toast.failed { border-left-color: var(--danger-600); }
+.toast-icon { font-size: 1.4rem; line-height: 1; }
+.check-draw { flex: none; width: 52px; height: 52px; }
+.check-draw circle { fill: var(--ok-wash); stroke: var(--ok-700); stroke-width: 2; }
+.check-draw path { fill: none; stroke: var(--ok-700); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 100; stroke-dashoffset: 100; animation: check-draw var(--t-slow) var(--ease) var(--t-fast) forwards; }
+/* The customer's pages: no menu, the map filling the screen and a sheet that rises over it. */
+.track-page { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; background: var(--paper-0); }
+/* The map ends where the sheet starts, so its fit (shop, bike, route, home) is never under the sheet. */
+.map.track-map { position: relative; flex: 1; min-height: 0; height: auto; border: 0; border-radius: 0; }
+.track-sheet { position: relative; flex: none; max-height: 60dvh; overflow-y: auto; padding: var(--pad); padding-top: 0; padding-bottom: calc(var(--pad) + env(safe-area-inset-bottom)); background: var(--paper-1); border-top-left-radius: var(--r-lg); border-top-right-radius: var(--r-lg); box-shadow: var(--sh-3); animation: rise var(--t-slow) var(--ease); }
+.sheet-handle { display: flex; justify-content: center; width: 100%; min-height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.sheet-handle::before { content: ''; width: 40px; height: 4px; margin-top: 10px; border-radius: var(--r-pill); background: var(--line-strong); }
+.track-sheet.collapsed .sheet-more { display: none; }
+.sheet-more { animation: enter var(--t-base) var(--ease); }
+.track-shop { font-family: var(--font-display); color: var(--ink-900); }
+.track-eta { margin-top: var(--gap); font-family: var(--font-display); font-size: 1.4rem; color: var(--ink-900); }
+.track-min { font-size: 2.4rem; color: var(--brand-700); font-variant-numeric: tabular-nums; }
+.track-done { display: flex; align-items: center; gap: var(--gap); animation: pop var(--t-base) var(--ease); }
+.track-done .track-eta { margin-top: 0; }
+.public-page { min-height: 100dvh; display: grid; place-items: center; padding: var(--pad); background: var(--paper-0); }
+.public-card { width: 100%; max-width: 440px; animation: enter var(--t-base) var(--ease); }
+.locate-btn { width: 100%; min-height: 64px; font-size: 1.2rem; margin-top: var(--gap); }
+.locate-btn.busy { animation: pulse 1.2s var(--ease) infinite; }
+.locate-done { display: flex; flex-direction: column; align-items: center; text-align: center; gap: var(--gap); padding: var(--pad) 0; animation: pop var(--t-base) var(--ease); }
+.locate-done .check-draw { width: 72px; height: 72px; }
+
 /* ---- Inventory → 3D view ------------------------------------------- */
 .plan3d { position: relative; margin: var(--gap) 0; border-radius: var(--r-lg); overflow: hidden; border: 1px solid var(--line); background: var(--paper-0); box-shadow: var(--sh-1); }
 .plan3d-canvas { width: 100%; height: min(70vh, 640px); min-height: 320px; }

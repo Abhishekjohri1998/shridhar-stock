@@ -51,17 +51,25 @@ const DEFAULT_ROLES: Record<EventKind, Role[]> = {
   delivery: ['worker', 'godown'],
 };
 
-const emitHooks = new Set<(kind: EventKind) => void>();
-/** Runs on every event, before it goes out: what server-side caches use to drop stale answers. */
-export function onEmit(fn: (kind: EventKind) => void): () => void {
+type EmitHook = (kind: EventKind, id?: string, extra?: EventExtra) => void;
+/** What else an event may say: for a delivery, what just happened (for the admin's toast). */
+export interface EventExtra {
+  what?: 'started' | 'nearby' | 'delivered' | 'failed' | 'located' | 'assigned';
+}
+const emitHooks = new Set<EmitHook>();
+/**
+ * Runs on every event, before it goes out: what server-side caches use to drop stale answers,
+ * and what the customer's public tracking stream listens to for its one delivery.
+ */
+export function onEmit(fn: EmitHook): () => void {
   emitHooks.add(fn);
   return () => emitHooks.delete(fn);
 }
 
-export function emit(kind: EventKind, audience: Audience = {}, id?: string): void {
-  for (const fn of emitHooks) fn(kind);
+export function emit(kind: EventKind, audience: Audience = {}, id?: string, extra: EventExtra = {}): void {
+  for (const fn of emitHooks) fn(kind, id, extra);
   const a = { roles: DEFAULT_ROLES[kind], ...audience };
-  const line = 'event: change\ndata: ' + JSON.stringify({ kind, ...(id ? { id } : {}) }) + '\n\n';
+  const line = 'event: change\ndata: ' + JSON.stringify({ kind, ...(id ? { id } : {}), ...(extra.what ? { what: extra.what } : {}) }) + '\n\n';
   for (const c of clients) {
     if (!wants(c.person, a)) continue;
     try {

@@ -395,7 +395,26 @@ export interface Delivery {
   reason?: string;
   /** Who started it (the admin). */
   by?: string;
+  /** The 4-digit code the customer tells the worker at the door. */
+  otp?: string;
+  /** The admin let it be delivered without the code (the customer has no phone). */
+  otpSkipped?: boolean;
+  /** Wrong codes tried so far; 5 and the worker must call the shop. */
+  otpTries?: number;
+  /** Minutes to the home by road, from the worker's last position, and when that was worked out. */
+  eta?: { minutes: number; at: string; from?: { lat: number; lng: number } };
+  /** When the worker first came within 300 m of the home. */
+  nearbyAt?: string;
+  /** How the customer paid at the door. */
+  paidBy?: PaidBy;
+  /** The proof photo, kept in its own collection. */
+  photoId?: string;
+  /** When the customer shared their own location through their link. */
+  locatedAt?: string;
 }
+
+export type PaidBy = 'cash' | 'upi' | 'paid' | 'credit';
+export const PAID_BY: readonly PaidBy[] = ['cash', 'upi', 'paid', 'credit'];
 
 export interface OrderLine {
   text?: string;
@@ -443,6 +462,8 @@ export interface ShopSettings {
   /** The shop on the map, for the live delivery map. */
   shopLat?: number;
   shopLng?: number;
+  /** The shop's phone, shown to customers on the tracking page (never a worker's own). */
+  shopPhone?: string;
 }
 
 export const DEFAULT_SETTINGS: ShopSettings = { roundTo: 0, bikeMaxItems: 10, bikeMaxAmount: 3000 };

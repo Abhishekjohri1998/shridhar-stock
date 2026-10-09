@@ -45,6 +45,18 @@ const eq = (name, got, want) => check(name, got === want, 'got ' + JSON.stringif
   eq('an empty route stays empty', C.trimTrack(undefined).length, 0);
   eq('a whole trip fits on the trail (500 points)', C.TRACK_MAX, 500);
   check('0,0 is not a position', !C.validLatLng(0, 0) && C.validLatLng(12.9, 77.6));
+  // the door code, nearby, the timeline
+  check('a code is 4 digits', /^\d{4}$/.test(C.makeOtp()) && C.makeOtp(() => 0) === '0000' && C.makeOtp(() => 0.0471) === '0471');
+  eq('nearby is 300 m', C.NEARBY_M, 300);
+  check('250 m away is nearby', C.isNearby({ lat: 15.35, lng: 75.13 }, { lat: 15.35225, lng: 75.13 }));
+  check('500 m away is not', !C.isNearby({ lat: 15.35, lng: 75.13 }, { lat: 15.3545, lng: 75.13 }));
+  check('no pin is never nearby', !C.isNearby({ lat: 15.35, lng: 75.13 }, {}));
+  const steps = (d) => C.deliverySteps(d).map((x) => (x.done ? 'D' : x.active ? 'A' : '-')).join('');
+  eq('assigned: packing is the step now', steps({ status: 'pending', times: { pending: 'a' } }), 'A----');
+  eq('on the way', steps({ status: 'out', times: { pending: 'a', out: 'b' } }), 'DDA--');
+  eq('nearby', steps({ status: 'out', times: { pending: 'a', out: 'b' }, nearbyAt: 'c' }), 'DDDA-');
+  eq('delivered: every step lit', steps({ status: 'delivered', times: { pending: 'a', out: 'b', delivered: 'd' } }), 'DDDDD');
+  eq('the payment kinds', C.PAID_BY.join(), 'cash,upi,paid,credit');
 }
 
 // ---------------------------------------------------------------- the address search, with a pretend Nominatim
@@ -224,7 +236,25 @@ async function main() {
     check('with the worker name and the shop', ld.personName === 'Ravi (shop)' && live.shop.lat === 15.35);
     check('the worker list carries no route', !('track' in (await get('/worker/deliveries', W)).body[0]));
     eq('Delivered needs a number', (await post('/worker/deliveries/' + d.id + '/delivered', W, { collected: 'lots' })).status, 400);
-    const done = await post('/worker/deliveries/' + d.id + '/delivered', W, { collected: 200 });
+    check('a door code is made', /^\d{4}$/.test(d.otp), d.otp);
+    check('the worker never sees it', !('otp' in (await get('/worker/deliveries', W)).body[0]));
+    const wrong = d.otp === '0000' ? '1111' : '0000';
+    const bad = await post('/worker/deliveries/' + d.id + '/delivered', W, { collected: 200, otp: wrong });
+    check('a wrong code is refused, with the tries left', bad.status === 400 && /4 tries left/.test(bad.body.error), JSON.stringify(bad.body));
+    eq('no code is wrong too', (await post('/worker/deliveries/' + d.id + '/delivered', W, { collected: 200 })).status, 400);
+    eq('a bad payment kind is refused', (await post('/worker/deliveries/' + d.id + '/delivered', W, { collected: 200, otp: d.otp, paidBy: 'cheque' })).status, 400);
+    eq('a photo too big is refused', (await post('/worker/deliveries/' + d.id + '/delivered', W, { collected: 200, otp: d.otp, photo: 'data:image/jpeg;base64,' + 'A'.repeat(400_001) })).status, 400);
+    eq('something not a photo is refused', (await post('/worker/deliveries/' + d.id + '/delivered', W, { collected: 200, otp: d.otp, photo: 'javascript:alert(1)' })).status, 400);
+    const photo = 'data:image/jpeg;base64,' + Buffer.from('pretend jpeg').toString('base64');
+    const done = await post('/worker/deliveries/' + d.id + '/delivered', W, { collected: 200, otp: d.otp, paidBy: 'upi', photo });
+    check('the right code delivers it', done.status === 200, JSON.stringify(done.body));
+    eq('with how it was paid', done.body.paidBy, 'upi');
+    check('and a photo kept on its own', !!done.body.photoId && !('data' in done.body));
+    eq('the admin sees the photo', (await get('/admin/deliveries/' + d.id + '/photo', A)).body.data, photo);
+    eq('the worker sees their own', (await get('/worker/deliveries/' + d.id + '/photo', W)).body.data, photo);
+    eq('another worker cannot', (await get('/worker/deliveries/' + d.id + '/photo', W2)).status, 404);
+    eq('nor through the admin address', (await get('/admin/deliveries/' + d.id + '/photo', W2)).status, 403);
+    check('the list stays light: no photo in it', !JSON.stringify((await get('/admin/deliveries', A)).body).includes('pretend'));
     eq('Delivered', done.body.status, 'delivered');
     eq('with what was collected', done.body.collected, 200);
 
@@ -238,6 +268,57 @@ async function main() {
     eq('Could not deliver needs a reason', (await post('/worker/deliveries/' + other.id + '/failed', W2, {})).status, 400);
     const f = await post('/worker/deliveries/' + other.id + '/failed', W2, { reason: 'Door locked' });
     check('Could not deliver, with the reason', f.body.status === 'failed' && f.body.reason === 'Door locked' && f.body.track.length === 0, JSON.stringify(f.body));
+
+    // ---- the customer's links
+    const plain = async (method, p, b) => {
+      const r = await fetch(base + '/api' + p, { method, headers: b ? { 'Content-Type': 'application/json' } : {}, ...(b ? { body: JSON.stringify(b) } : {}) });
+      return { status: r.status, body: await r.json().catch(() => null) };
+    };
+    const noPin = await post('/admin/deliveries', A, { ...body, customerKey: 'cust-y', phone: '9876500000', lat: undefined, lng: undefined });
+    eq('a delivery can be sent before the pin', noPin.status, 201);
+    const np = noPin.body;
+    check('with its two links', /^\/t\/dl_/.test(np.links.track) && /^\/l\/dl_/.test(np.links.locate), JSON.stringify(np.links));
+    eq('Start is refused with no pin', (await post('/worker/deliveries/' + np.id + '/start', W)).status, 409);
+    const tok = (u) => u.split('/').pop();
+    eq('a wrong token is not found', (await plain('GET', '/t/' + np.id + '/AAAAAAAAAAAAAAAA')).status, 404);
+    eq('the location token does not open tracking', (await plain('GET', '/t/' + np.id + '/' + tok(np.links.locate))).status, 404);
+    eq('nor the tracking token send a location', (await plain('POST', '/l/' + np.id + '/' + tok(np.links.track), { lat: 15.4, lng: 75.1 })).status, 404);
+    eq('the location page opens', (await plain('GET', np.links.locate.replace(/^/, ''))).status, 200);
+    eq('a nonsense location is refused', (await plain('POST', np.links.locate, { lat: 0, lng: 0 })).status, 400);
+    eq('the customer sends their location', (await plain('POST', np.links.locate, { lat: 15.36, lng: 75.12, accuracy: 20 })).status, 200);
+    const located = (await get('/admin/deliveries', A)).body.deliveries.find((x) => x.id === np.id);
+    check('it sets the pin', located.lat === 15.36 && located.lng === 75.12 && !!located.locatedAt, JSON.stringify(located));
+    const cy = (await get('/admin/customers', A)).body.find((c) => c.key === 'cust-y');
+    check('and keeps it on the customer', cy && cy.lat === 15.36, JSON.stringify(cy));
+    eq('now Start works', (await post('/worker/deliveries/' + np.id + '/start', W)).body.status, 'out');
+    const far = await post('/worker/deliveries/' + np.id + '/position', W, { lat: 15.33, lng: 75.12 });
+    check('a position works out the arrival time (straight line, router down)', far.body.kept && far.body.eta >= 1 && !far.body.nearby, JSON.stringify(far.body));
+    const tv = await plain('GET', np.links.track);
+    eq('the tracking page opens with no sign-in', tv.status, 200);
+    const pub = tv.body;
+    check('it shows the worker, the code, the arrival and the steps', pub.worker === 'Ravi' && pub.otp === np.otp && pub.eta.minutes === far.body.eta && pub.steps.length === 5 && pub.pos.lat === 15.33, JSON.stringify(pub));
+    const txt = JSON.stringify(pub);
+    check('but no phone numbers, trail, ids or amounts beyond what to pay', !txt.includes('9876500000') && !txt.includes('9000000') && !('track' in pub) && !('personId' in pub) && !('customerKey' in pub) && !('amount' in pub) && !('collected' in pub) && !('eta' in pub && 'from' in pub.eta) && !txt.includes('p_worker'), txt);
+    eq('what to pay is there', pub.toPay, 200);
+    await new Promise((r) => setTimeout(r, 3100));
+    const near = await post('/worker/deliveries/' + np.id + '/position', W, { lat: 15.3585, lng: 75.12 });
+    check('within 300 m it is Nearby', near.body.nearby === true, JSON.stringify(near.body));
+    const pub2 = (await plain('GET', np.links.track)).body;
+    check('and the customer sees the Nearby step', pub2.steps[3].active && pub2.steps[2].done, JSON.stringify(pub2.steps));
+    // too many tries
+    for (let i = 0; i < 4; i++) await post('/worker/deliveries/' + np.id + '/delivered', W, { collected: 0, otp: np.otp === '0000' ? '1111' : '0000' });
+    const fifth = await post('/worker/deliveries/' + np.id + '/delivered', W, { collected: 0, otp: np.otp === '0000' ? '1111' : '0000' });
+    check('the fifth wrong code: call the shop', fifth.status === 429 && /Call the shop/.test(fifth.body.error), JSON.stringify(fifth.body));
+    eq('even the right code is refused after that', (await post('/worker/deliveries/' + np.id + '/delivered', W, { collected: 0, otp: np.otp })).status, 429);
+    eq('the admin lets it go without the code', (await send('PUT', '/admin/deliveries/' + np.id, A, { otpSkipped: true })).body.otpSkipped, true);
+    check('the customer page no longer shows a code', !('otp' in (await plain('GET', np.links.track)).body));
+    eq('skipped: delivered with no code', (await post('/worker/deliveries/' + np.id + '/delivered', W, { collected: 200, paidBy: 'cash' })).body.status, 'delivered');
+    const fin = await plain('GET', np.links.track);
+    check('tracking shows it delivered for a while', fin.status === 200 && fin.body.status === 'delivered' && !!fin.body.deliveredAt && !fin.body.pos && !('otp' in fin.body), JSON.stringify(fin.body));
+    eq('the location link has ended', (await plain('POST', np.links.locate, { lat: 15.36, lng: 75.12 })).status, 404);
+    const failedLinks = (await get('/admin/deliveries', A)).body.deliveries.find((x) => x.id === other.id).links;
+    eq('a delivery that could not be delivered has no tracking', (await plain('GET', failedLinks.track)).status, 404);
+    eq('a wrong id is not found', (await plain('GET', '/t/dl_nope/' + tok(np.links.track))).status, 404);
   } catch (err) {
     failed++;
     console.log('FAIL threw: ' + err.stack + '\n' + log);
