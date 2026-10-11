@@ -61,13 +61,6 @@ export function BillsPage() {
             </span>
             <span className="muted">
               {when(b.at, lang)} · <span data-tour="bills-total"><Money v={b.rounded} /></span>
-              {b.roundOff !== 0 && (
-                <span className="muted">
-                  {' '}
-                  ({bi('round off', 'ರೌಂಡ್ ಆಫ್')} {b.roundOff > 0 ? '+' : '−'}
-                  {formatRupees(Math.abs(b.roundOff))})
-                </span>
-              )}
               {b.balance > 0 && <span className="pill warn"> {bi('due', 'ಬಾಕಿ')} {formatRupees(b.balance)}</span>}
             </span>
           </div>

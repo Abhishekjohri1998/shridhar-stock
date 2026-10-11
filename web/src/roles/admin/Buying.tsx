@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { formatRupees, pickName, poStage, type Item, type ItemSupplierRow, type Location, type PurchaseOrder, type Refill, type Supplier } from '@stock/core';
+import { formatRate, formatRupees, pickName, poStage, type Item, type ItemSupplierRow, type Location, type PurchaseOrder, type Refill, type Supplier } from '@stock/core';
 import { api, http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
@@ -208,7 +208,7 @@ function OrderCard({
                 <td className="num">
                   {l.qty} {unitWord(l.itemId, l.unit)}
                 </td>
-                <td className="num">{l.cost ? formatRupees(l.cost) : '—'}</td>
+                <td className="num">{l.cost ? formatRate(l.cost) : '—'}</td>
                 {receiving && (
                   <td>
                     <input inputMode="decimal" value={got[l.itemId]!.qty} onChange={(e) => setGot({ ...got, [l.itemId]: { ...got[l.itemId]!, qty: e.target.value } })} className="in-qty" aria-label={bi('Arrived', 'ಬಂದದ್ದು')} />{' '}
@@ -217,7 +217,7 @@ function OrderCard({
                 )}
                 {!receiving && stage === 'received' && (
                   <td className={r && r.qty < l.qty ? 'qty-neg' : ''}>
-                    {r ? r.qty + ' ' + unitWord(l.itemId, l.unit) + (r.cost !== l.cost ? ' @ ' + formatRupees(r.cost) : '') : '—'}
+                    {r ? r.qty + ' ' + unitWord(l.itemId, l.unit) + (r.cost !== l.cost ? ' @ ' + formatRate(r.cost) : '') : '—'}
                   </td>
                 )}
               </tr>
@@ -442,7 +442,7 @@ function NewOrder({ locs, sups, fromBuyList, onDone }: { locs: Location[]; sups:
                   onClick={() => setSupplier(x.supplierId)}
                 >
                   {supName(x.supplierId)}
-                  {x.lastCost != null && ' · ' + formatRupees(x.lastCost) + '/' + x.lastUnit}
+                  {x.lastCost != null && ' · ' + formatRate(x.lastCost) + '/' + x.lastUnit}
                 </button>
               ))}
             </div>

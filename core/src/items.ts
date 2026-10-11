@@ -1,5 +1,5 @@
 import { searchKey } from './kannada';
-import { round2, round3 } from './money';
+import { round3, round4 } from './money';
 import { unitKey } from './units';
 import type { Alias, ItemInput, ItemUnit, LowAt, Slab } from './types';
 
@@ -60,7 +60,7 @@ export function checkItem(input: ItemInput): Checked<ItemInput> {
       if (minQty == null || Number.isNaN(minQty) || minQty <= 0) return { ok: false, error: where + 'a price slab needs a quantity above 0' };
       if (rate == null || Number.isNaN(rate) || rate < 0) return { ok: false, error: where + 'a price slab needs a rate' };
       if (slabs.some((x) => x.minQty === minQty)) return { ok: false, error: where + 'two slabs start at ' + minQty };
-      slabs.push({ minQty, rate: round2(rate) });
+      slabs.push({ minQty, rate: round4(rate) });
     }
     slabs.sort((a, b) => a.minQty - b.minQty);
 
@@ -69,11 +69,11 @@ export function checkItem(input: ItemInput): Checked<ItemInput> {
       label: String(u.label ?? '').trim() || code,
       labelKn: String(u.labelKn ?? '').trim(),
       perBase,
-      price: round2(price),
+      price: round4(price),
       ...(slabs.length ? { slabs } : {}),
-      ...(min != null ? { min: round2(min) } : {}),
-      ...(max != null ? { max: round2(max) } : {}),
-      ...(cost != null ? { cost: round2(cost) } : {}),
+      ...(min != null ? { min: round4(min) } : {}),
+      ...(max != null ? { max: round4(max) } : {}),
+      ...(cost != null ? { cost: round4(cost) } : {}),
     });
   }
 

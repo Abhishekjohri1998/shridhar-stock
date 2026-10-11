@@ -8,6 +8,17 @@ export function round3(n: number): number {
   return Math.round((n + Number.EPSILON) * 1000) / 1000;
 }
 
+/** Prices and per-unit rates to four places: ₹0.056 a gram stays ₹0.056. */
+export function round4(n: number): number {
+  return Math.round((n + Number.EPSILON) * 10000) / 10000;
+}
+
+/** A per-unit price or rate, up to three decimals with no trailing zeros: ₹0.056, ₹170, ₹9.17. */
+export function formatRate(n: number): string {
+  const v = Math.round((n + Number.EPSILON) * 1000) / 1000;
+  return '₹' + String(Number(v.toFixed(3)));
+}
+
 export function formatRupees(n: number): string {
   const v = round2(n);
   return '₹' + (Number.isInteger(v) ? String(v) : v.toFixed(2));

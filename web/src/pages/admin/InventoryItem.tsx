@@ -6,7 +6,7 @@ import {
   blankUnit,
   defaultUnitOf,
   describeQty,
-  formatRupees,
+  formatRate, formatRupees,
   qtyInUnit,
   formToInput,
   isLow,
@@ -580,7 +580,7 @@ function StockSummary({ item, locs, stock, info, sups }: { item: Item; locs: Loc
           <div className="muted">{bi('Last bought', 'ಕೊನೆಯ ಖರೀದಿ')}</div>
           {info.lastBought ? (
             <span>
-              {when(info.lastBought.at, lang)} · {supName(info.lastBought.supplierId)} · {info.lastBought.qty} {info.lastBought.unit} · {formatRupees(info.lastBought.cost)}/{info.lastBought.unit}
+              {when(info.lastBought.at, lang)} · {supName(info.lastBought.supplierId)} · {info.lastBought.qty} {info.lastBought.unit} · {formatRate(info.lastBought.cost)}/{info.lastBought.unit}
             </span>
           ) : (
             <span className="muted">{bi('not through a purchase order yet', 'ಇನ್ನೂ ಖರೀದಿ ಆರ್ಡರ್ ಮೂಲಕ ಇಲ್ಲ')}</span>
@@ -636,7 +636,7 @@ function ItemSuppliersCard({
   const row = (id: string) => found.find((r) => r.supplierId === id);
   const choices = sups.filter((s) => s.active && !form.suppliers.includes(s.id));
   const last = (r: ItemSupplierRow | undefined) =>
-    r?.lastAt ? ' · ' + bi('last', 'ಕೊನೆಗೆ') + ' ' + (r.lastCost != null ? formatRupees(r.lastCost) + '/' + r.lastUnit + ', ' : '') + when(r.lastAt, lang) : '';
+    r?.lastAt ? ' · ' + bi('last', 'ಕೊನೆಗೆ') + ' ' + (r.lastCost != null ? formatRate(r.lastCost) + '/' + r.lastUnit + ', ' : '') + when(r.lastAt, lang) : '';
   return (
     <div className="card" data-tour="item-suppliers">
       <h2 className="subtitle mt-0">{bi('Suppliers', 'ಸರಬರಾಜುದಾರರು')}</h2>

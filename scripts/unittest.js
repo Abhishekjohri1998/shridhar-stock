@@ -657,6 +657,22 @@ async function ledger() {
   check('3D: rack contents keyed by rack', rc.get('r')?.[0]?.qty === 3 && rc.get('r')[0].status === 'low');
 }
 
+// ---------------------------------------------------------------- exact prices (₹0.056 a gram)
+{
+  const r = C.checkItem({ nameEn: 'Saffron', nameKn: '', units: [{ code: 'g', label: 'g', labelKn: '', perBase: 1, price: '0.056', min: '0.05', max: '0.0612', cost: '0.0415', slabs: [{ minQty: 100, rate: '0.052' }] }] });
+  const u = r.ok ? r.value.units[0] : {};
+  check('price 0.056 saved exactly', r.ok && u.price === 0.056 && u.min === 0.05 && u.max === 0.0612 && u.cost === 0.0415 && u.slabs[0].rate === 0.052, JSON.stringify(r));
+  const q = C.priceFor({ units: [u] }, 'g', 10);
+  check('quote at 0.056: rate exact, amount to paise', q.rate === 0.056 && q.amount === 0.56, JSON.stringify(q));
+  check('quote slab at 0.052', C.priceFor({ units: [u] }, 'g', 250).amount === 13, '');
+  check('round4', C.round4(0.05612345) === 0.0561);
+  check('formatRate', C.formatRate(0.056) === '₹0.056' && C.formatRate(170) === '₹170' && C.formatRate(9.17) === '₹9.17' && C.formatRate(9.1) === '₹9.1', [C.formatRate(0.056), C.formatRate(170), C.formatRate(9.17)].join(' '));
+  for (const f of ['web/src/roles/admin/Flows.tsx', 'web/src/roles/RoleScreens.tsx', 'web/src/roles/Reports.tsx']) {
+    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+    check('no round-off text in ' + f, !/round off/i.test(src) && !src.includes('ರೌಂಡ್ ಆಫ್'));
+  }
+}
+
 ledger()
   .catch((err) => {
     failed++;

@@ -1,4 +1,4 @@
-import { round2 } from './money';
+import { round2, round4 } from './money';
 import { findUnit } from './units';
 import type { Item, ItemUnit, Slab } from './types';
 
@@ -36,7 +36,7 @@ export function priceFor(item: Pick<Item, 'units'>, unitCode: string, qty: numbe
   const rate = slab ? slab.rate : unit.price;
   return {
     unit: unit.code,
-    rate,
+    rate: round4(rate),
     amount: round2(rate * qty),
     baseQty: Math.round(qty * unit.perBase * 1000) / 1000,
     ...(slab ? { slab } : {}),

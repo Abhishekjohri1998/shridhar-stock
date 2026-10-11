@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { formatRupees, pickName } from '@stock/core';
+import { formatRate, formatRupees, pickName } from '@stock/core';
 import { download, http } from '../lib/api';
 import { useLive } from '../lib/live';
 import { useLoad, useSession } from '../lib/session';
@@ -94,12 +94,6 @@ export function ReportsPage() {
               <b><Money v={r.sales.notStock} /></b>
               {bi('Not stock (charges)', 'ಸ್ಟಾಕ್ ಅಲ್ಲ')}
             </div>
-            {r.sales.roundTo > 0 && (
-              <div className="tile">
-                <b><Money v={r.sales.roundOff} /></b>
-                {bi('Round off', 'ರೌಂಡ್ ಆಫ್')} (₹{r.sales.roundTo}) · {bi('collected', 'ಸಂಗ್ರಹ')} {formatRupees(r.sales.total + r.sales.roundOff)}
-              </div>
-            )}
           </div>
           {r.sales.unlinked > 0 && (
             <p className="muted">
@@ -251,9 +245,9 @@ export function ReportsPage() {
                       </div>
                     </td>
                     <td className="num">
-                      {x.qty} {x.unit} @ <b className={x.why === 'low' || x.rate < x.usual ? 'qty-neg' : 'qty-low'}>{formatRupees(x.rate)}</b>
+                      {x.qty} {x.unit} @ <b className={x.why === 'low' || x.rate < x.usual ? 'qty-neg' : 'qty-low'}>{formatRate(x.rate)}</b>
                       <div className="muted">
-                        {bi('usually', 'ಸಾಮಾನ್ಯ')} {formatRupees(x.usual)}
+                        {bi('usually', 'ಸಾಮಾನ್ಯ')} {formatRate(x.usual)}
                       </div>
                     </td>
                     <td>

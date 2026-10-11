@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { formatRupees, itemMatches, pickName, priceFor, searchKey, type Item, type MirrorLine } from '@stock/core';
+import { formatRate, formatRupees, itemMatches, pickName, priceFor, searchKey, type Item, type MirrorLine } from '@stock/core';
 import { http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { itemName, useCatalog } from '../../lib/catalog';
@@ -193,7 +193,7 @@ function why(line: MirrorLine, item: Item | undefined, bi: (en: string, kn: stri
     try {
       const p = priceFor(item, line.reading.unit, line.qty);
       if (Math.abs(line.rate - p.rate) > p.rate * 0.15) {
-        return bi('Price does not fit: billed ', 'ಬೆಲೆ ಹೊಂದುತ್ತಿಲ್ಲ: ಬಿಲ್ ') + formatRupees(line.rate) + bi(', usually ', ', ಸಾಮಾನ್ಯವಾಗಿ ') + formatRupees(p.rate);
+        return bi('Price does not fit: billed ', 'ಬೆಲೆ ಹೊಂದುತ್ತಿಲ್ಲ: ಬಿಲ್ ') + formatRate(line.rate) + bi(', usually ', ', ಸಾಮಾನ್ಯವಾಗಿ ') + formatRate(p.rate);
       }
     } catch {
       /* unit not on item */
@@ -278,7 +278,7 @@ function ConfirmLine({
       <div className="confirm-ink" data-tour="confirm-written">
         {line.ink ? <InkView ink={line.ink} height={64} /> : <span className="typed">{line.name}</span>}
         <span className="num confirm-price">
-          {line.qty} × {formatRupees(line.rate)} = <b>{formatRupees(line.amount)}</b>
+          {line.qty} × {formatRate(line.rate)} = <b>{formatRupees(line.amount)}</b>
         </span>
       </div>
       {r && (

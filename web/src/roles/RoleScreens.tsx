@@ -99,7 +99,6 @@ export function WorkerHome({ screen = false }: { screen?: boolean }) {
       </div>
       <p className="muted" data-tour="worker-total">
         {when(bill.at, lang)} · {bi('Total', 'ಒಟ್ಟು')} <b>{formatRupees(bill.rounded)}</b>
-        {bill.roundOff !== 0 && ' (' + formatRupees(bill.total) + ' ' + bi('round off', 'ರೌಂಡ್ ಆಫ್') + ' ' + (bill.roundOff > 0 ? '+' : '−') + formatRupees(Math.abs(bill.roundOff)) + ')'}
       </p>
       {bill.draftId && (
         <div className="banner warn">{bi('Not saved yet: lines may still change at the counter.', 'ಇನ್ನೂ ಉಳಿಸಿಲ್ಲ: ಕೌಂಟರ್‌ನಲ್ಲಿ ಸಾಲುಗಳು ಬದಲಾಗಬಹುದು.')}</div>
