@@ -90,3 +90,45 @@ export function qtyInUnit(item: Pick<Item, 'units'>, code: string, baseQty: numb
   const u = findUnit(item, code) ?? baseUnit(item);
   return round3(baseQty / u.perBase) + ' ' + (lang === 'kn' && u.labelKn ? u.labelKn : u.code);
 }
+
+/** One unit name the shop already uses, with how many items use it and its usual labels. */
+export interface UsedUnit {
+  code: string;
+  label: string;
+  labelKn: string;
+  count: number;
+}
+
+function mostCommon(m: Map<string, number>): string {
+  let best = '';
+  let n = 0;
+  for (const [v, c] of m) if (c > n) [best, n] = [v, c];
+  return best;
+}
+
+/**
+ * Every unit name used across the items, once each (case does not matter), most-used first,
+ * with the label and Kannada label most often paired with it. For suggestions on a new unit.
+ */
+export function usedUnits(items: Pick<Item, 'units'>[]): UsedUnit[] {
+  const by = new Map<string, { codes: Map<string, number>; labels: Map<string, number>; kn: Map<string, number>; count: number }>();
+  const bump = (m: Map<string, number>, v: string) => v && m.set(v, (m.get(v) ?? 0) + 1);
+  for (const it of items) {
+    const seen = new Set<string>();
+    for (const u of it.units ?? []) {
+      const code = (u.code ?? '').trim();
+      const k = code.toLowerCase();
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      let e = by.get(k);
+      if (!e) by.set(k, (e = { codes: new Map(), labels: new Map(), kn: new Map(), count: 0 }));
+      e.count++;
+      bump(e.codes, code);
+      bump(e.labels, (u.label ?? '').trim());
+      bump(e.kn, (u.labelKn ?? '').trim());
+    }
+  }
+  return [...by.values()]
+    .map((e) => ({ code: mostCommon(e.codes), label: mostCommon(e.labels), labelKn: mostCommon(e.kn), count: e.count }))
+    .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code));
+}

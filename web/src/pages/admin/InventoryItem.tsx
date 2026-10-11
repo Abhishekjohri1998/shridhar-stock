@@ -26,6 +26,8 @@ import {
   type StockLevel,
   type StockMove,
   type UnitForm,
+  type UsedUnit,
+  usedUnits,
 } from '@stock/core';
 import { api, http } from '../../lib/api';
 import { useLive } from '../../lib/live';
@@ -133,6 +135,26 @@ function ItemDetails({
   }, [item?.id, item?.updatedAt]);
 
   const set = (patch: Partial<ItemForm>) => setForm((f) => ({ ...f, ...patch }));
+  // Unit names other items already use, suggested while a unit is typed.
+  const [known, setKnown] = useState<UsedUnit[]>([]);
+  useEffect(() => {
+    if (readOnly) return;
+    let gone = false;
+    api
+      .items(true)
+      .then((all) => !gone && setKnown(usedUnits(all)))
+      .catch(() => undefined);
+    return () => {
+      gone = true;
+    };
+  }, [readOnly]);
+  const itemsWord = (n: number) => bi('used by ' + n + (n === 1 ? ' item' : ' items'), n + ' ಸಾಮಾನುಗಳಲ್ಲಿ ಬಳಕೆ');
+  const pickCode = (i: number, code: string) => {
+    const u = form.units[i] ?? { label: '', labelKn: '' };
+    const k = known.find((x) => x.code.toLowerCase() === code.trim().toLowerCase());
+    setUnit(i, { code, ...(k && !u.label.trim() && k.label ? { label: k.label } : {}), ...(k && !u.labelKn.trim() && k.labelKn ? { labelKn: k.labelKn } : {}) });
+  };
+  const uniq = (vals: string[]) => [...new Map(vals.filter(Boolean).map((v) => [v.toLowerCase(), v])).values()];
   const setUnit = (i: number, patch: Partial<UnitForm>) => setForm((f) => ({ ...f, units: f.units.map((u, j) => (j === i ? { ...u, ...patch } : u)) }));
 
   const save = async (e: FormEvent | null, active?: boolean) => {
@@ -237,15 +259,15 @@ function ItemDetails({
               <div className="unit-grid">
                 <label className="field">
                   <span>{t('items.code')}</span>
-                  <input value={u.code} onChange={(e) => setUnit(i, { code: e.target.value })} />
+                  <SuggestInput value={u.code} onChange={(v) => pickCode(i, v)} aria-label={t('items.code')} suggestions={known.map((k) => ({ value: k.code, hint: itemsWord(k.count) }))} />
                 </label>
                 <label className="field">
                   <span>{t('items.label')}</span>
-                  <input value={u.label} onChange={(e) => setUnit(i, { label: e.target.value })} />
+                  <SuggestInput value={u.label} onChange={(v) => setUnit(i, { label: v })} aria-label={t('items.label')} suggestions={uniq(known.map((k) => k.label)).map((value) => ({ value }))} />
                 </label>
                 <label className="field">
                   <span>{t('items.labelKn')}</span>
-                  <input value={u.labelKn} onChange={(e) => setUnit(i, { labelKn: e.target.value })} />
+                  <SuggestInput value={u.labelKn} onChange={(v) => setUnit(i, { labelKn: v })} aria-label={t('items.labelKn')} suggestions={uniq(known.map((k) => k.labelKn)).map((value) => ({ value }))} />
                 </label>
                 {i > 0 && (
                   <label className="field">

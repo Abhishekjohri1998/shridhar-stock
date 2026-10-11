@@ -36,6 +36,12 @@ const clinic = {
 const rice = { units: [{ code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price: 55, slabs: [{ minQty: 10, rate: 52 }] }, { code: 'bag', label: 'Bag', labelKn: '', perBase: 25, price: 1250 }] };
 
 {
+  const u = C.usedUnits([parle, clinic, rice, { units: [{ code: 'PC', label: 'Piece', labelKn: 'ಪೀಸ್' }, { code: 'pc', label: 'x' }] }]);
+  check('used units: deduped case-insensitively, most used first', u[0].code === 'pc' && u[0].count === 3 && u.filter((x) => x.code.toLowerCase() === 'pc').length === 1, JSON.stringify(u));
+  check('used units: most common label pairing', u[0].label === 'Piece' && u[0].labelKn === 'ಪೀಸ್', JSON.stringify(u[0]));
+  check('used units: every name once', u.length === 6, JSON.stringify(u.map((x) => x.code)));
+}
+{
   const p = C.priceFor(parle, 'pack', 1);
   check('a pack of Parle-G is ₹110, not 24 × ₹5', p.amount === 110 && p.baseQty === 24, JSON.stringify(p));
   const two = C.priceFor(parle, 'pack', 2);
