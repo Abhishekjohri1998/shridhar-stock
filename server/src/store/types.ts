@@ -41,6 +41,11 @@ export interface DocQuery {
   limit?: number;
   /** Top-level fields to return; `id` always comes back. */
   fields?: string[];
+  /**
+   * Fields to leave out, as dotted paths into lists too (`lines.ink`). Used instead of `fields`,
+   * never with it: the big handwriting stays in the database for lists that only count lines.
+   */
+  omit?: string[];
 }
 
 /** Every value at a dotted path, looking through lists the way Mongo does. */
@@ -77,6 +82,24 @@ export function matchesFilter(doc: Record<string, unknown>, filter: DocFilter): 
   return Object.entries(filter).every(([k, c]) => condHolds(valuesAt(doc, k.split('.')), c));
 }
 
+/**
+ * A document without the given dotted paths, looking through lists the way Mongo's projection
+ * does. Only what leads to a dropped field is copied; the rest is shared, and the store copies
+ * the result anyway. The big fields are never copied at all.
+ */
+function without(doc: unknown, paths: string[][]): unknown {
+  if (Array.isArray(doc)) return doc.map((d) => without(d, paths));
+  if (doc == null || typeof doc !== 'object' || !paths.length) return doc;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(doc as Record<string, unknown>)) {
+    const here = paths.filter((p) => p[0] === k);
+    if (!here.length) out[k] = v;
+    else if (here.some((p) => p.length === 1)) continue;
+    else out[k] = without(v, here.map((p) => p.slice(1)));
+  }
+  return out;
+}
+
 /** The file store's reading of a DocQuery's sort, limit and fields, over already-filtered docs. */
 export function shapeDocs<T>(docs: Record<string, unknown>[], q: DocQuery): T[] {
   let out = docs;
@@ -98,6 +121,9 @@ export function shapeDocs<T>(docs: Record<string, unknown>[], q: DocQuery): T[] 
   if (q.fields) {
     const keep = ['id', ...q.fields];
     out = out.map((d) => Object.fromEntries(keep.filter((k) => k in d).map((k) => [k, d[k]])));
+  } else if (q.omit?.length) {
+    const paths = q.omit.map((p) => p.split('.'));
+    out = out.map((d) => without(d, paths) as Record<string, unknown>);
   }
   return out as T[];
 }
@@ -151,6 +177,8 @@ export interface InvRepo {
   getDoc<T extends { id: string }>(col: DocCollection, id: string): Promise<T | null>;
   /** Adds or replaces the whole document. */
   putDoc<T extends { id: string }>(col: DocCollection, doc: T): Promise<void>;
+  /** Adds or replaces many documents in one write. */
+  putDocs<T extends { id: string }>(col: DocCollection, docs: T[]): Promise<void>;
   deleteDoc(col: DocCollection, id: string): Promise<void>;
   /** The next number in a series (transfers, purchase orders), starting at 1. */
   nextNo(series: string): Promise<number>;
@@ -161,7 +189,7 @@ export interface InvRepo {
   close(): Promise<void>;
 }
 
-const QUERY_KEYS = new Set(['filter', 'sort', 'limit', 'fields']);
+const QUERY_KEYS = new Set(['filter', 'sort', 'limit', 'fields', 'omit']);
 /** A bare filter, or a full query, as a full query. */
 export function asQuery(f?: DocFilter | DocQuery): DocQuery {
   if (!f) return {};

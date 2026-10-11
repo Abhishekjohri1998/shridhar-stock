@@ -3,12 +3,18 @@ import { getRepo } from '../store';
 import { billingClient, type BillingClient } from './client';
 import { emit } from '../events';
 import { pushGiven } from './push';
-import { pollDelay, recordLink, syncOnce, POLL_ACTIVE_WINDOW_MS, type SyncResult } from './sync';
+import { syncCustomers, pollDelay, recordLink, syncOnce, POLL_ACTIVE_WINDOW_MS, type SyncResult } from './sync';
 
 let running: Promise<SyncResult | null> | null = null;
 let last: SyncResult | null = null;
 /** When a read last brought something new: keeps the quick polling going while the counter is busy. */
 let lastChangeAt = 0;
+/** When the last full read (the latest 30, for cancels and edits) was made. */
+let lastFullAt = 0;
+/** A full read this often; between them only new bills are asked for. */
+export const FULL_EVERY_MS = 2 * 60_000;
+/** Whether billing answers the light list: unknown until the first bills come back. */
+let liteServer: boolean | null = null;
 
 export const linkConfigured = () => !!(env.billingUrl && env.billingPin);
 
@@ -20,11 +26,34 @@ export function billing(): BillingClient {
 }
 
 /** One sync, never two at once: a slow billing server must not pile runs up. */
-export function syncNow(): Promise<SyncResult | null> {
+export function syncNow(force = false): Promise<SyncResult | null> {
   if (!linkConfigured()) return Promise.resolve(null);
   if (running) return running;
   const repo = getRepo();
-  running = syncOnce(repo, billing())
+  running = (async () => {
+    const [newest] = await repo.listDocs<{ id: string; no: number }>('bills', { sort: { no: -1 }, limit: 1, fields: ['no'] });
+    // An older billing server has no light list: its latest 100, in full, every time, as before.
+    if (liteServer === false) {
+      const r = await syncOnce(repo, billing(), { mode: 'full', limit: 100, customers: true });
+      if (r.bills > 0) liteServer = r.lite ?? false;
+      lastFullAt = Date.now();
+      return r;
+    }
+    const full = force || !newest || Date.now() - lastFullAt >= FULL_EVERY_MS;
+    if (full) {
+      // The latest 30 for cancels and edits; the first read ever takes the latest 100.
+      const r = await syncOnce(repo, billing(), { mode: 'full', limit: newest ? 30 : 100, customers: true });
+      if (r.bills > 0) liteServer = r.lite ?? false;
+      lastFullAt = Date.now();
+      return r;
+    }
+    // Between full reads: only bills newer than the newest stock has.
+    const r = await syncOnce(repo, billing(), { mode: 'fast', since: newest.no, limit: 100, customers: false });
+    if (r.bills > 0) liteServer = r.lite ?? false;
+    // A new bill may be for a new customer: their details come along.
+    if (r.newBills) r.customers = await syncCustomers(repo, billing()).catch(() => 0);
+    return r;
+  })()
     .then(async (r) => {
       last = r;
       for (const g of r.sendGiven) void pushGiven(g.no, g.i, g.given);
@@ -49,6 +78,20 @@ export function syncNow(): Promise<SyncResult | null> {
       running = null;
     });
   return running;
+}
+
+function mergeResults(a: SyncResult, b: SyncResult): SyncResult {
+  return {
+    bills: Math.max(a.bills, b.bills),
+    newBills: a.newBills + b.newBills,
+    posted: a.posted + b.posted,
+    reversed: a.reversed + b.reversed,
+    toConfirm: Math.max(a.toConfirm, b.toConfirm),
+    customers: a.customers + b.customers,
+    sendGiven: [...a.sendGiven, ...b.sendGiven],
+    lite: a.lite,
+    fullFetched: (a.fullFetched ?? 0) + (b.fullFetched ?? 0),
+  };
 }
 
 export function lastSync(): SyncResult | null {

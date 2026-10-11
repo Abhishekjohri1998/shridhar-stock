@@ -63,7 +63,7 @@ const SECTIONS: Section[] = [
     tour: 'setup',
     roles: ['admin'],
     title: ['Setup', 'ಸೆಟಪ್'],
-    body: ['Places, people and their PINs, vehicles, Excel files, the billing link and rounding off.', 'ಸ್ಥಳಗಳು, ಜನರು ಮತ್ತು ಪಿನ್, ವಾಹನಗಳು, ಎಕ್ಸೆಲ್ ಫೈಲ್, ಬಿಲ್ಲಿಂಗ್ ಸಂಪರ್ಕ, ರೌಂಡ್ ಆಫ್.'],
+    body: ['Places, people and their PINs, vehicles, Excel files and the billing link. Rounding off is set in billing.', 'ಸ್ಥಳಗಳು, ಜನರು ಮತ್ತು ಪಿನ್, ವಾಹನಗಳು, ಎಕ್ಸೆಲ್ ಫೈಲ್, ಬಿಲ್ಲಿಂಗ್ ಸಂಪರ್ಕ. ರೌಂಡ್ ಆಫ್ ಬಿಲ್ಲಿಂಗ್‌ನಲ್ಲಿ.'],
   },
   {
     tour: 'reports',

@@ -16,6 +16,7 @@ import { InventoryPage } from './pages/admin/Inventory';
 import { InventoryItemPage } from './pages/admin/InventoryItem';
 import { LowToast } from './components/LowToast';
 import { DeliveryToast } from './components/DeliveryToast';
+import { ActingFor, useActAs } from './components/ActingFor';
 import { firstTourSeen, markFirstTourSeen, TourButton, TourProvider, useTour } from './components/Tour';
 import { FIRST_TOUR, tourForPath } from './tours';
 import { ExplainerModal, explainerOffered, markExplainerOffered } from './explainer/entry';
@@ -48,6 +49,9 @@ type Tab = { to: string; en: string; kn: string };
 type Place = { to: string; en: string; kn: string; icon: IconName; tour: string; tabs: Tab[] };
 const tab = (to: string, en: string, kn: string): Tab => ({ to, en, kn });
 
+/** The worker's three views, as tabs. The godown job is the middle one. */
+const WORKER_TABS: Tab[] = [tab('/worker', 'Pick list', 'ಪಟ್ಟಿ'), tab('/worker/godown', 'Godown', 'ಗೋದಾಮು'), tab('/worker/deliveries', 'Deliveries', 'ಡೆಲಿವರಿ'), tab('/worker/screen', 'TV screen', 'ಟಿವಿ ಪರದೆ')];
+
 /**
  * The admin's menu: five places instead of sixteen. Each place is one screen with tabs; the tabs
  * keep their old addresses, so every bookmark still lands.
@@ -71,6 +75,8 @@ const ADMIN: Place[] = [
     tour: 'nav-move',
     tabs: [tab('/admin/purchases', 'Purchases', 'ಖರೀದಿ'), tab('/admin/transfers', 'Transfers', 'ಸಾಗಣೆ'), tab('/admin/deliveries', 'Deliveries', 'ಡೆಲಿವರಿ')],
   },
+  // Every worker screen, without signing in again: "Acting for" at the top picks the worker.
+  { to: '/worker', en: 'Worker screens', kn: 'ಕೆಲಸಗಾರರ ಪರದೆ', icon: 'people', tour: 'nav-workers', tabs: WORKER_TABS },
   {
     to: '/admin/places',
     en: 'Setup',
@@ -89,8 +95,6 @@ const ADMIN: Place[] = [
 /** The phone's bottom bar: these, then "More" for the rest. */
 const PRIMARY = ['/admin', '/admin/bills', '/admin/inventory'];
 
-/** The worker's three views, as tabs. The godown job is the middle one. */
-const WORKER_TABS: Tab[] = [tab('/worker', 'Pick list', 'ಪಟ್ಟಿ'), tab('/worker/godown', 'Godown', 'ಗೋದಾಮು'), tab('/worker/deliveries', 'Deliveries', 'ಡೆಲಿವರಿ'), tab('/worker/screen', 'TV screen', 'ಟಿವಿ ಪರದೆ')];
 
 const inTab = (path: string, t: Tab) => path === t.to || (t.to === '/admin/inventory' && path.startsWith('/admin/inventory/'));
 const placeOf = (path: string) => ADMIN.find((p) => p.tabs.some((t) => inTab(path, t)));
@@ -369,6 +373,7 @@ export function App() {
 function Shell() {
   const { ready, me, t } = useSession();
   const loc = useLocation();
+  const actAs = useActAs();
   const [more, setMore] = useState(false);
   const closeMore = useCallback(() => setMore(false), []);
   useEffect(() => setMore(false), [loc.pathname]);
@@ -416,6 +421,8 @@ function Shell() {
   const home = ROLE_HOME[r];
   const hasNav = r === 'admin';
   const tabs = r === 'admin' ? (placeOf(loc.pathname)?.tabs ?? []) : r === 'worker' ? WORKER_TABS : [];
+  // The admin on a worker screen works as the worker picked at the top.
+  const onWorker = r === 'admin' && WORKER_TABS.some((t) => t.to === loc.pathname);
   return (
     <div className={'shell' + (hasNav ? ' has-nav' : '')}>
       {hasNav && <Sidebar />}
@@ -423,8 +430,9 @@ function Shell() {
         <Top onMenu={hasNav ? () => setMore(true) : undefined} />
         <main className={'page role-' + r + (loc.pathname === '/worker/screen' ? ' tv' : '')}>
           <SectionTabs tabs={tabs} />
+          {onWorker && <ActingFor />}
           <Suspense fallback={<Loading />}>
-          <Routes>
+          <Routes key={onWorker ? 'as:' + actAs : 'own'}>
             <Route path="/pin" element={<PinPage />} />
             <Route path="/help" element={<HelpPage />} />
             {r === 'admin' && (

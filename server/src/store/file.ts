@@ -144,6 +144,11 @@ export async function createFileRepo(dir: string): Promise<InvRepo> {
       write(() => {
         (db.docs[col] ??= {})[doc.id] = clone(doc);
       }),
+    putDocs: (col, docs) =>
+      write(() => {
+        const into = (db.docs[col] ??= {});
+        for (const d of docs) into[d.id] = clone(d);
+      }),
     deleteDoc: (col, id) =>
       write(() => {
         delete db.docs[col]?.[id];

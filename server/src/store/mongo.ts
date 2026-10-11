@@ -99,6 +99,8 @@ const moveSchema = new Schema(
     qty: { type: Number, required: true, min: 0 },
     ref: { type: String, required: false, default: '' },
     by: { type: String, required: true },
+    // The admin who tapped it while acting for the worker in `by`.
+    actor: { type: String, required: false },
     note: { type: String, required: false },
   },
   { versionKey: false },
@@ -126,7 +128,8 @@ const docSchema = new Schema({ id: { type: String, required: true, unique: true 
  * and orders by status and time. Built on start by syncIndexes; building one changes no data.
  */
 export const DOC_INDEXES: Partial<Record<DocCollection, Record<string, 1 | -1>[]>> = {
-  bills: [{ at: -1 }, { no: -1 }, { cancelled: 1, at: -1 }],
+  // Home and To digitise count waiting lines, money due and handwritten bills by query.
+  bills: [{ at: -1 }, { no: -1 }, { cancelled: 1, at: -1 }, { 'lines.state': 1 }, { balance: 1 }, { hasInk: 1 }],
   transfers: [{ status: 1, at: -1 }, { at: -1 }],
   pos: [{ status: 1, at: -1 }, { at: -1 }],
   // Deliveries: the admin's live list by status, and each worker's own.
@@ -290,7 +293,12 @@ export async function createMongoRepo(uri: string, dbName: string): Promise<InvR
 
     listDocs: async <T>(col: DocCollection, f?: DocFilter | DocQuery) => {
       const q = asQuery(f);
-      let query = Docs[col].find(mongoFilter(q.filter), q.fields ? Object.fromEntries(['id', ...q.fields].map((k) => [k, 1])) : undefined);
+      const projection = q.fields
+        ? Object.fromEntries(['id', ...q.fields].map((k) => [k, 1]))
+        : q.omit?.length
+          ? Object.fromEntries(q.omit.map((k) => [k, 0]))
+          : undefined;
+      let query = Docs[col].find(mongoFilter(q.filter), projection);
       if (q.sort) query = query.sort(q.sort);
       if (q.limit) query = query.limit(q.limit);
       return (await query.lean()).map((d) => strip<T>(d));
@@ -301,6 +309,10 @@ export async function createMongoRepo(uri: string, dbName: string): Promise<InvR
     },
     putDoc: async (col, doc) => {
       await Docs[col].replaceOne({ id: doc.id }, doc, { upsert: true });
+    },
+    putDocs: async (col, docs) => {
+      if (!docs.length) return;
+      await Docs[col].bulkWrite(docs.map((d) => ({ replaceOne: { filter: { id: d.id }, replacement: d, upsert: true } })) as never);
     },
     deleteDoc: async (col, id) => {
       await Docs[col].deleteOne({ id });

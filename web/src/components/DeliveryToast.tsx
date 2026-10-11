@@ -4,6 +4,7 @@ import type { Delivery } from '@stock/core';
 import { http } from '../lib/api';
 import { useLiveEvent } from '../lib/live';
 import { useBi } from './ui';
+import { getActAs } from '../lib/api';
 
 type What = 'started' | 'nearby' | 'delivered' | 'failed' | 'located' | 'assigned';
 interface Shown {
@@ -40,7 +41,8 @@ function blip(): void {
 /**
  * Live notes about deliveries, in the same corner style as the running-low note.
  *  - admin: started, nearby, delivered, could not deliver, the customer sent their location;
- *  - worker: a new delivery for them (with a buzz).
+ *  - worker: a new delivery for them (with a buzz);
+ *  - the admin working as a worker on the worker screens: that worker's new deliveries too.
  * Tapping opens Deliveries. Only on an open screen: there is no phone notification.
  */
 export function DeliveryToast({ role }: { role: 'admin' | 'worker' }) {
@@ -50,10 +52,13 @@ export function DeliveryToast({ role }: { role: 'admin' | 'worker' }) {
     if (!what) return;
     const w = what as What;
     if (role === 'worker' && w !== 'assigned') return;
-    if (role === 'admin' && w === 'assigned') return;
+    const actingFor = role === 'admin' ? getActAs() : '';
+    if (role === 'admin' && w === 'assigned' && !actingFor) return;
     const load =
       role === 'admin'
-        ? http.get<{ deliveries: (Delivery & { personName: string })[] }>('/admin/deliveries').then((r) => r.deliveries.find((d) => d.id === id))
+        ? http
+            .get<{ deliveries: (Delivery & { personName: string })[] }>('/admin/deliveries')
+            .then((r) => r.deliveries.find((d) => d.id === id && (w !== 'assigned' || d.personId === actingFor)))
         : http.get<Delivery[]>('/worker/deliveries').then((r) => r.find((d) => d.id === id));
     load
       .then((d) => {
@@ -81,7 +86,7 @@ export function DeliveryToast({ role }: { role: 'admin' | 'worker' }) {
   };
   const icon: Record<What, string> = { assigned: '📦', started: '🏍', nearby: '📍', delivered: '✅', failed: '⚠️', located: '📍' };
   return (
-    <Link key={shown.key} className={'toast delivery-toast ' + shown.what} role="status" to={role === 'admin' ? '/admin/deliveries' : '/worker/deliveries'} onClick={() => setShown(null)}>
+    <Link key={shown.key} className={'toast delivery-toast ' + shown.what} role="status" to={role === 'admin' && shown.what !== 'assigned' ? '/admin/deliveries' : '/worker/deliveries'} onClick={() => setShown(null)}>
       <span className="toast-icon" aria-hidden>
         {icon[shown.what]}
       </span>

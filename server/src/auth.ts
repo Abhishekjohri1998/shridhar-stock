@@ -34,7 +34,22 @@ export function publicPerson(p: PersonRecord): Person {
 declare module 'express-serve-static-core' {
   interface Request {
     person?: PersonRecord;
+    /** The worker the admin is working as (X-Act-As). `person` stays the admin. */
+    actingFor?: PersonRecord;
   }
+}
+
+/** The header the admin's worker screens send to work as one worker. */
+export const ACT_AS_HEADER = 'x-act-as';
+
+/** Whose screen this is: the worker the admin acts for, else the person signed in. */
+export function who(req: Request): PersonRecord {
+  return req.actingFor ?? req.person!;
+}
+
+/** Who did it, for the record: the worker in `by`, and the admin in `actor` when they tapped it for them. */
+export function audit(req: Request): { by: string; actor?: string } {
+  return req.actingFor ? { by: req.actingFor.id, actor: req.person!.id } : { by: req.person!.id };
 }
 
 /**
@@ -67,7 +82,17 @@ export function requireRole(...roles: Role[]) {
         if (!isActiveRole(p.role)) throw new HttpError(401, retiredRoleMessage(p.role));
         if (roles.length && !roles.includes(p.role)) throw new HttpError(403, 'This is not open to your role');
         req.person = p;
-        next();
+        // Working as a worker: only the admin may, and only as a switched-on worker.
+        const actAs = (req.header(ACT_AS_HEADER) ?? '').trim();
+        if (!actAs) return next();
+        if (p.role !== 'admin') throw new HttpError(403, 'Only the admin can work as another person');
+        return getRepo()
+          .getPerson(actAs)
+          .then((w) => {
+            if (!w || !w.active || (w.role !== 'worker' && w.role !== 'godown')) throw new HttpError(400, 'That is not a working worker');
+            req.actingFor = w;
+            next();
+          });
       })
       .catch(next);
   };

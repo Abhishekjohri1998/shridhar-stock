@@ -16,6 +16,7 @@ import { publicRoutes } from './routes/public';
 import { reportRoutes } from './routes/reports';
 import { roleRoutes } from './routes/roles';
 import { startLink } from './billing/link';
+import { markInk } from './billing/sync';
 import { seedDemo } from './demo/seed';
 import { ensureShop, seedAdmin } from './setup';
 import { getRepo, initRepo } from './store';
@@ -95,6 +96,10 @@ async function main(): Promise<void> {
   await check();
   setInterval(check, RECONCILE_EVERY_MS).unref();
 
+  // Bills read before the handwriting mark existed are marked once, so Home counts them by query.
+  await markInk(repo)
+    .then((n) => n && console.log('[store] marked handwriting on ' + n + ' older bills'))
+    .catch((err: Error) => console.error('[store] marking handwriting failed:', err.message));
   startLink();
 
   app.listen(env.port, () => {

@@ -13,7 +13,7 @@ import {
   type Transfer,
   type Vehicle,
 } from '@stock/core';
-import { requireRole } from '../auth';
+import { requireRole, who } from '../auth';
 import { handler, HttpError } from '../http';
 import { emit } from '../events';
 import { dataVersion, getRepo } from '../store';
@@ -49,6 +49,15 @@ function rounding(total: number, step: number): { rounded: number; roundOff: num
   return { rounded: r.rounded, roundOff: r.diff };
 }
 
+/**
+ * A bill's round-off as billing put it on the bill. Billing owns rounding; only a bill read
+ * before billing sent it falls back to the old setting here.
+ */
+export function billRounding(b: Pick<BillMirror, 'total' | 'roundOff' | 'rounded'>, step: number): { rounded: number; roundOff: number } {
+  if (typeof b.rounded === 'number' && typeof b.roundOff === 'number') return { rounded: b.rounded, roundOff: b.roundOff };
+  return rounding(b.total, step);
+}
+
 // ---------------------------------------------------------------- admin
 
 /** Stock value at cost: each item's base cost times what all places hold, in one pass. */
@@ -74,6 +83,9 @@ onEmit(() => {
 });
 const HOME_TTL_MS = 60_000;
 
+/** What lists leave out: the handwriting, which is most of a bill's size. */
+const NO_INK = ['lines.ink'];
+
 export async function buildHome() {
   const repo = getRepo();
   const today = istToday();
@@ -84,9 +96,10 @@ export async function buildHome() {
     repo.listItems(),
     repo.listStock(),
     repo.listDocs<Pick<BillMirror, 'id' | 'at' | 'total' | 'cancelled'>>('bills', { filter: { at: { gte: weekStart } }, fields: ['at', 'total', 'cancelled'] }),
-    repo.listDocs<Pick<BillMirror, 'id' | 'lines'>>('bills', { filter: { ...live, 'lines.state': 'to-confirm' }, fields: ['lines'] }),
+    // Lines without their handwriting: Home only counts them.
+    repo.listDocs<Pick<BillMirror, 'id' | 'lines'>>('bills', { filter: { ...live, 'lines.state': 'to-confirm' }, omit: NO_INK }),
     repo.listDocs<Pick<BillMirror, 'id' | 'balance'>>('bills', { filter: { ...live, balance: { gt: 0 } }, fields: ['balance'] }),
-    repo.listDocs<Pick<BillMirror, 'id' | 'lines'>>('bills', { filter: { ...live, 'lines.ink': { exists: true } }, fields: ['lines'] }),
+    repo.listDocs<Pick<BillMirror, 'id' | 'inkLines'>>('bills', { filter: { ...live, hasInk: true }, fields: ['inkLines'] }),
     repo.listDocs<Pick<Transfer, 'id' | 'status'>>('transfers', { filter: { status: ['sent', 'requested'] }, fields: ['status'] }),
     repo.listDocs<Pick<PurchaseOrder, 'id'>>('pos', { filter: { status: [...OPEN_PO] }, fields: ['status'] }),
     repo.getDoc<{ id: string; link?: unknown }>('meta', 'status'),
@@ -125,7 +138,7 @@ export async function buildHome() {
     billsToday: todays.length,
     due: owing.reduce((s, b) => s + Math.max(0, b.balance), 0),
     stockValue: stockValueOf(items, stock),
-    handwrittenLines: handwritten.reduce((n, b) => n + b.lines.filter((l) => l.ink).length, 0),
+    handwrittenLines: handwritten.reduce((n, b) => n + (b.inkLines ?? 0), 0),
     link: meta?.link ?? null,
     week: days,
   };
@@ -203,9 +216,26 @@ roleRoutes.get(
   handler(async (req, res) => {
     const limit = Math.min(500, Number(req.query.limit) || 100);
     const repo = getRepo();
-    const [bills, settings] = await Promise.all([repo.listDocs<BillMirror>('bills', { sort: { no: -1 }, limit }), settingsOf(repo)]);
-    // The total as the counter collects it, with the round-off line that gets there.
-    res.json(bills.map((b) => ({ ...b, ...rounding(b.total, settings.roundTo) })));
+    // Without the handwriting: the page fetches it from /admin/bills/ink for the bills that have some.
+    const [bills, settings] = await Promise.all([repo.listDocs<BillMirror>('bills', { sort: { no: -1 }, limit, omit: NO_INK }), settingsOf(repo)]);
+    // The total as the counter collected it, with the round-off line billing put on the bill.
+    res.json(bills.map((b) => ({ ...b, ...billRounding(b, settings.roundTo) })));
+  }),
+);
+
+/** The handwriting of some bills, by number: { [no]: { [line]: ink } }. For the Bills page, after the list. */
+roleRoutes.get(
+  '/admin/bills/ink',
+  admin,
+  handler(async (req, res) => {
+    const nos = String(req.query.nos ?? '')
+      .split(',')
+      .map(Number)
+      .filter((n) => Number.isInteger(n) && n > 0)
+      .slice(0, 100);
+    if (!nos.length) return res.json({});
+    const bills = await getRepo().listDocs<BillMirror>('bills', { filter: { no: nos }, fields: ['no', 'lines'] });
+    res.json(Object.fromEntries(bills.filter((b) => b.lines.some((l) => l.ink)).map((b) => [b.no, Object.fromEntries(b.lines.filter((l) => l.ink).map((l) => [l.i, l.ink]))])));
   }),
 );
 
@@ -214,7 +244,8 @@ roleRoutes.get(
   '/admin/confirm',
   admin,
   handler(async (_req, res) => {
-    const bills = await getRepo().listDocs<BillMirror>('bills', { filter: { cancelled: { ne: true }, 'lines.state': 'to-confirm' }, sort: { no: 1 } });
+    // The oldest 50 bills waiting: the page works through them a few at a time.
+    const bills = await getRepo().listDocs<BillMirror>('bills', { filter: { cancelled: { ne: true }, 'lines.state': 'to-confirm' }, sort: { no: 1 }, limit: 50 });
     res.json(
       bills.flatMap((b) =>
         b.lines
@@ -343,7 +374,7 @@ roleRoutes.get(
           at: b.at,
           customer: b.customer?.name ?? '',
           total: b.total,
-          ...rounding(b.total, settings.roundTo),
+          ...billRounding(b, settings.roundTo),
           lines: b.lines.map((l) => {
             // Until a person confirms it, the best match says which rack to walk to.
             const guess = l.itemId ?? l.reading?.itemId;
@@ -450,7 +481,7 @@ roleRoutes.get(
 async function myGodown(req: import('express').Request): Promise<string> {
   const godowns = placeOrder((await getRepo().listLocations()).filter((l) => l.active && l.kind === 'godown'));
   if (!godowns.length) throw new HttpError(404, 'There is no godown yet. Ask the admin to add one under Setup.');
-  const want = String(req.query.g ?? '') || req.person!.linkedId || '';
+  const want = String(req.query.g ?? '') || who(req).linkedId || '';
   return (godowns.find((l) => l.id === want) ?? godowns[0]!).id;
 }
 

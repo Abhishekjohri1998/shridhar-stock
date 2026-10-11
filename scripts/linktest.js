@@ -82,7 +82,106 @@ const fake = http.createServer((req, res) => {
   send(404, { error: 'no' });
 });
 
+
+// ---- the light list (lite, since) from a newer billing server, and an older one that ignores both
+async function liteSyncTests() {
+  const { syncOnce } = require(path.join(out, 'billing', 'sync.js'));
+  const { createFileRepo } = require(path.join(out, 'store', 'file.js'));
+  const { billRounding } = require(path.join(out, 'routes', 'roles.js'));
+  const { roundOffTotal } = require(path.join(out, 'routes', 'reports.js'));
+  const at = new Date().toISOString();
+  const fresh = async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-lite-'));
+    const repo = await createFileRepo(dir);
+    await repo.saveLocation({ id: 'loc_shop', name: 'Shop', nameKn: '', kind: 'shop', active: true });
+    await repo.saveItem({ id: 'it_sugar', nameEn: 'Sugar', nameKn: '', units: [{ code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price: 46 }], aliases: [], racks: {}, active: true, updatedAt: at });
+    return { repo, dir };
+  };
+  const full = [
+    { no: 1, at, total: 92, paid: 92, balance: 0, roundOff: 3, rounded: 95, lines: [{ nameEn: 'Sugar', qty: 2, rate: 46 }] },
+    { no: 2, at, total: 90.5, paid: 0, balance: 90.5, roundoff: -0.5, roundedTotal: 90, lines: [{ nameEn: '', ink, qty: 1, rate: 90.5, lastMode: 'ink' }] },
+  ];
+  // A newer billing server: a light list (no ink, hasInk per bill), since and limit honoured.
+  const newer = (bills) => {
+    const calls = [];
+    const lite = (b) => ({ ...b, hasInk: b.lines.some((l) => l.ink), lines: b.lines.map(({ ink: _i, ...l }) => l) });
+    return {
+      calls,
+      get: async (p) => {
+        calls.push(p);
+        if (p === '/api/customers') return [];
+        const one = p.match(/^\/api\/bills\/(\d+)$/);
+        if (one) return JSON.parse(JSON.stringify(bills.find((b) => b.no === Number(one[1]))));
+        const u = new URL('http://x' + p);
+        const since = Number(u.searchParams.get('since') || 0);
+        const limit = Number(u.searchParams.get('limit') || 100);
+        return bills.filter((b) => b.no > since).sort((a, b) => b.no - a.no).slice(0, limit).map(lite);
+      },
+    };
+  };
+  {
+    const { repo, dir } = await fresh();
+    const bills = JSON.parse(JSON.stringify(full));
+    const b = newer(bills);
+    const r1 = await syncOnce(repo, b, { mode: 'full', limit: 30 });
+    eq('lite: a newer billing server is seen as one', r1.lite, true);
+    eq('lite: both bills read', r1.newBills, 2);
+    check('lite: the list is asked for light, the latest 30', b.calls.includes('/api/bills?lite=1&limit=30'), JSON.stringify(b.calls));
+    check('lite: only the handwritten bill is fetched whole', b.calls.filter((c) => /^\/api\/bills\/\d+$/.test(c)).join() === '/api/bills/2', JSON.stringify(b.calls));
+    const m2 = await repo.getDoc('bills', '2');
+    check('lite: its handwriting is kept, marked on the bill and the line', m2.hasInk === true && m2.inkLines === 1 && m2.lines[0].inked === true && m2.lines[0].ink.w === 300, JSON.stringify(m2));
+    const m1 = await repo.getDoc('bills', '1');
+    check('round-off: taken from the bill billing sent', m1.roundOff === 3 && m1.rounded === 95 && m1.hasInk === false, JSON.stringify(m1));
+    check('round-off: either spelling is read', m2.roundOff === -0.5 && m2.rounded === 90, JSON.stringify([m2.roundOff, m2.rounded]));
+    check('round-off: the stored one wins over the old setting', JSON.stringify(billRounding(m1, 10)) === '{"rounded":95,"roundOff":3}');
+    check('round-off: an old bill with none falls back to the setting', JSON.stringify(billRounding({ total: 92 }, 5)) === '{"rounded":90,"roundOff":-2}');
+    eq('round-off: reports add up what billing put on the bills', roundOffTotal([m1, m2, { total: 92, at, no: 9 }], 5, '', '~'), 0.5);
+    const moves = await repo.listMoves({});
+    eq('lite: the typed line sold stock once', moves.filter((m) => m.kind === 'sale').length, 1);
+
+    b.calls.length = 0;
+    const r2 = await syncOnce(repo, b, { mode: 'fast', since: 2 });
+    check('since: the quick read asks only for bills after the newest', b.calls.join() === '/api/bills?lite=1&since=2&limit=100', JSON.stringify(b.calls));
+    eq('since: nothing new, nothing read', r2.bills + r2.newBills, 0);
+
+    bills.push({ no: 3, at, total: 46, paid: 46, balance: 0, lines: [{ nameEn: 'Sugar', qty: 1, rate: 46 }] });
+    b.calls.length = 0;
+    const r3 = await syncOnce(repo, b, { mode: 'fast', since: 2 });
+    check('since: a new typed bill comes in the light list alone', r3.newBills === 1 && r3.posted === 1 && b.calls.length === 1, JSON.stringify([r3, b.calls]));
+
+    // Bill 2 is cancelled at the counter: the slow full read finds it, without fetching its ink again.
+    bills.find((x) => x.no === 2).cancelled = true;
+    bills.find((x) => x.no === 1).cancelled = true;
+    b.calls.length = 0;
+    const r4 = await syncOnce(repo, b, { mode: 'full', limit: 30, customers: false });
+    check('full: cancels are found, nothing fetched whole', b.calls.length === 1 && r4.reversed === 1, JSON.stringify([r4, b.calls]));
+    const c2 = await repo.getDoc('bills', '2');
+    check('full: a cancelled handwritten bill keeps its ink', c2.cancelled === true && c2.lines[0].ink && c2.lines[0].ink.w === 300, JSON.stringify(c2));
+    const before = JSON.stringify(await repo.listDocs('bills'));
+    const r5 = await syncOnce(repo, b, { mode: 'full', limit: 30, customers: false });
+    check('full: an unchanged read changes nothing', JSON.stringify(await repo.listDocs('bills')) === before && r5.posted === 0 && r5.reversed === 0);
+    await repo.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  {
+    // An older billing server: no lite, no since, full bills with ink; stock reads as before.
+    const { repo, dir } = await fresh();
+    const calls = [];
+    const old = { get: async (p) => (calls.push(p), p === '/api/customers' ? [] : JSON.parse(JSON.stringify(full)).map(({ roundOff: _a, roundoff: _b, rounded: _c, roundedTotal: _d, ...x }) => x)) };
+    const r = await syncOnce(repo, old, { mode: 'fast', since: 1 });
+    eq('older billing: seen as no light list', r.lite, false);
+    eq('older billing: every bill it sends is read', r.newBills, 2);
+    check('older billing: nothing is fetched one by one', !calls.some((c) => /^\/api\/bills\/\d+$/.test(c)), JSON.stringify(calls));
+    const m2 = await repo.getDoc('bills', '2');
+    check('older billing: handwriting is read from the list', m2.lines[0].ink && m2.hasInk === true && m2.inkLines === 1, JSON.stringify(m2));
+    check('older billing: no round-off is made up', m2.roundOff === undefined && m2.rounded === undefined);
+    await repo.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 async function main() {
+  await liteSyncTests();
   await new Promise((r) => fake.listen(0, r));
   const billingUrl = 'http://localhost:' + fake.address().port;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-link-'));
@@ -135,7 +234,9 @@ async function main() {
     // No machine reading: a written line waits in To confirm for a person to pick the item.
     eq('the handwritten line waits for a person', b1.lines[1].state, 'to-confirm');
     check('with no machine reading', !b1.lines[1].reading, JSON.stringify(b1.lines[1].reading));
-    check('with its ink', b1.lines[1].ink && b1.lines[1].ink.strokes.length === 1);
+    check('the list leaves the ink out, marking the line', !b1.lines[1].ink && b1.lines[1].inked === true && b1.hasInk === true, JSON.stringify(b1.lines[1]));
+    const inks = (await call('/admin/bills/ink?nos=1,2')).body;
+    check('with its ink fetched after', inks['1'] && inks['1']['1'] && inks['1']['1'].strokes.length === 1 && !inks['2'], JSON.stringify(inks));
     eq('a name no item has waits too', b1.lines[2].state, 'to-confirm');
     eq('a price with nothing written is not stock', b1.lines[3].state, 'not-item');
     eq('the typed sugar line knows its unit', b1.lines[0].unit, 'kg');

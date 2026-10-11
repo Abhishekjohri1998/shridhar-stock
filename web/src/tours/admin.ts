@@ -140,9 +140,9 @@ export const billsTour = tour('bills', ['Bills', 'ಬಿಲ್‌ಗಳು'], [
   step(
     'bills-total',
     ['Total, rounded', 'ಒಟ್ಟು, ರೌಂಡ್'],
-    ['The amount as the counter collects it, with the round-off beside it.', 'ಕೌಂಟರ್ ತೆಗೆದುಕೊಳ್ಳುವ ಮೊತ್ತ, ಪಕ್ಕದಲ್ಲಿ ರೌಂಡ್ ಆಫ್.'],
+    ['The amount as the counter collected it, with billing’s round-off beside it.', 'ಕೌಂಟರ್ ತೆಗೆದುಕೊಂಡ ಮೊತ್ತ, ಪಕ್ಕದಲ್ಲಿ ಬಿಲ್ಲಿಂಗ್‌ನ ರೌಂಡ್ ಆಫ್.'],
     ['“Due” in yellow means the customer still owes money on this bill.', 'ಹಳದಿ “ಬಾಕಿ” ಎಂದರೆ ಈ ಬಿಲ್‌ನಲ್ಲಿ ಗ್ರಾಹಕ ಇನ್ನೂ ಹಣ ಕೊಡಬೇಕು.'],
-    ['Nothing. The rounding is set in Setup → Settings.', 'ಏನೂ ಇಲ್ಲ. ರೌಂಡಿಂಗ್ ಸೆಟಪ್ → ಸೆಟ್ಟಿಂಗ್ಸ್‌ನಲ್ಲಿ.'],
+    ['Nothing. The rounding is set in the billing app’s Settings.', 'ಏನೂ ಇಲ್ಲ. ರೌಂಡಿಂಗ್ ಬಿಲ್ಲಿಂಗ್ ಆ್ಯಪ್‌ನ ಸೆಟ್ಟಿಂಗ್ಸ್‌ನಲ್ಲಿ.'],
   ),
   step(
     'bills-state',
@@ -451,6 +451,13 @@ export const purchasesTour = tour('purchases', ['Purchases', 'ಖರೀದಿ'],
     ['On a phone it is under “More”.', 'ಫೋನಿನಲ್ಲಿ “ಇನ್ನಷ್ಟು” ಒಳಗೆ.'],
     ['Purchases opens.', 'ಖರೀದಿ ತೆರೆಯುತ್ತದೆ.'],
   ),
+  step(
+    'nav-workers',
+    ['Worker screens in the menu', 'ಮೆನುವಿನಲ್ಲಿ ಕೆಲಸಗಾರರ ಪರದೆ'],
+    ['The pick list, godown, deliveries and TV screen, without signing in again.', 'ಪಟ್ಟಿ, ಗೋದಾಮು, ಡೆಲಿವರಿ ಮತ್ತು ಟಿವಿ ಪರದೆ, ಮತ್ತೆ ಲಾಗಿನ್ ಆಗದೆ.'],
+    ['“Acting for” at the top picks the worker. What you do there is saved as that worker’s, with your name beside it.', 'ಮೇಲಿನ “ಯಾರ ಪರವಾಗಿ” ಕೆಲಸಗಾರನನ್ನು ಆರಿಸುತ್ತದೆ. ಅಲ್ಲಿ ಮಾಡಿದ್ದು ಆ ಕೆಲಸಗಾರನದಾಗಿ, ನಿಮ್ಮ ಹೆಸರಿನೊಂದಿಗೆ ಉಳಿಯುತ್ತದೆ.'],
+    ['The pick list opens.', 'ಪಟ್ಟಿ ತೆರೆಯುತ್ತದೆ.'],
+  ),
   helpStep,
 ]);
 
@@ -563,13 +570,6 @@ export const setupTour = tour('setup', ['Setup', 'ಸೆಟಪ್'], [
     ['Whether bills are coming in from billing, and the last bill read.', 'ಬಿಲ್ಲಿಂಗ್‌ನಿಂದ ಬಿಲ್ ಬರುತ್ತಿದೆಯೇ, ಕೊನೆಯ ಬಿಲ್ ಯಾವುದು.'],
     ['Bills are read every few seconds by themselves.', 'ಕೆಲವು ಸೆಕೆಂಡಿಗೊಮ್ಮೆ ಬಿಲ್‌ಗಳು ತಾನಾಗಿ ಓದಲ್ಪಡುತ್ತವೆ.'],
     ['“Read bills now” reads at once and says how many came.', '“ಈಗಲೇ ಬಿಲ್ ಓದಿ” ತಕ್ಷಣ ಓದಿ ಎಷ್ಟು ಬಂತು ಎಂದು ಹೇಳುತ್ತದೆ.'],
-  ),
-  step(
-    'settings-round',
-    ['Settings: rounding off', 'ಸೆಟ್ಟಿಂಗ್ಸ್: ರೌಂಡ್ ಆಫ್'],
-    ['How bill totals are rounded: none, ₹1, ₹5 or ₹10.', 'ಬಿಲ್ ಮೊತ್ತ ಹೇಗೆ ರೌಂಡ್: ಬೇಡ, ₹1, ₹5 ಅಥವಾ ₹10.'],
-    ['The worker screen, bills and reports show the rounded total.', 'ಕೆಲಸಗಾರರ ಪರದೆ, ಬಿಲ್ ಮತ್ತು ವರದಿಯಲ್ಲಿ ರೌಂಡ್ ಮೊತ್ತ.'],
-    ['The choice is saved at once.', 'ಆಯ್ಕೆ ತಕ್ಷಣ ಉಳಿಯುತ್ತದೆ.'],
   ),
   helpStep,
 ]);

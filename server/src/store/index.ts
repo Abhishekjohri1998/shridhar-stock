@@ -83,6 +83,7 @@ export function withCache(inner: InvRepo): InvRepo {
     incStock: w(inner.incStock),
     setStock: w(inner.setStock),
     putDoc: w(inner.putDoc),
+    putDocs: w(inner.putDocs),
     deleteDoc: w(inner.deleteDoc),
     nextNo: w(inner.nextNo),
     ...(inner.eraseAll

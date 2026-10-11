@@ -179,13 +179,14 @@ export function tripsByVehicle(vehicles: Vehicle[], transfers: Transfer[], deliv
 /** What rounding bills to the shop's step added (or took off) across the period. */
 export function roundOffTotal(bills: BillMirror[], step: number, from: string, to: string): number {
   let sum = 0;
-  for (const b of bills) if (!b.cancelled && b.at >= from && b.at < to) sum += roundOff(b.total, step).diff;
+  // The round-off billing put on each bill; a bill from before billing sent it, by the old step.
+  for (const b of bills) if (!b.cancelled && b.at >= from && b.at < to) sum += typeof b.roundOff === 'number' ? b.roundOff : roundOff(b.total, step).diff;
   return round2(sum);
 }
 
 async function load() {
   const repo = getRepo();
-  const [bills, items, stock, locs] = await Promise.all([repo.listDocs<BillMirror>('bills'), repo.listItems(), repo.listStock(), repo.listLocations()]);
+  const [bills, items, stock, locs] = await Promise.all([repo.listDocs<BillMirror>('bills', { omit: ['lines.ink'] }), repo.listItems(), repo.listStock(), repo.listLocations()]);
   return { bills, items, byId: new Map(items.map((i) => [i.id, i])), stock, locs };
 }
 
@@ -253,9 +254,9 @@ reportRoutes.get(
         const { roundTo } = await settingsOf(getRepo());
         const rows: (string | number)[][] = [];
         for (const b of d.bills.filter((x) => x.at >= p.from && x.at < p.to).sort((a, c) => a.no - c.no)) {
-          for (const l of b.lines) rows.push([b.no, b.at, b.customer?.name ?? '', b.cancelled ? 'cancelled' : '', l.i + 1, l.name || l.reading?.readText || (l.ink ? '[handwritten]' : ''), l.itemId ? name(d.byId.get(l.itemId), l.itemId) : '', l.qty, l.rate, l.amount, l.state]);
+          for (const l of b.lines) rows.push([b.no, b.at, b.customer?.name ?? '', b.cancelled ? 'cancelled' : '', l.i + 1, l.name || l.reading?.readText || (l.ink || l.inked ? '[handwritten]' : ''), l.itemId ? name(d.byId.get(l.itemId), l.itemId) : '', l.qty, l.rate, l.amount, l.state]);
           // The round-off as a line of its own, so the amounts still add up to what was collected.
-          const r = roundOff(b.total, roundTo);
+          const r = typeof b.roundOff === 'number' ? { diff: b.roundOff } : roundOff(b.total, roundTo);
           if (r.diff) rows.push([b.no, b.at, b.customer?.name ?? '', b.cancelled ? 'cancelled' : '', '', 'Round off', '', '', '', r.diff, '']);
         }
         return sendCsv(res, 'bills-' + span + '.csv', toCsv(['bill', 'at', 'customer', 'cancelled', 'line', 'written_or_typed', 'item', 'qty', 'rate', 'amount', 'how_matched'], rows));

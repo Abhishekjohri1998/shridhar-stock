@@ -14,7 +14,7 @@ import {
   type CustomerProfile,
   type Transfer,
 } from '@stock/core';
-import { requireRole } from '../auth';
+import { requireRole, audit } from '../auth';
 import { handler, HttpError } from '../http';
 import { post } from '../posting';
 import { getRepo } from '../store';
@@ -165,7 +165,7 @@ actionRoutes.post(
   handler(async (_req, res) => {
     const { linkConfigured, syncNow } = await import('../billing/link');
     if (!linkConfigured()) throw new HttpError(400, 'The link to billing is not set up (BILLING_URL and BILLING_PIN on the server)');
-    const r = await syncNow();
+    const r = await syncNow(true);
     if (!r) throw new HttpError(502, 'Could not read from billing. See the link status.');
     res.json(r);
   }),
@@ -243,7 +243,7 @@ actionRoutes.post(
     if (body.driver) t.driver = body.driver;
     if (body.note) t.note = body.note;
     if (body.noteInk) t.noteInk = body.noteInk as Ink;
-    const moves: StockMove[] = t.lines.map((l) => ({ id: newId('mv'), key: 'xfer:' + t.no + ':out:' + l.itemId, at: now(), kind: 'transfer_out', itemId: l.itemId, from: t.from, qty: l.sent ?? 0, ref: 'transfer ' + t.no, by: req.person!.id }));
+    const moves: StockMove[] = t.lines.map((l) => ({ id: newId('mv'), key: 'xfer:' + t.no + ':out:' + l.itemId, at: now(), kind: 'transfer_out', itemId: l.itemId, from: t.from, qty: l.sent ?? 0, ref: 'transfer ' + t.no, ...audit(req) }));
     await getRepo().putDoc('transfers', t);
     await post(getRepo(), moves);
     emit('transfers', { locationIds: [t.from, t.to] }, t.id);
@@ -267,7 +267,7 @@ actionRoutes.post(
     t.status = 'received';
     t.times.received = now();
     if (body.note) t.note = body.note;
-    const moves: StockMove[] = t.lines.map((l) => ({ id: newId('mv'), key: 'xfer:' + t.no + ':in:' + l.itemId, at: now(), kind: 'transfer_in', itemId: l.itemId, to: t.to, qty: l.received ?? 0, ref: 'transfer ' + t.no, by: req.person!.id, ...((l.received ?? 0) < (l.sent ?? 0) ? { note: (l.sent! - l.received!) + ' short' } : {}) }));
+    const moves: StockMove[] = t.lines.map((l) => ({ id: newId('mv'), key: 'xfer:' + t.no + ':in:' + l.itemId, at: now(), kind: 'transfer_in', itemId: l.itemId, to: t.to, qty: l.received ?? 0, ref: 'transfer ' + t.no, ...audit(req), ...((l.received ?? 0) < (l.sent ?? 0) ? { note: (l.sent! - l.received!) + ' short' } : {}) }));
     await getRepo().putDoc('transfers', t);
     await post(getRepo(), moves);
     emit('transfers', { locationIds: [t.from, t.to] }, t.id);

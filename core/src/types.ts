@@ -173,8 +173,10 @@ export interface StockMove {
   qty: number;
   /** What caused it: a bill number, a transfer, a reason. */
   ref: string;
-  /** The person who did it. */
+  /** The person who did it: the worker, also when the admin acted for them. */
   by: string;
+  /** The admin who tapped it while acting for the worker in `by`. Absent when `by` tapped it. */
+  actor?: string;
   note?: string;
 }
 
@@ -241,6 +243,8 @@ export interface MirrorLine {
   fetched?: boolean;
   /** Billing's given tick as the last sync saw it: a change there is adopted as the fetched tick. */
   billingGiven?: boolean;
+  /** The line has handwriting: lists read without the ink still know it is a written line. */
+  inked?: boolean;
 }
 
 /** A bill as read from the billing server. Stock never writes to billing. */
@@ -254,6 +258,13 @@ export interface BillMirror {
   paid: number;
   balance: number;
   cancelled?: boolean;
+  /** Any line has handwriting. Set at sync, so lists can count written lines without the ink. */
+  hasInk?: boolean;
+  /** How many lines have handwriting, for the same reason. */
+  inkLines?: number;
+  /** The round-off billing put on the bill, and the total the customer paid. Old bills have none. */
+  roundOff?: number;
+  rounded?: number;
 }
 
 /** A customer, from billing, plus what deliveries need that billing does not keep. */
@@ -395,6 +406,9 @@ export interface Delivery {
   reason?: string;
   /** Who started it (the admin). */
   by?: string;
+  /** The worker a status change was made as, and the admin who tapped it, when the admin acted for them. */
+  doneBy?: string;
+  actor?: string;
   /** The 4-digit code the customer tells the worker at the door. */
   otp?: string;
   /** The admin let it be delivered without the code (the customer has no phone). */

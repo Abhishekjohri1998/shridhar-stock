@@ -42,6 +42,13 @@ export interface BillingBill {
   cancelled?: boolean;
   /** The live draft this bill was written as, when billing sent one. */
   draftId?: string;
+  /** Only on a newer billing server's light list (lite=1): the bill has handwriting, left out of the list. */
+  hasInk?: boolean;
+  /** Billing's round-off and rounded total, on a newer billing server (either spelling is read). */
+  roundOff?: number;
+  roundoff?: number;
+  rounded?: number;
+  roundedTotal?: number;
 }
 
 export interface BillingCustomer {
@@ -126,7 +133,7 @@ function matchLine(items: Item[], raw: BillingBill['lines'][number], i: number, 
   const base: MirrorLine = {
     i,
     name: text,
-    ...(ink ? { ink } : {}),
+    ...(ink ? { ink, inked: true } : {}),
     qty: raw.qty,
     rate: raw.rate,
     amount: Math.round(raw.qty * raw.rate * 100) / 100,
@@ -163,31 +170,72 @@ export interface SyncResult {
   customers: number;
   /** Draft ticks billing has not got yet; link.ts sends them through push.ts. */
   sendGiven: { no: number; i: number; given: boolean }[];
+  /** Whether billing answered the light list (hasInk on each bill); false for an older billing server. */
+  lite?: boolean;
+  /** Full bills fetched one by one, for their handwriting. */
+  fullFetched?: number;
 }
 
-/**
- * Reads the latest bills and every customer from billing, and brings stock up to date.
- *
- * - A matched line posts a sale from the shop (key sale:<bill>:<line>, so a restart or a second
- *   run never posts it again).
- * - A cancelled bill posts the reverse of every sale it made (key cancel:<bill>:<line>).
- * - Handwritten and unmatched lines wait in "To confirm".
- */
-export async function syncOnce(repo: InvRepo, billing: BillingClient, limit = 100): Promise<SyncResult> {
-  const [bills, customers, items, locs] = await Promise.all([
-    billing.get<BillingBill[]>('/api/bills?limit=' + limit),
-    billing.get<BillingCustomer[]>('/api/customers'),
-    repo.listItems(),
-    repo.listLocations(),
-  ]);
-  const shop = locs.find((l) => l.kind === 'shop');
-  if (!shop) throw new Error('No shop place');
-  const result: SyncResult = { bills: bills.length, newBills: 0, posted: 0, reversed: 0, toConfirm: 0, customers: 0, sendGiven: [] };
+export interface SyncOptions {
+  /**
+   * 'fast': only bills after `since` (new bills), the cheap read made every few seconds.
+   * 'full': the latest `limit` bills, for cancels and edits of bills already read.
+   * An older billing server ignores since and lite, and sends its latest bills in full either way.
+   */
+  mode?: 'fast' | 'full';
+  /** The newest bill number stock already has. */
+  since?: number;
+  limit?: number;
+  /** Read billing's customers too. The link does it on full reads and when a new bill arrives. */
+  customers?: boolean;
+}
 
+/** The round-off as billing names it, under either spelling. Undefined when billing sent none. */
+function billRounding(b: BillingBill): { roundOff?: number; rounded?: number } {
+  const raw = b as unknown as Record<string, unknown>;
+  const off = raw.roundOff ?? raw.roundoff;
+  const rounded = raw.rounded ?? raw.roundedTotal;
+  const out: { roundOff?: number; rounded?: number } = {};
+  if (typeof off === 'number' && Number.isFinite(off)) out.roundOff = Math.round(off * 100) / 100;
+  if (typeof rounded === 'number' && Number.isFinite(rounded)) out.rounded = Math.round(rounded * 100) / 100;
+  // One without the other: the missing one follows from the total.
+  if (out.roundOff != null && out.rounded == null) out.rounded = Math.round((b.total + out.roundOff) * 100) / 100;
+  if (out.rounded != null && out.roundOff == null) out.roundOff = Math.round((out.rounded - b.total) * 100) / 100;
+  return out;
+}
+
+/** JSON with sorted keys, so two copies of a bill compare equal whatever order their fields were set in. */
+function stable(v: unknown): string {
+  if (Array.isArray(v)) return '[' + v.map(stable).join(',') + ']';
+  if (v && typeof v === 'object')
+    return (
+      '{' +
+      Object.keys(v as object)
+        .filter((k) => (v as Record<string, unknown>)[k] !== undefined)
+        .sort()
+        .map((k) => JSON.stringify(k) + ':' + stable((v as Record<string, unknown>)[k]))
+        .join(',') +
+      '}'
+    );
+  return JSON.stringify(v);
+}
+
+/** The bill list from billing: the light one where billing has it, and whether it did. */
+async function readBills(billing: BillingClient, opts: Required<Pick<SyncOptions, 'mode' | 'since' | 'limit'>>): Promise<{ bills: BillingBill[]; lite: boolean }> {
+  const q = opts.mode === 'fast' && opts.since > 0 ? '?lite=1&since=' + opts.since + '&limit=' + opts.limit : '?lite=1&limit=' + opts.limit;
+  const bills = await billing.get<BillingBill[]>('/api/bills' + q);
+  // A billing server that knows lite marks every bill with hasInk; an older one sends full bills.
+  const lite = bills.length > 0 && bills.every((b) => typeof b.hasInk === 'boolean');
+  return { bills, lite };
+}
+
+/** Every customer from billing, written only where something changed. Returns how many were read. */
+export async function syncCustomers(repo: InvRepo, billing: BillingClient): Promise<number> {
+  const customers = await billing.get<BillingCustomer[]>('/api/customers');
   for (const c of customers) {
     const key = c.phone || c.id;
     const before = await repo.getDoc<CustomerProfile>('customers', 'c_' + key);
-    await repo.putDoc<CustomerProfile>('customers', {
+    const next: CustomerProfile = {
       id: 'c_' + key,
       key,
       name: c.name,
@@ -199,24 +247,66 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limit = 10
       // The home's map pin, also stock's own.
       ...(before?.lat != null && before?.lng != null ? { lat: before.lat, lng: before.lng } : {}),
       balance: c.balance ?? 0,
-    });
-    result.customers++;
+    };
+    if (!before || stable(before) !== stable(next)) await repo.putDoc<CustomerProfile>('customers', next);
   }
+  return customers.length;
+}
 
-  for (const b of bills) {
-    const id = String(b.no);
+/**
+ * Reads bills (and, when asked, every customer) from billing, and brings stock up to date.
+ *
+ * - A matched line posts a sale from the shop (key sale:<bill>:<line>, so a restart or a second
+ *   run never posts it again).
+ * - A cancelled bill posts the reverse of every sale it made (key cancel:<bill>:<line>).
+ * - Handwritten and unmatched lines wait in "To confirm".
+ * - From a newer billing server the list comes without handwriting; a new bill that has some is
+ *   fetched on its own, once. A bill already read keeps the handwriting it was read with.
+ * - A bill that has not changed since the last read is not written again.
+ */
+export async function syncOnce(repo: InvRepo, billing: BillingClient, limitOrOpts: number | SyncOptions = 100): Promise<SyncResult> {
+  const opts = typeof limitOrOpts === 'number' ? { limit: limitOrOpts } : limitOrOpts;
+  const mode = opts.mode ?? 'full';
+  const limit = opts.limit ?? (mode === 'full' ? 30 : 100);
+  const wantCustomers = opts.customers ?? mode === 'full';
+  const [{ bills: listed, lite }, items, locs] = await Promise.all([
+    readBills(billing, { mode, since: opts.since ?? 0, limit }),
+    repo.listItems(),
+    repo.listLocations(),
+  ]);
+  const shop = locs.find((l) => l.kind === 'shop');
+  if (!shop) throw new Error('No shop place');
+  const result: SyncResult = { bills: listed.length, newBills: 0, posted: 0, reversed: 0, toConfirm: 0, customers: 0, sendGiven: [], lite, fullFetched: 0 };
+
+  if (wantCustomers) result.customers = await syncCustomers(repo, billing);
+
+  // Oldest first, so sales post in the order they were made.
+  const ordered = [...listed].sort((a, b) => a.no - b.no);
+  for (const listedBill of ordered) {
+    const id = String(listedBill.no);
     const before = await repo.getDoc<BillMirror>('bills', id);
+    let b = listedBill;
+    // A light bill with handwriting that stock has not read yet: its handwriting, fetched once.
+    if (lite && b.hasInk && !before?.hasInk) {
+      b = await billing.get<BillingBill>('/api/bills/' + b.no);
+      result.fullFetched!++;
+    }
     if (!before) result.newBills++;
     // A bill saved from a live draft takes the draft's place, with the ticks made on it.
-    const draft = b.draftId ? takeDraft(b.draftId) : undefined;
+    const draft = b.draftId && !before ? takeDraft(b.draftId) : undefined;
     // Each line finds its draft line by billing's line id (the draft's key), else by position.
     const drafted = (l: BillingBill['lines'][number], i: number) =>
       before || !draft ? undefined : l.itemId ? draft.lines.find((d) => d.key === l.itemId) : draft.lines[i];
-    const lines = b.lines.map((l, i) => toMirrorLine(items, l, i, before?.lines[i], drafted(l, i)));
+    const lines = b.lines.map((l, i) => {
+      // A light line comes without its handwriting: the ink read before stays.
+      const raw = lite && !l.ink && before?.lines[i]?.ink ? { ...l, ink: before.lines[i]!.ink } : l;
+      return toMirrorLine(items, raw, i, before?.lines[i], drafted(l, i));
+    });
     // A tick made on the draft in the moment before Save may not have reached billing: send it.
     lines.forEach((l, i) => {
       if (!!l.billingGiven !== !!b.lines[i]!.given) result.sendGiven.push({ no: b.no, i, given: !!l.billingGiven });
     });
+    const inked = lines.some((l) => l.ink);
     const mirror: BillMirror = {
       id,
       no: b.no,
@@ -227,8 +317,15 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limit = 10
       paid: b.paid,
       balance: b.balance,
       ...(b.cancelled ? { cancelled: true } : {}),
+      hasInk: inked,
+      inkLines: lines.filter((l) => l.ink).length,
+      ...billRounding(b),
     };
-    await repo.putDoc('bills', mirror);
+    // Nothing changed since the last read: nothing to write and nothing to post.
+    if (before && stable(before) === stable(mirror)) {
+      if (!b.cancelled) result.toConfirm += lines.filter((l) => l.state === 'to-confirm').length;
+      continue;
+    }
 
     const moved = lines.filter((l) => l.itemId && l.baseQty && (l.state === 'typed-match' || l.state === 'read-auto' || l.state === 'confirmed'));
     if (!b.cancelled) {
@@ -254,8 +351,29 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limit = 10
         .map((m) => ({ id: 'mv_cancel_' + m.key, key: 'cancel:' + m.key.slice(5), at: new Date().toISOString(), kind: 'cancel', itemId: m.itemId, to: m.from!, qty: m.qty, ref: 'bill ' + b.no + ' cancelled', by: 'billing' }));
       result.reversed += (await post(repo, reverse)).length;
     }
+    // Written after its stock moves: a read that fails half way is done again in full next time.
+    await repo.putDoc('bills', mirror);
   }
   return result;
+}
+
+/**
+ * Bills read before hasInk existed: marked once, at start, so Home can count handwriting by
+ * query. Reads only the bills with no mark, a batch at a time.
+ */
+export async function markInk(repo: InvRepo, batch = 500): Promise<number> {
+  let done = 0;
+  for (;;) {
+    const old = await repo.listDocs<BillMirror>('bills', { filter: { inkLines: { exists: false } }, limit: batch });
+    if (!old.length) return done;
+    for (const b of old) {
+      for (const l of b.lines) if (l.ink) l.inked = true;
+      b.hasInk = b.lines.some((l) => l.ink);
+      b.inkLines = b.lines.filter((l) => l.ink).length;
+    }
+    await repo.putDocs('bills', old);
+    done += old.length;
+  }
 }
 
 /** The link's health, for the admin's screens. */

@@ -26,6 +26,8 @@ export function setToken(token: string): void {
     /* private window: the session lasts as long as the tab */
   }
   memToken = token;
+  // A new sign-in (or sign-out) never carries on as the worker picked before.
+  if (actAs) setActAs('');
 }
 
 // A session handed over by the billing app wins over whatever was kept here.
@@ -38,6 +40,37 @@ export function whenSignedOut(fn: () => void): void {
   onSignedOut = fn;
 }
 
+// ---- the admin working as a worker
+
+const ACT_AS_KEY = 'stock.actAs';
+function readActAs(): string {
+  try {
+    return sessionStorage.getItem(ACT_AS_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+/** The worker the admin's worker screens act for; '' for everyone. Kept for this tab only. */
+let actAs = readActAs();
+const actAsListeners = new Set<() => void>();
+export const getActAs = () => actAs;
+export function setActAs(id: string): void {
+  actAs = id;
+  try {
+    if (id) sessionStorage.setItem(ACT_AS_KEY, id);
+    else sessionStorage.removeItem(ACT_AS_KEY);
+  } catch {
+    /* kept in memory only */
+  }
+  for (const fn of actAsListeners) fn();
+}
+export function onActAs(fn: () => void): () => void {
+  actAsListeners.add(fn);
+  return () => void actAsListeners.delete(fn);
+}
+/** Only the worker screens' calls carry it: the admin's own screens stay the admin's. */
+const WORKER_CALL = /^\/(worker|godown|transfers)\//;
+
 async function raw(path: string, init: RequestInit = {}): Promise<Response> {
   let res: Response;
   try {
@@ -46,6 +79,7 @@ async function raw(path: string, init: RequestInit = {}): Promise<Response> {
       headers: {
         ...(init.body ? { 'Content-Type': 'application/json' } : {}),
         ...(memToken ? { Authorization: 'Bearer ' + memToken } : {}),
+        ...(actAs && WORKER_CALL.test(path) ? { 'X-Act-As': actAs } : {}),
         ...init.headers,
       },
     });

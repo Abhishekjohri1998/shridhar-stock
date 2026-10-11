@@ -16,7 +16,7 @@ import {
   type Delivery,
   type Vehicle,
 } from '@stock/core';
-import { requireRole } from '../auth';
+import { requireRole, who } from '../auth';
 import { emit, type EventExtra } from '../events';
 import { linkPaths } from '../links';
 import { geocoder } from '../geocode';
@@ -81,11 +81,27 @@ function forWorker(d: Delivery): Omit<Delivery, 'otp' | 'otpTries'> {
   return shown;
 }
 
-async function ownDelivery(repo: InvRepo, id: string, me: PersonRecord): Promise<Delivery> {
+/**
+ * A delivery the person may work on: a worker their own; the admin any, or, while working as a
+ * worker, only that worker's.
+ */
+async function ownDelivery(repo: InvRepo, id: string, req: import('express').Request): Promise<Delivery> {
   const d = await repo.getDoc<Delivery>('deliveries', id);
+  const me: PersonRecord = who(req);
   // Someone else's delivery is "not found", the same as one that does not exist.
   if (!d || (d.personId !== me.id && me.role !== 'admin')) throw new HttpError(404, 'No such delivery');
   return d;
+}
+
+/** On a status change the admin made while working as a worker: who it was done as, and who tapped it. */
+function stamp(d: Delivery, req: import('express').Request): void {
+  if (req.actingFor) {
+    d.doneBy = req.actingFor.id;
+    d.actor = req.person!.id;
+  } else {
+    delete d.doneBy;
+    delete d.actor;
+  }
 }
 
 // ---------------------------------------------------------------- admin
@@ -314,7 +330,9 @@ deliveryRoutes.get(
   handler(async (req, res) => {
     const repo = getRepo();
     const since = new Date(Date.now() - RECENT_MS).toISOString();
-    const mine = await repo.listDocs<Delivery>('deliveries', { personId: req.person!.id });
+    // The admin's worker screens with no worker picked show everyone's.
+    const everyone = req.person!.role === 'admin' && !req.actingFor;
+    const mine = await repo.listDocs<Delivery>('deliveries', everyone ? undefined : { personId: who(req).id });
     const shown = mine
       .filter((d) => isActiveDelivery(d.status) || d.at >= since)
       .sort((a, b) => Number(isActiveDelivery(b.status)) - Number(isActiveDelivery(a.status)) || b.at.localeCompare(a.at))
@@ -330,13 +348,14 @@ deliveryRoutes.post(
   worker,
   handler(async (req, res) => {
     const repo = getRepo();
-    const d = await ownDelivery(repo, String(req.params.id), req.person!);
+    const d = await ownDelivery(repo, String(req.params.id), req);
     if (d.status === 'out') return res.json(forWorker(d));
     if (d.status !== 'pending') throw new HttpError(409, 'This delivery is already over');
     if (d.lat == null || d.lng == null) throw new HttpError(409, 'There is no pin for the home yet. Wait for the customer’s location, or ask the shop.');
     d.status = 'out';
     d.times.out = now();
     d.track = [];
+    stamp(d, req);
     await repo.putDoc('deliveries', d);
     tell(d, 'started');
     res.json(forWorker(d));
@@ -349,7 +368,7 @@ deliveryRoutes.post(
   handler(async (req, res) => {
     const b = z.object({ ...latLng, accuracy: z.number().min(0).optional() }).parse(req.body);
     const repo = getRepo();
-    const d = await ownDelivery(repo, String(req.params.id), req.person!);
+    const d = await ownDelivery(repo, String(req.params.id), req);
     // Only while on the way: nothing is kept before Start or after it is over.
     if (d.status !== 'out') throw new HttpError(409, 'Start the delivery first');
     const at = now();
@@ -381,10 +400,11 @@ deliveryRoutes.post(
 
 async function finish(req: import('express').Request, status: 'delivered' | 'failed', patch: Partial<Delivery>, check?: (d: Delivery, repo: InvRepo) => Promise<void>) {
   const repo = getRepo();
-  const d = await ownDelivery(repo, String(req.params.id), req.person!);
+  const d = await ownDelivery(repo, String(req.params.id), req);
   if (!isActiveDelivery(d.status)) throw new HttpError(409, 'This delivery is already over');
   if (check) await check(d, repo);
   Object.assign(d, patch);
+  stamp(d, req);
   d.status = status;
   d.times[status] = now();
   // The route is not kept: only where it started and ended.
@@ -454,7 +474,7 @@ deliveryRoutes.get(
   '/worker/deliveries/:id/photo',
   worker,
   handler(async (req, res) => {
-    await sendPhoto(await ownDelivery(getRepo(), String(req.params.id), req.person!), res);
+    await sendPhoto(await ownDelivery(getRepo(), String(req.params.id), req), res);
   }),
 );
 

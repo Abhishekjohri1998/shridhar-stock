@@ -209,6 +209,40 @@ async function main() {
     check('the other worker sees only their own', theirs.length === 1 && theirs[0].id !== d.id);
     eq('nor can start someone else', (await post('/worker/deliveries/' + d.id + '/start', W2)).status, 404);
     eq('nor send a position on it', (await post('/worker/deliveries/' + d.id + '/position', W2, { lat: 1, lng: 1 })).status, 404);
+    // ---- the admin on the worker screens, acting for a worker (X-Act-As)
+    const sendAs = async (method, p, token, actAs, b) => {
+      const r = await fetch(base + '/api' + p, { method, headers: { Authorization: 'Bearer ' + token, 'X-Act-As': actAs, ...(b ? { 'Content-Type': 'application/json' } : {}) }, ...(b ? { body: JSON.stringify(b) } : {}) });
+      return { status: r.status, body: await r.json().catch(() => null) };
+    };
+    eq('a worker cannot act for another worker', (await sendAs('GET', '/worker/deliveries', W, suresh)).status, 403);
+    eq('nor for themselves', (await sendAs('GET', '/worker/deliveries', W, 'p_worker')).status, 403);
+    eq('the admin cannot act for an admin', (await sendAs('GET', '/worker/deliveries', A, 'p_admin')).status, 400);
+    eq('nor for nobody', (await sendAs('GET', '/worker/deliveries', A, 'p_nope')).status, 400);
+    const asRavi = (await sendAs('GET', '/worker/deliveries', A, 'p_worker')).body;
+    check('the admin acting for Ravi sees only Ravi’s deliveries', asRavi.length === 1 && asRavi[0].id === d.id, JSON.stringify(asRavi.map((x) => x.id)));
+    check('and no door code, as Ravi would', !('otp' in asRavi[0]));
+    const asEveryone = (await get('/worker/deliveries', A)).body;
+    check('with no worker picked, the admin sees everyone’s', asEveryone.length === 2, asEveryone.length);
+    eq('acting for Suresh, Ravi’s delivery is not there to start', (await sendAs('POST', '/worker/deliveries/' + d.id + '/start', A, suresh, {})).status, 404);
+    const sureshOwn = theirs[0];
+    eq('acting for Suresh, his own starts', (await sendAs('POST', '/worker/deliveries/' + sureshOwn.id + '/start', A, suresh, {})).body.status, 'out');
+    const stamped = (await get('/admin/deliveries', A)).body.deliveries.find((x) => x.id === sureshOwn.id);
+    check('recorded as done by Suresh, tapped by the admin', stamped.doneBy === suresh && stamped.actor === 'p_admin', JSON.stringify({ doneBy: stamped.doneBy, actor: stamped.actor }));
+    eq('the admin is still the admin: Setup answers', (await sendAs('GET', '/admin/settings', A, 'p_worker')).status, 200);
+    // A transfer sent from the godown screen, acting for Ravi: the stock moves name Ravi and the admin.
+    const locs = (await get('/locations', A)).body;
+    const godown = locs.find((l) => l.kind === 'godown' && l.active);
+    const shopLoc = locs.find((l) => l.kind === 'shop');
+    const anItem = (await get('/items', A)).body[0];
+    const tr = (await post('/admin/transfers', A, { from: godown.id, to: shopLoc.id, lines: [{ itemId: anItem.id, qty: 1 }] })).body;
+    eq('a worker cannot send a transfer as another', (await sendAs('POST', '/transfers/' + tr.id + '/send', W, suresh, {})).status, 403);
+    eq('the admin sends it acting for Ravi', (await sendAs('POST', '/transfers/' + tr.id + '/send', A, 'p_worker', {})).body.status, 'sent');
+    const mv = (await get('/items/' + anItem.id + '/moves', A)).body.find((m) => m.key === 'xfer:' + tr.no + ':out:' + anItem.id);
+    check('its stock move is by Ravi, with the admin as actor', mv && mv.by === 'p_worker' && mv.actor === 'p_admin', JSON.stringify(mv));
+    eq('received by the admin as themselves', (await post('/transfers/' + tr.id + '/receive', A, {})).body.status, 'received');
+    const mvIn = (await get('/items/' + anItem.id + '/moves', A)).body.find((m) => m.key === 'xfer:' + tr.no + ':in:' + anItem.id);
+    check('that one is by the admin, no actor', mvIn && mvIn.by === 'p_admin' && !mvIn.actor, JSON.stringify(mvIn));
+
     eq('a worker cannot read the admin list', (await get('/admin/deliveries', W)).status, 403);
     eq('nor search addresses', (await get('/admin/geocode?q=hubli', W)).status, 403);
     eq('the search says plainly when it is not answering', (await get('/admin/geocode?q=hubli', A)).status, 502);
@@ -268,6 +302,7 @@ async function main() {
     eq('Could not deliver needs a reason', (await post('/worker/deliveries/' + other.id + '/failed', W2, {})).status, 400);
     const f = await post('/worker/deliveries/' + other.id + '/failed', W2, { reason: 'Door locked' });
     check('Could not deliver, with the reason', f.body.status === 'failed' && f.body.reason === 'Door locked' && f.body.track.length === 0, JSON.stringify(f.body));
+    check('done by Suresh himself: no actor', !f.body.actor && !f.body.doneBy, JSON.stringify(f.body));
 
     // ---- the customer's links
     const plain = async (method, p, b) => {

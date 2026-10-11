@@ -444,7 +444,14 @@ async function queries(out) {
   check('only the fields asked for, and the id', JSON.stringify(shapeDocs(docs, { fields: ['no'] })[0]) === '{"id":"a","no":2}');
   check('a bare filter is still a filter', asQuery({ status: 'sent' }).filter.status === 'sent' && asQuery({ limit: 3 }).limit === 3);
   check('to Mongo: ranges, not-equal, lists, exists', JSON.stringify(mongoFilter({ at: { gte: 'x' }, cancelled: { ne: true }, no: [1], 'lines.ink': { exists: true } })) === JSON.stringify({ at: { $gte: 'x' }, cancelled: { $ne: true }, no: { $in: [1] }, 'lines.ink': { $exists: true, $ne: null } }));
-  check('bills are indexed by time, number and cancelled', JSON.stringify(DOC_INDEXES.bills) === JSON.stringify([{ at: -1 }, { no: -1 }, { cancelled: 1, at: -1 }]));
+  check('bills are indexed by time, number, cancelled, waiting lines, money due and handwriting', JSON.stringify(DOC_INDEXES.bills) === JSON.stringify([{ at: -1 }, { no: -1 }, { cancelled: 1, at: -1 }, { 'lines.state': 1 }, { balance: 1 }, { hasInk: 1 }]));
+  {
+    const bill = [{ id: 'b', no: 1, lines: [{ i: 0, ink: { w: 1 }, inked: true, state: 'x' }, { i: 1, name: 'Sugar' }] }];
+    const lite = shapeDocs(bill, { omit: ['lines.ink'] })[0];
+    check('omit: the ink is left out of every line, the rest kept', !lite.lines[0].ink && lite.lines[0].inked === true && lite.lines[1].name === 'Sugar' && lite.no === 1, JSON.stringify(lite));
+    check('omit: the stored bill is not touched', bill[0].lines[0].ink.w === 1);
+    check('omit: a full query', asQuery({ omit: ['lines.ink'] }).omit[0] === 'lines.ink');
+  }
   check('transfers and orders by status and time', DOC_INDEXES.transfers.some((i) => i.status === 1 && i.at === -1) && DOC_INDEXES.pos.some((i) => i.status === 1 && i.at === -1));
   check('stock value counts only what is held, at base cost', stockValueOf([{ id: 'x', units: [{ cost: 2 }] }, { id: 'y', units: [{}] }], [{ itemId: 'x', qty: 3 }, { itemId: 'x', qty: -5 }, { itemId: 'x', qty: 4 }, { itemId: 'y', qty: 9 }]) === 14);
 

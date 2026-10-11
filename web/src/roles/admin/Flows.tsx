@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   formatRupees,
   pickName,
   type BillMirror,
   type Delivery,
+  type Ink,
   type OrderRequest,
   type PurchaseOrder,
   type Refill,
@@ -27,6 +28,20 @@ export function BillsPage() {
   const { items } = useCatalog();
   const live = useLive('bills');
   const { value, error } = useLoad(() => http.get<(BillMirror & { rounded: number; roundOff: number })[]>('/admin/bills?limit=100'), [live]);
+  // The list comes without handwriting, so it shows at once; the written lines follow.
+  const [inks, setInks] = useState<Record<string, Record<string, Ink>>>({});
+  useEffect(() => {
+    const nos = (value ?? []).filter((b) => b.hasInk || b.lines.some((l) => l.inked)).map((b) => b.no);
+    if (!nos.length) return;
+    let gone = false;
+    http
+      .get<Record<string, Record<string, Ink>>>('/admin/bills/ink?nos=' + nos.join(','))
+      .then((r) => !gone && setInks(r))
+      .catch(() => undefined);
+    return () => {
+      gone = true;
+    };
+  }, [value]);
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
   return (
@@ -71,7 +86,12 @@ export function BillsPage() {
                     {l.i + 1}
                   </td>
                   <td>
-                    {l.ink ? <InkView ink={l.ink} height={30} /> : l.name}
+                    {(() => {
+                      const ink = l.ink ?? inks[b.no]?.[l.i];
+                      if (ink) return <InkView ink={ink} height={30} />;
+                      if (l.inked) return <span className="muted">✍ {bi('handwritten', 'ಕೈಬರಹ')}</span>;
+                      return l.name;
+                    })()}
                     {l.itemId && (
                       <div className="muted">
                         → {itemName(items, l.itemId, lang)}
@@ -101,18 +121,10 @@ export function SettingsPage() {
   const { lang } = useSession();
   const [version, setVersion] = useState(0);
   const [syncMsg, setSyncMsg] = useState('');
-  const { value: settings } = useLoad(() => http.get<{ roundTo: number; bikeMaxItems: number; bikeMaxAmount: number; shopLat?: number; shopLng?: number; shopPhone?: string }>('/admin/settings'), [version]);
+  const { value: settings } = useLoad(() => http.get<{ bikeMaxItems: number; bikeMaxAmount: number; shopLat?: number; shopLng?: number; shopPhone?: string }>('/admin/settings'), [version]);
   const saveSettings = async (patch: Record<string, number | string>) => {
     try {
       await http.put('/admin/settings', patch);
-    } catch (e) {
-      setSyncMsg((e as Error).message);
-    }
-    setVersion((v) => v + 1);
-  };
-  const setRound = async (roundTo: number) => {
-    try {
-      await http.put('/admin/settings', { roundTo });
     } catch (e) {
       setSyncMsg((e as Error).message);
     }
@@ -158,19 +170,6 @@ export function SettingsPage() {
         <button className="btn" onClick={syncNow} data-tour="settings-sync">
           ↻ {bi('Read bills now', 'ಈಗಲೇ ಬಿಲ್ ಓದಿ')}
         </button>
-      </div>
-      <div className="card">
-        <h2 className="subtitle mt-0" data-tour="settings-round">{bi('Rounding off', 'ರೌಂಡ್ ಆಫ್')}</h2>
-        <p>
-          {bi('Bill totals on the worker’s screen, the bills list and reports are shown rounded to this, with the round-off as its own line.', 'ಕೆಲಸಗಾರರ ಪರದೆ, ಬಿಲ್ ಪಟ್ಟಿ ಮತ್ತು ವರದಿಗಳಲ್ಲಿ ಬಿಲ್ ಮೊತ್ತವನ್ನು ಇದಕ್ಕೆ ರೌಂಡ್ ಮಾಡಿ, ರೌಂಡ್ ಆಫ್ ಬೇರೆ ಸಾಲಿನಲ್ಲಿ ತೋರಿಸಲಾಗುತ್ತದೆ.')}
-        </p>
-        <div className="chips">
-          {[0, 1, 5, 10].map((n) => (
-            <button key={n} className={'chip ' + (settings?.roundTo === n ? 'on' : '')} onClick={() => setRound(n)}>
-              {n === 0 ? bi('No rounding', 'ರೌಂಡ್ ಬೇಡ') : '₹' + n}
-            </button>
-          ))}
-        </div>
       </div>
       {settings && <DeliverySettings s={settings} save={saveSettings} />}
     </>
