@@ -258,6 +258,10 @@ export interface BillMirror {
   paid: number;
   balance: number;
   cancelled?: boolean;
+  /** Taken off "To digitise" by the admin: left out of the waiting lists and counts, no stock moved. Kept by every sync. */
+  dismissed?: boolean;
+  dismissedBy?: string;
+  dismissedAt?: string;
   /** Any line has handwriting. Set at sync, so lists can count written lines without the ink. */
   hasInk?: boolean;
   /** How many lines have handwriting, for the same reason. */

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { formatRate, formatRupees, itemMatches, pickName, priceFor, searchKey, type Item, type MirrorLine } from '@stock/core';
 import { http } from '../../lib/api';
 import { useLive } from '../../lib/live';
@@ -51,6 +51,13 @@ export function ConfirmPage() {
   const [note, setNote] = useState('');
   const [q, setQ] = useState('');
   const [newest, setNewest] = useState(false);
+  // The bill just removed, offered back for a few seconds.
+  const [removed, setRemoved] = useState<number | null>(null);
+  useEffect(() => {
+    if (removed === null) return;
+    const t = setTimeout(() => setRemoved(null), 8_000);
+    return () => clearTimeout(t);
+  }, [removed]);
 
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
@@ -68,6 +75,25 @@ export function ConfirmPage() {
   const done = (msg: string) => {
     setNote(msg);
     setVersion((v) => v + 1);
+  };
+  const remove = async (billNo: number) => {
+    if (!confirm(bi('Remove bill #', 'ಬಿಲ್ #') + billNo + bi(' from this list? No stock moves. The bill stays in Bills.', ' ಈ ಪಟ್ಟಿಯಿಂದ ತೆಗೆಯಬೇಕೆ? ಸ್ಟಾಕ್ ಬದಲಾಗುವುದಿಲ್ಲ. ಬಿಲ್ ಬಿಲ್‌ಗಳಲ್ಲಿ ಉಳಿಯುತ್ತದೆ.'))) return;
+    try {
+      await http.post('/admin/confirm/' + billNo + '/dismiss', {});
+      setRemoved(billNo);
+      done('');
+    } catch (e) {
+      done((e as Error).message);
+    }
+  };
+  const undo = async (billNo: number) => {
+    setRemoved(null);
+    try {
+      await http.post('/admin/confirm/' + billNo + '/undismiss', {});
+      done(bi('Bill #', 'ಬಿಲ್ #') + billNo + bi(' is back.', ' ಮತ್ತೆ ಬಂದಿದೆ.'));
+    } catch (e) {
+      done((e as Error).message);
+    }
   };
   return (
     <>
@@ -99,13 +125,24 @@ export function ConfirmPage() {
       )}
       {value.length > 0 && shown.length === 0 && <Empty>{bi('No bill matches.', 'ಯಾವ ಬಿಲ್ಲೂ ಹೊಂದುತ್ತಿಲ್ಲ.')}</Empty>}
       {shown.map((g) => (
-        <BillCard key={g.billNo + ':' + g.lines.map((l) => l.i).join()} g={g} items={items} onDone={done} />
+        <BillCard key={g.billNo + ':' + g.lines.map((l) => l.i).join()} g={g} items={items} onDone={done} onRemove={() => remove(g.billNo)} />
       ))}
+      {removed !== null && (
+        <div className="toast" role="status">
+          <span className="grow">
+            {bi('Bill #', 'ಬಿಲ್ #')}
+            {removed} {bi('removed from To digitise', 'ಡಿಜಿಟೈಸ್ ಪಟ್ಟಿಯಿಂದ ತೆಗೆಯಲಾಗಿದೆ')}
+          </span>
+          <button className="btn" onClick={() => undo(removed)}>
+            {bi('Undo', 'ರದ್ದು ಮಾಡಿ')}
+          </button>
+        </div>
+      )}
     </>
   );
 }
 
-function BillCard({ g, items, onDone }: { g: BillGroup; items: Map<string, Item>; onDone: (msg: string) => void }) {
+function BillCard({ g, items, onDone, onRemove }: { g: BillGroup; items: Map<string, Item>; onDone: (msg: string) => void; onRemove: () => void }) {
   const bi = useBi();
   const { lang } = useSession();
   const [open, setOpen] = useState(true);
@@ -161,6 +198,9 @@ function BillCard({ g, items, onDone }: { g: BillGroup; items: Map<string, Item>
         <button className="btn primary" data-tour="confirm-all" disabled={busy || filled.length === 0} onClick={confirmAll}>
           ✓ {bi('Digitise all on this bill', 'ಈ ಬಿಲ್‌ನ ಎಲ್ಲಾ ಡಿಜಿಟೈಸ್ ಮಾಡಿ')}
           {blank > 0 && filled.length > 0 && ' (' + filled.length + ')'}
+        </button>
+        <button className="btn" data-tour="confirm-remove" disabled={busy} onClick={onRemove}>
+          {bi('Remove', 'ತೆಗೆಯಿರಿ')}
         </button>
       </div>
       {blank > 0 && open && (

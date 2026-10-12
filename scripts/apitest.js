@@ -123,6 +123,7 @@ async function main() {
     eq('a second worker is fine', (await addP({ name: 'G', phone: '9444444444', role: 'worker', pin: '2222' })).status, 201);
 
     let worker = (await login('9222222222', '1111')).body.token;
+    eq('a worker cannot remove a bill from To digitise', (await call('/admin/confirm/1/dismiss', { method: 'POST', token: worker, body: {} })).status, 403);
     eq('a worker can sign in', (await call('/me', { token: worker })).body.name, 'Ravi');
     eq('a worker cannot see the item list', (await call('/items', { token: worker })).status, 403);
     eq('or add people', (await call('/people', { method: 'POST', token: worker, body: {} })).status, 403);

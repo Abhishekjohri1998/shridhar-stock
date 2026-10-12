@@ -256,6 +256,22 @@ async function main() {
     eq('a sync does not undo a person\'s answer', kept.state, 'confirmed');
     eq('nor post it twice', await qty(sugar.id), 96);
 
+    // The admin removes bill 1 from To digitise: it leaves the list and the count, and stays removed through a sync.
+    const waitingOn = async () => (await call('/admin/confirm')).body.filter((p) => p.billNo === 1).length;
+    check('bill 1 still has a line to digitise', (await waitingOn()) > 0);
+    const homeBefore = (await call('/admin/home')).body.toConfirm;
+    eq('removing a bill from To digitise', (await call('/admin/confirm/1/dismiss', {})).status, 200);
+    eq('it leaves the list', await waitingOn(), 0);
+    check('and the Home count', (await call('/admin/home')).body.toConfirm < homeBefore);
+    eq('no stock moves', await qty(sugar.id), 96);
+    await call('/admin/link/sync', {});
+    eq('a sync keeps it removed', await waitingOn(), 0);
+    eq('the bill says so', (await call('/admin/bills')).body.find((b) => b.no === 1).dismissed, true);
+    eq('undo', (await call('/admin/confirm/1/undismiss', {})).status, 200);
+    check('undo puts it back', (await waitingOn()) > 0);
+    eq('and the Home count', (await call('/admin/home')).body.toConfirm, homeBefore);
+    eq('an unknown bill is 404', (await call('/admin/confirm/999/dismiss', {})).status, 404);
+
     // The bill is cancelled in billing.
     billing.bills[0].cancelled = true;
     const c = await call('/admin/link/sync', {});

@@ -91,7 +91,7 @@ export async function buildHome() {
   const today = istToday();
   // Seven shop days, today last.
   const weekStart = istToday(Date.now() - 6 * 86_400_000);
-  const live = { cancelled: { ne: true } };
+  const live = { cancelled: { ne: true }, dismissed: { ne: true } };
   const [items, stock, week, waiting, owing, handwritten, transfers, pos, meta, alerts] = await Promise.all([
     repo.listItems(),
     repo.listStock(),
@@ -190,7 +190,7 @@ roleRoutes.get(
       .map((a) => ({ ...a, nameEn: names.get(a.itemId)?.nameEn ?? '', nameKn: names.get(a.itemId)?.nameKn ?? '' }));
     const today = istToday();
     const todays = bills.filter((b) => b.at >= today && !b.cancelled);
-    const lines = bills.flatMap((b) => (b.cancelled ? [] : b.lines));
+    const lines = bills.flatMap((b) => (b.cancelled || b.dismissed ? [] : b.lines));
     const written = lines.filter((l) => l.ink);
     res.json({
       toConfirm: lines.filter((l) => l.state === 'to-confirm').length,
@@ -245,7 +245,7 @@ roleRoutes.get(
   admin,
   handler(async (_req, res) => {
     // The oldest 50 bills waiting: the page works through them a few at a time.
-    const bills = await getRepo().listDocs<BillMirror>('bills', { filter: { cancelled: { ne: true }, 'lines.state': 'to-confirm' }, sort: { no: 1 }, limit: 50 });
+    const bills = await getRepo().listDocs<BillMirror>('bills', { filter: { cancelled: { ne: true }, dismissed: { ne: true }, 'lines.state': 'to-confirm' }, sort: { no: 1 }, limit: 50 });
     res.json(
       bills.flatMap((b) =>
         b.lines
@@ -255,6 +255,34 @@ roleRoutes.get(
     );
   }),
 );
+
+/**
+ * Remove a bill from "To digitise" (a test bill, a duplicate): it leaves the waiting lists and counts,
+ * and no stock moves. Undo puts it back. Billing is never told; every sync keeps the mark.
+ */
+for (const [path, dismissed] of [
+  ['/admin/confirm/:billNo/dismiss', true],
+  ['/admin/confirm/:billNo/undismiss', false],
+] as const) {
+  roleRoutes.post(
+    path,
+    admin,
+    handler(async (req, res) => {
+      const repo = getRepo();
+      const bill = await repo.getDoc<BillMirror>('bills', String(Number(req.params.billNo)));
+      if (!bill) throw new HttpError(404, 'No such bill');
+      if (dismissed) Object.assign(bill, { dismissed: true, dismissedBy: who(req).id, dismissedAt: new Date().toISOString() });
+      else {
+        delete bill.dismissed;
+        delete bill.dismissedBy;
+        delete bill.dismissedAt;
+      }
+      await repo.putDoc('bills', bill);
+      emit('bills', {}, String(bill.no));
+      res.json({ ok: true, billNo: bill.no, dismissed });
+    }),
+  );
+}
 
 roleRoutes.get(
   '/admin/refill',
@@ -323,7 +351,7 @@ roleRoutes.get(
     const repo = getRepo();
     const today = istToday();
     const [bills, items, locs, settings] = await Promise.all([
-      repo.listDocs<BillMirror>('bills', { filter: { at: { gte: today }, cancelled: { ne: true } } }),
+      repo.listDocs<BillMirror>('bills', { filter: { at: { gte: today }, cancelled: { ne: true }, dismissed: { ne: true } } }),
       repo.listItems(),
       repo.listLocations(),
       settingsOf(repo),

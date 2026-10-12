@@ -317,13 +317,15 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limitOrOpt
       paid: b.paid,
       balance: b.balance,
       ...(b.cancelled ? { cancelled: true } : {}),
+      // Removed from To digitise by the admin: billing knows nothing of it, so the mark is carried over.
+      ...(before?.dismissed ? { dismissed: true, dismissedBy: before.dismissedBy, dismissedAt: before.dismissedAt } : {}),
       hasInk: inked,
       inkLines: lines.filter((l) => l.ink).length,
       ...billRounding(b),
     };
     // Nothing changed since the last read: nothing to write and nothing to post.
     if (before && stable(before) === stable(mirror)) {
-      if (!b.cancelled) result.toConfirm += lines.filter((l) => l.state === 'to-confirm').length;
+      if (!b.cancelled && !mirror.dismissed) result.toConfirm += lines.filter((l) => l.state === 'to-confirm').length;
       continue;
     }
 
@@ -341,7 +343,7 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limitOrOpt
         by: 'billing',
       }));
       result.posted += (await post(repo, sales)).length;
-      result.toConfirm += lines.filter((l) => l.state === 'to-confirm').length;
+      if (!mirror.dismissed) result.toConfirm += lines.filter((l) => l.state === 'to-confirm').length;
     } else {
       // Only what was actually sold comes back: reverse the sale moves that exist.
       const sold = await repo.listMoves({});
