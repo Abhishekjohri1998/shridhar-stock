@@ -13,6 +13,7 @@ import {
   retiredRoleMessage,
   sellUnitOf,
   unitsSellFirst,
+  unitRate1,
 } from '@stock/core';
 import { issueToken } from '../auth';
 import { verifyPin } from '../pin';
@@ -65,7 +66,9 @@ billingLinkRoutes.get(
           code: u.code,
           label: u.label,
           labelKn: u.labelKn,
-          price: u.price,
+          // The rate for one of this unit: a slab that starts at 1 sets it, else the unit's price.
+          price: unitRate1(u),
+          ...(u.slabs?.length ? { basePrice: u.price, slabs: u.slabs.map((x) => ({ minQty: x.minQty, rate: x.rate })) } : {}),
           ...(u.min != null ? { min: u.min } : {}),
           ...(u.max != null ? { max: u.max } : {}),
         })),

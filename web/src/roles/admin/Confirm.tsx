@@ -53,6 +53,8 @@ export function ConfirmPage() {
   const [newest, setNewest] = useState(false);
   // The bill just removed, offered back for a few seconds.
   const [removed, setRemoved] = useState<number | null>(null);
+  // Bills removed here, hidden at once rather than after the list reloads.
+  const [gone, setGone] = useState<Set<number>>(() => new Set());
   useEffect(() => {
     if (removed === null) return;
     const t = setTimeout(() => setRemoved(null), 8_000);
@@ -63,6 +65,7 @@ export function ConfirmPage() {
   if (!value) return <Loading />;
   const groups: BillGroup[] = [];
   for (const p of value) {
+    if (gone.has(p.billNo)) continue;
     const g = groups[groups.length - 1];
     if (g && g.billNo === p.billNo) g.lines.push(p.line);
     else groups.push({ billNo: p.billNo, at: p.at, customer: p.customer, lines: [p.line] });
@@ -80,6 +83,7 @@ export function ConfirmPage() {
     if (!confirm(bi('Remove bill #', 'ಬಿಲ್ #') + billNo + bi(' from this list? No stock moves. The bill stays in Bills.', ' ಈ ಪಟ್ಟಿಯಿಂದ ತೆಗೆಯಬೇಕೆ? ಸ್ಟಾಕ್ ಬದಲಾಗುವುದಿಲ್ಲ. ಬಿಲ್ ಬಿಲ್‌ಗಳಲ್ಲಿ ಉಳಿಯುತ್ತದೆ.'))) return;
     try {
       await http.post('/admin/confirm/' + billNo + '/dismiss', {});
+      setGone((s) => new Set(s).add(billNo));
       setRemoved(billNo);
       done('');
     } catch (e) {
@@ -90,6 +94,11 @@ export function ConfirmPage() {
     setRemoved(null);
     try {
       await http.post('/admin/confirm/' + billNo + '/undismiss', {});
+      setGone((s) => {
+        const n = new Set(s);
+        n.delete(billNo);
+        return n;
+      });
       done(bi('Bill #', 'ಬಿಲ್ #') + billNo + bi(' is back.', ' ಮತ್ತೆ ಬಂದಿದೆ.'));
     } catch (e) {
       done((e as Error).message);
@@ -118,12 +127,12 @@ export function ConfirmPage() {
         </div>
       )}
       {note && <div className="msg ok">{note}</div>}
-      {value.length === 0 && (
+      {groups.length === 0 && (
         <Empty tour="confirm-bill">
           {bi('All caught up. Handwritten or unknown bill lines will wait here for you.', 'ಎಲ್ಲಾ ಮುಗಿದಿದೆ. ಕೈಬರಹದ ಅಥವಾ ಗೊತ್ತಿಲ್ಲದ ಬಿಲ್ ಸಾಲುಗಳು ಇಲ್ಲಿ ಕಾಯುತ್ತವೆ.')}
         </Empty>
       )}
-      {value.length > 0 && shown.length === 0 && <Empty>{bi('No bill matches.', 'ಯಾವ ಬಿಲ್ಲೂ ಹೊಂದುತ್ತಿಲ್ಲ.')}</Empty>}
+      {groups.length > 0 && shown.length === 0 && <Empty>{bi('No bill matches.', 'ಯಾವ ಬಿಲ್ಲೂ ಹೊಂದುತ್ತಿಲ್ಲ.')}</Empty>}
       {shown.map((g) => (
         <BillCard key={g.billNo + ':' + g.lines.map((l) => l.i).join()} g={g} items={items} onDone={done} onRemove={() => remove(g.billNo)} />
       ))}

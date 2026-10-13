@@ -103,6 +103,9 @@ async function main() {
     eq('nothing typed, nothing found', (await names('')).length, 0);
     const p = (await link('/items?q=parle')).body.items[0];
     check('with its units, prices and range, and no cost', p.units.length === 2 && p.units[0].price === 5 && p.units[0].min === 4 && p.units[0].max === 6 && p.units[1].code === 'pack' && p.units[1].price === 110 && p.units[1].min === undefined && !('cost' in p.units[0]) && p.nameKn === 'ಪಾರ್ಲೆ-ಜಿ', JSON.stringify(p));
+    const r1 = (await link('/items?q=rice')).body.items.find((i) => i.id === rice.id);
+    check('a slab item answers its qty-1 price and its slabs', r1.units[0].price === 60 && r1.units[0].basePrice === 60 && r1.units[0].slabs.length === 1 && r1.units[0].slabs[0].rate === 56, JSON.stringify(r1));
+    check('the qty-1 quote matches the list price', (await link('/quote?item=' + rice.id + '&unit=kg&qty=1')).body.rate === 60);
     eq('limit is kept', (await link('/items?q=p&limit=1')).body.items.length, 1);
     const put = (id, body) => fetch(on.base + '/api/items/' + id, { method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const parleBody = { nameEn: parle.nameEn, nameKn: parle.nameKn, units: parle.units, aliases: parle.aliases, racks: {}, reorderAt: {} };

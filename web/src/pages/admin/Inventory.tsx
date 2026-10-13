@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { describeQty, isLow, isLowAt, itemMatches, lowAtOf, pickName, totalsByItem, type Item, type Lang, type Location, type StockLevel } from '@stock/core';
+import { describeQty, formatRate, sellPriceOf, isLow, isLowAt, itemMatches, lowAtOf, pickName, totalsByItem, type Item, type Lang, type Location, type StockLevel } from '@stock/core';
 import { api } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
@@ -97,6 +97,7 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
                   </th>
                 ))}
                 <th className="num">{t('stock.total')}</th>
+                <th className="num inv-price">{bi('Price', 'ಬೆಲೆ')}</th>
               </tr>
             </thead>
             <tbody>
@@ -109,6 +110,9 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
                       <div className="name">{pickName(i.nameEn, i.nameKn, lang)}</div>
                       <div className="muted">
                         {[lang === 'kn' ? i.nameEn : i.nameKn, i.units.map((u) => u.code).join(' · '), shop && i.racks[shop.id]].filter(Boolean).join(' · ')}
+                      </div>
+                      <div className="inv-price-under">
+                        <PriceOf i={i} lang={lang} />
                       </div>
                       {!i.active && <span className="pill">{t('items.inactive')}</span>}
                     </td>
@@ -131,6 +135,9 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
                         </div>
                       )}
                     </td>
+                    <td className="num inv-price">
+                      <PriceOf i={i} lang={lang} />
+                    </td>
                   </tr>
                 );
               })}
@@ -139,5 +146,24 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
         </div>
       )}
     </>
+  );
+}
+
+/** "₹170 / Pkt": one of the selling unit, with a "range" hint when slabs lower it for more. */
+function PriceOf({ i, lang }: { i: Item; lang: Lang }) {
+  const bi = useBi();
+  const p = sellPriceOf(i);
+  const code = lang === 'kn' && p.unit.labelKn ? p.unit.labelKn : p.unit.code;
+  const tip = p.slabs.map((s) => s.minQty + '+ ' + code + ': ' + formatRate(s.rate)).join(' · ');
+  return (
+    <span>
+      {formatRate(p.rate)} / {code}
+      {p.slabs.length > 0 && (
+        <span className="muted" title={tip}>
+          {' '}
+          · {bi('range', 'ಶ್ರೇಣಿ')}
+        </span>
+      )}
+    </span>
   );
 }

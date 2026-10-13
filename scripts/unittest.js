@@ -64,6 +64,14 @@ const rice = { units: [{ code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price
   check('10 lines reach the 26 slab, the highest one reached', C.priceFor(clinic, 'line', 10).rate === 26);
   check('a piece has no slab', C.priceFor(clinic, 'pc', 50).rate === 2);
   check('12 kg of rice is ₹624', C.priceFor(rice, 'kg', 12).amount === 624);
+  // The list price: one of the selling unit, slabs counted by that unit's own quantity.
+  const pkt = { sellUnit: 'pkt', units: [{ code: 'pc', label: 'Pc', labelKn: '', perBase: 1, price: 18 }, { code: 'pkt', label: 'Pkt', labelKn: '', perBase: 10, price: 170, slabs: [{ minQty: 5, rate: 160 }, { minQty: 10, rate: 150 }] }] };
+  const sp = C.sellPriceOf(pkt);
+  check('list price is one Pkt, not a piece', sp.unit.code === 'pkt' && sp.rate === 170 && sp.slabs.length === 2, JSON.stringify(sp));
+  check('qty 1 of a slab unit is its own price', C.priceFor(pkt, 'pkt', 1).rate === 170 && !C.priceFor(pkt, 'pkt', 1).slab);
+  check('slabs go by Pkts, not pieces', C.priceFor(pkt, 'pkt', 5).rate === 160 && C.priceFor(pkt, 'pkt', 9).rate === 160 && C.priceFor(pkt, 'pkt', 12).rate === 150 && C.priceFor(pkt, 'pc', 50).rate === 18);
+  check('a slab from 1 sets the qty-1 price', C.unitRate1({ code: 'x', label: '', labelKn: '', perBase: 1, price: 10, slabs: [{ minQty: 1, rate: 9 }] }) === 9);
+  check('no sellUnit falls back to the default unit', C.sellPriceOf(clinic).rate === C.sellUnitOf(clinic).price);
   check('9 kg is still the plain price', C.priceFor(rice, 'kg', 9).rate === 55);
   let threw = false;
   try {

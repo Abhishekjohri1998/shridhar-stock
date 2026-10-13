@@ -1,5 +1,5 @@
 import { round2, round4 } from './money';
-import { findUnit } from './units';
+import { findUnit, sellUnitOf } from './units';
 import type { Item, ItemUnit, Slab } from './types';
 
 export interface Price {
@@ -53,4 +53,15 @@ export function rateRange(unit: ItemUnit, rate: number): 'low' | 'high' | null {
   if (unit.min != null && rate < unit.min) return 'low';
   if (unit.max != null && rate > unit.max) return 'high';
   return null;
+}
+
+/** What one of a unit costs: its own price, or the slab that already starts at 1 or below. */
+export function unitRate1(unit: ItemUnit): number {
+  return round4(slabFor(unit, 1)?.rate ?? unit.price);
+}
+
+/** The price of one of the item's selling unit, and that unit's slabs, for lists that show a price. */
+export function sellPriceOf(item: Pick<Item, 'units'> & { defaultUnit?: string; sellUnit?: string }): { unit: ItemUnit; rate: number; slabs: Slab[] } {
+  const unit = sellUnitOf(item);
+  return { unit, rate: unitRate1(unit), slabs: unit.slabs ?? [] };
 }

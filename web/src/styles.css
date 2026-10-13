@@ -849,3 +849,10 @@ img, svg.ink { max-width: 100%; }
   .plan3d-canvas { height: 56vh; }
 }
 @media (prefers-reduced-motion: reduce) { .plan3d-card { animation: none; } }
+
+/* Inventory list price: its own column on wide screens, under the name on narrow ones. */
+.inv-price-under { display: none; }
+@media (max-width: 640px) {
+  .inv-price { display: none; }
+  .inv-price-under { display: block; }
+}
