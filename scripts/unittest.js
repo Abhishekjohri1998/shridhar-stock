@@ -458,7 +458,7 @@ async function queries(out) {
   check('only the fields asked for, and the id', JSON.stringify(shapeDocs(docs, { fields: ['no'] })[0]) === '{"id":"a","no":2}');
   check('a bare filter is still a filter', asQuery({ status: 'sent' }).filter.status === 'sent' && asQuery({ limit: 3 }).limit === 3);
   check('to Mongo: ranges, not-equal, lists, exists', JSON.stringify(mongoFilter({ at: { gte: 'x' }, cancelled: { ne: true }, no: [1], 'lines.ink': { exists: true } })) === JSON.stringify({ at: { $gte: 'x' }, cancelled: { $ne: true }, no: { $in: [1] }, 'lines.ink': { $exists: true, $ne: null } }));
-  check('bills are indexed by time, number, cancelled, waiting lines (and dismissed), money due and handwriting', JSON.stringify(DOC_INDEXES.bills) === JSON.stringify([{ at: -1 }, { no: -1 }, { cancelled: 1, at: -1 }, { 'lines.state': 1 }, { 'lines.state': 1, dismissed: 1 }, { balance: 1 }, { hasInk: 1 }]));
+  check('bills are indexed by time, number, cancelled, waiting lines (and dismissed), money due and handwriting', JSON.stringify(DOC_INDEXES.bills) === JSON.stringify([{ at: -1 }, { no: -1 }, { cancelled: 1, at: -1 }, { 'lines.state': 1 }, { 'lines.state': 1, dismissed: 1 }, { 'lines.state': 1, dismissed: 1, no: 1 }, { balance: 1 }, { hasInk: 1 }]));
   {
     const bill = [{ id: 'b', no: 1, lines: [{ i: 0, ink: { w: 1 }, inked: true, state: 'x' }, { i: 1, name: 'Sugar' }] }];
     const lite = shapeDocs(bill, { omit: ['lines.ink'] })[0];

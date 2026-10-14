@@ -129,7 +129,7 @@ const docSchema = new Schema({ id: { type: String, required: true, unique: true 
  */
 export const DOC_INDEXES: Partial<Record<DocCollection, Record<string, 1 | -1>[]>> = {
   // Home and To digitise count waiting lines, money due and handwritten bills by query.
-  bills: [{ at: -1 }, { no: -1 }, { cancelled: 1, at: -1 }, { 'lines.state': 1 }, { 'lines.state': 1, dismissed: 1 }, { balance: 1 }, { hasInk: 1 }],
+  bills: [{ at: -1 }, { no: -1 }, { cancelled: 1, at: -1 }, { 'lines.state': 1 }, { 'lines.state': 1, dismissed: 1 }, { 'lines.state': 1, dismissed: 1, no: 1 }, { balance: 1 }, { hasInk: 1 }],
   transfers: [{ status: 1, at: -1 }, { at: -1 }],
   pos: [{ status: 1, at: -1 }, { at: -1 }],
   // Deliveries: the admin's live list by status, and each worker's own.

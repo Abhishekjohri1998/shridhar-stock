@@ -23,6 +23,7 @@ import { listDrafts, tickDraft } from '../billing/drafts';
 import { matchTyped } from '../billing/sync';
 import { pushGiven } from '../billing/push';
 import type { LowAlert } from '../posting';
+import type { DocFilter } from '../store/types';
 
 /**
  * What each role reads, and the small things each may do.
@@ -85,6 +86,8 @@ const HOME_TTL_MS = 60_000;
 
 /** What lists leave out: the handwriting, which is most of a bill's size. */
 const NO_INK = ['lines.ink'];
+/** To digitise also leaves out any extra writing billing may send with a line. */
+const CONFIRM_OMIT = ['lines.ink', 'lines.moreInk'];
 
 export async function buildHome() {
   const repo = getRepo();
@@ -239,18 +242,25 @@ roleRoutes.get(
   }),
 );
 
-/** Every handwritten or unmatched line waiting for a person, oldest first. */
+/**
+ * Every handwritten or unmatched line waiting for a person, oldest first, a page of bills at a time
+ * (`?limit=20&after=<bill no>`). Without the handwriting: each line says `hasInk`, and the page
+ * fetches the writing from /admin/bills/ink a few bills at a time, so the list comes back at once.
+ */
 roleRoutes.get(
   '/admin/confirm',
   admin,
-  handler(async (_req, res) => {
-    // The oldest 50 bills waiting: the page works through them a few at a time.
-    const bills = await getRepo().listDocs<BillMirror>('bills', { filter: { cancelled: { ne: true }, dismissed: { ne: true }, 'lines.state': 'to-confirm' }, sort: { no: 1 }, limit: 50 });
+  handler(async (req, res) => {
+    const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 20));
+    const after = Number(req.query.after);
+    const filter: DocFilter = { 'lines.state': 'to-confirm', dismissed: { ne: true }, cancelled: { ne: true } };
+    if (Number.isInteger(after) && after > 0) filter.no = { gt: after };
+    const bills = await getRepo().listDocs<BillMirror>('bills', { filter, sort: { no: 1 }, limit, omit: CONFIRM_OMIT });
     res.json(
       bills.flatMap((b) =>
         b.lines
           .filter((l) => l.state === 'to-confirm')
-          .map((l) => ({ billNo: b.no, at: b.at, customer: b.customer?.name ?? '', line: l })),
+          .map((l) => ({ billNo: b.no, at: b.at, customer: b.customer?.name ?? '', line: { ...l, hasInk: !!l.inked } })),
       ),
     );
   }),

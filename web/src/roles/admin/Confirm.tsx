@@ -1,24 +1,33 @@
-import { useEffect, useState } from 'react';
-import { formatRate, formatRupees, itemMatches, pickName, priceFor, searchKey, type Item, type MirrorLine } from '@stock/core';
+import { useEffect, useRef, useState } from 'react';
+import { formatRate, formatRupees, itemMatches, pickName, priceFor, searchKey, type Ink, type Item, type MirrorLine } from '@stock/core';
 import { http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { itemName, useCatalog } from '../../lib/catalog';
 import { useLoad, useSession } from '../../lib/session';
 import { Empty, InkView, Loading, useBi, when, Select } from '../../components/ui';
 
+/** A line as the list sends it: without its handwriting, which comes after from /admin/bills/ink. */
+type ListLine = MirrorLine & { hasInk?: boolean };
+
 interface Pending {
   billNo: number;
   at: string;
   customer: string;
-  line: MirrorLine;
+  line: ListLine;
 }
+
+/** Bills per page of the list, and per request for their handwriting. */
+const PAGE = 20;
+const INK_BATCH = 5;
+
+const billsIn = (list: Pending[]) => new Set(list.map((p) => p.billNo)).size;
 
 /** One bill's lines waiting for a person, in bill order. */
 interface BillGroup {
   billNo: number;
   at: string;
   customer: string;
-  lines: MirrorLine[];
+  lines: ListLine[];
 }
 
 /** What the admin has chosen for a line so far: filled in from the reading, changed by a tap. */
@@ -47,7 +56,20 @@ export function ConfirmPage() {
   const [version, setVersion] = useState(0);
   const { items } = useCatalog(version);
   const live = useLive('bills');
-  const { value, error } = useLoad(() => http.get<Pending[]>('/admin/confirm'), [version, live]);
+  // Bills the list has shown so far: a reload after a change fetches as many again, from the start.
+  const want = useRef(PAGE);
+  const { value, error } = useLoad(() => http.get<Pending[]>('/admin/confirm?limit=' + Math.min(100, want.current)), [version, live]);
+  // Pages added by "Load more", after the first reply; dropped when the list reloads.
+  const [more, setMore] = useState<Pending[]>([]);
+  const [moreDone, setMoreDone] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  useEffect(() => {
+    setMore([]);
+    setMoreDone(false);
+  }, [value]);
+  // The handwriting, by bill then line, fetched a few bills at a time once the list is up.
+  const [inks, setInks] = useState<Record<number, Record<number, Ink>>>({});
+  const asked = useRef(new Set<number>());
   const [note, setNote] = useState('');
   const [q, setQ] = useState('');
   const [newest, setNewest] = useState(false);
@@ -61,20 +83,70 @@ export function ConfirmPage() {
     return () => clearTimeout(t);
   }, [removed]);
 
+  const all = value ? [...value, ...more] : [];
+  const hasMore = !!value && !moreDone && (more.length > 0 || billsIn(value) >= Math.min(100, want.current));
+  const groups: BillGroup[] = [];
+  for (const p of all) {
+    if (gone.has(p.billNo)) continue;
+    const ink = inks[p.billNo]?.[p.line.i];
+    const line = ink ? { ...p.line, ink } : p.line;
+    const g = groups[groups.length - 1];
+    if (g && g.billNo === p.billNo) g.lines.push(line);
+    else groups.push({ billNo: p.billNo, at: p.at, customer: p.customer, lines: [line] });
+  }
+  const shown = (() => {
+    // "Ningappa", "#75" or "75": a customer, or a bill number.
+    const text = q.trim().replace(/^#/, '');
+    return groups
+      .filter((g) => !text || String(g.billNo) === text || searchKey(g.customer).includes(searchKey(text)) || g.lines.some((l) => searchKey(l.name || l.reading?.readText || '').includes(searchKey(text))))
+      .sort((a, b) => (newest ? b.billNo - a.billNo : a.billNo - b.billNo));
+  })();
+  // Shown bills with writing not yet asked for, in the order they appear.
+  const needInk = shown.filter((g) => !asked.current.has(g.billNo) && g.lines.some((l) => l.hasInk && !l.ink)).map((g) => g.billNo);
+  const needKey = needInk.join();
+  useEffect(() => {
+    if (!needInk.length) return;
+    let stop = false;
+    void (async () => {
+      for (let k = 0; k < needInk.length && !stop; k += INK_BATCH) {
+        const nos = needInk.slice(k, k + INK_BATCH);
+        nos.forEach((n) => asked.current.add(n));
+        try {
+          const got = await http.get<Record<string, Record<string, Ink>>>('/admin/bills/ink?nos=' + nos.join(','));
+          setInks((x) => {
+            const out = { ...x };
+            for (const n of nos) out[n] = Object.fromEntries(Object.entries(got[n] ?? {}).map(([i, ink]) => [Number(i), ink]));
+            return out;
+          });
+        } catch {
+          // Asked again on the next render that still needs them.
+          nos.forEach((n) => asked.current.delete(n));
+          return;
+        }
+      }
+    })();
+    return () => {
+      stop = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needKey]);
+
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
-  const groups: BillGroup[] = [];
-  for (const p of value) {
-    if (gone.has(p.billNo)) continue;
-    const g = groups[groups.length - 1];
-    if (g && g.billNo === p.billNo) g.lines.push(p.line);
-    else groups.push({ billNo: p.billNo, at: p.at, customer: p.customer, lines: [p.line] });
-  }
-  // "Ningappa", "#75" or "75": a customer, or a bill number.
-  const text = q.trim().replace(/^#/, '');
-  const shown = groups
-    .filter((g) => !text || String(g.billNo) === text || searchKey(g.customer).includes(searchKey(text)) || g.lines.some((l) => searchKey(l.name || l.reading?.readText || '').includes(searchKey(text))))
-    .sort((a, b) => (newest ? b.billNo - a.billNo : a.billNo - b.billNo));
+  const loadMore = async () => {
+    const last = all[all.length - 1]?.billNo ?? 0;
+    setLoadingMore(true);
+    try {
+      const page = await http.get<Pending[]>('/admin/confirm?limit=' + PAGE + '&after=' + last);
+      setMore((m) => [...m, ...page]);
+      if (billsIn(page) < PAGE) setMoreDone(true);
+      want.current = billsIn(all) + billsIn(page);
+    } catch (e) {
+      setNote((e as Error).message);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
   const done = (msg: string) => {
     setNote(msg);
     setVersion((v) => v + 1);
@@ -136,6 +208,13 @@ export function ConfirmPage() {
       {shown.map((g) => (
         <BillCard key={g.billNo + ':' + g.lines.map((l) => l.i).join()} g={g} items={items} onDone={done} onRemove={() => remove(g.billNo)} />
       ))}
+      {hasMore && (
+        <div className="bar mt-10">
+          <button className="btn" disabled={loadingMore} onClick={loadMore}>
+            {bi('Load more bills', 'ಇನ್ನಷ್ಟು ಬಿಲ್‌ಗಳು')}
+          </button>
+        </div>
+      )}
       {removed !== null && (
         <div className="toast" role="status">
           <span className="grow">
@@ -235,8 +314,8 @@ function BillCard({ g, items, onDone, onRemove }: { g: BillGroup; items: Map<str
   );
 }
 
-function why(line: MirrorLine, item: Item | undefined, bi: (en: string, kn: string) => string): string {
-  if (!line.ink) return bi('Typed name matches no item', 'ಟೈಪ್ ಮಾಡಿದ ಹೆಸರು ಯಾವ ಸಾಮಾನಿಗೂ ಹೊಂದುತ್ತಿಲ್ಲ');
+function why(line: ListLine, item: Item | undefined, bi: (en: string, kn: string) => string): string {
+  if (!line.ink && !line.hasInk) return bi('Typed name matches no item', 'ಟೈಪ್ ಮಾಡಿದ ಹೆಸರು ಯಾವ ಸಾಮಾನಿಗೂ ಹೊಂದುತ್ತಿಲ್ಲ');
   if (!line.reading) return bi('Written by hand: pick the item', 'ಕೈಯಲ್ಲಿ ಬರೆದದ್ದು: ಸಾಮಾನು ಆರಿಸಿ');
   if (item && line.reading.unit) {
     try {
@@ -263,7 +342,7 @@ function ConfirmLine({
   onDone,
 }: {
   billNo: number;
-  line: MirrorLine;
+  line: ListLine;
   items: Map<string, Item>;
   answer: Answer;
   blank: boolean;
@@ -325,7 +404,13 @@ function ConfirmLine({
         <span className="pill warn">{blank ? bi('Needs you', 'ನಿಮ್ಮ ಗಮನ ಬೇಕು') : why(line, items.get(r?.itemId ?? ''), bi)}</span>
       </div>
       <div className="confirm-ink" data-tour="confirm-written">
-        {line.ink ? <InkView ink={line.ink} height={64} /> : <span className="typed">{line.name}</span>}
+        {line.ink ? (
+          <InkView ink={line.ink} height={64} />
+        ) : line.hasInk ? (
+          <div className="sk sk-line" style={{ height: 64 }} role="status" aria-busy="true" />
+        ) : (
+          <span className="typed">{line.name}</span>
+        )}
         <span className="num confirm-price">
           {line.qty} × {formatRate(line.rate)} = <b>{formatRupees(line.amount)}</b>
         </span>

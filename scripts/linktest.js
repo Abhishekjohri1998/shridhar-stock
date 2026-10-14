@@ -237,6 +237,15 @@ async function main() {
     check('the list leaves the ink out, marking the line', !b1.lines[1].ink && b1.lines[1].inked === true && b1.hasInk === true, JSON.stringify(b1.lines[1]));
     const inks = (await call('/admin/bills/ink?nos=1,2')).body;
     check('with its ink fetched after', inks['1'] && inks['1']['1'] && inks['1']['1'].strokes.length === 1 && !inks['2'], JSON.stringify(inks));
+    // To digitise: the list without the writing, a page of bills at a time; the writing comes after.
+    const conf = (await call('/admin/confirm')).body;
+    const cw = conf.find((p) => p.billNo === 1 && p.line.i === 1);
+    check('To digitise sends no ink', conf.length > 0 && conf.every((p) => !p.line.ink && !p.line.moreInk), JSON.stringify(conf).slice(0, 300));
+    check('but marks the written line', cw && cw.line.hasInk === true && conf.filter((p) => p.line.i !== 1 || p.billNo !== 1).every((p) => p.line.hasInk === false), JSON.stringify(conf));
+    const p1 = (await call('/admin/confirm?limit=1')).body;
+    check('a page of one bill', p1.length > 0 && p1.every((p) => p.billNo === 1), JSON.stringify(p1));
+    check('the next page starts after it', (await call('/admin/confirm?limit=1&after=1')).body.every((p) => p.billNo > 1));
+    check('and the ink endpoint has the writing of that bill', !!(await call('/admin/bills/ink?nos=' + p1[0].billNo)).body['1']['1'].strokes);
     eq('a name no item has waits too', b1.lines[2].state, 'to-confirm');
     eq('a price with nothing written is not stock', b1.lines[3].state, 'not-item');
     eq('the typed sugar line knows its unit', b1.lines[0].unit, 'kg');
