@@ -2,6 +2,10 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ADJUST_REASONS,
+  addAliasChip,
+  aliasChips,
+  aliasesFromChips,
+  MAX_ALIASES,
   blankItemForm,
   blankUnit,
   defaultUnitOf,
@@ -333,10 +337,13 @@ function ItemDetails({
         {item && <ItemSuppliersCard form={form} set={set} sups={sups} found={found} readOnly={readOnly} />}
 
         <div className="card">
-          <label className="field">
-            <span>{t('items.otherNames')}</span>
-            <textarea value={form.aliases} onChange={(e) => set({ aliases: e.target.value })} />
-          </label>
+          <AliasEditor
+            aliases={form.aliases}
+            onChange={(aliases) => set({ aliases })}
+            unitCodes={unitChoices.map((u) => u.code)}
+            readOnly={readOnly}
+            label={t('items.otherNames')}
+          />
           <p className="muted">{t('items.otherNamesHint')}</p>
         </div>
 
@@ -691,6 +698,89 @@ function ItemSuppliersCard({
         </div>
       )}
       {!readOnly && sups.length === 0 && <p className="muted">{bi('Add suppliers under Purchases, Suppliers first.', 'ಮೊದಲು ಖರೀದಿ → ಸರಬರಾಜುದಾರರಲ್ಲಿ ಸೇರಿಸಿ.')}</p>}
+    </div>
+  );
+}
+
+/**
+ * Other names as chips. A name goes in with the "+ Add" button, so it never needs the keyboard's
+ * Enter key (the tablet's WebView keyboard does not add a line in a textarea). Enter in the box adds too.
+ */
+function AliasEditor({
+  aliases,
+  onChange,
+  unitCodes,
+  readOnly,
+  label,
+}: {
+  aliases: string;
+  onChange: (aliases: string) => void;
+  unitCodes: string[];
+  readOnly?: boolean;
+  label: string;
+}) {
+  const bi = useBi();
+  const [text, setText] = useState('');
+  const [unit, setUnit] = useState('');
+  const chips = aliasChips(aliases);
+  const full = chips.length >= MAX_ALIASES;
+  const add = () => {
+    const next = addAliasChip(chips, text, unitCodes.includes(unit) ? unit : '');
+    if (next !== chips) onChange(aliasesFromChips(next));
+    if (!full) setText('');
+  };
+  return (
+    <div className="field">
+      <span>{label}</span>
+      {chips.length > 0 && (
+        <div className="bar">
+          {chips.map((c, i) => (
+            <span key={i} className="chip on">
+              {c.text}
+              {c.unit ? ` · ${c.unit}` : ''}
+              {!readOnly && (
+                <button
+                  type="button"
+                  className="btn ghost small"
+                  aria-label={bi('Remove', 'ತೆಗೆಯಿರಿ') + ' ' + c.text}
+                  onClick={() => onChange(aliasesFromChips(chips.filter((_, j) => j !== i)))}
+                >
+                  ×
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+      {!readOnly && (
+        <div className="bar mb-0">
+          <input
+            value={text}
+            disabled={full}
+            enterKeyHint="done"
+            aria-label={label}
+            onChange={(e) => setText(e.target.value.replace(/,/g, ' '))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                add();
+              }
+            }}
+          />
+          <Select
+            value={unit}
+            onChange={setUnit}
+            className="w-auto"
+            disabled={full}
+            aria-label={bi('Unit', 'ಘಟಕ')}
+            options={[{ value: '', label: bi('any unit', 'ಯಾವುದೇ ಘಟಕ') }, ...unitCodes.map((u) => ({ value: u, label: u }))]}
+          />
+          <button type="button" className="btn" disabled={full || !text.trim()} onClick={add}>
+            + {bi('Add', 'ಸೇರಿಸಿ')}
+          </button>
+        </div>
+      )}
+      {full && <p className="muted">{bi(`At most ${MAX_ALIASES} names.`, `ಗರಿಷ್ಠ ${MAX_ALIASES} ಹೆಸರುಗಳು.`)}</p>}
     </div>
   );
 }

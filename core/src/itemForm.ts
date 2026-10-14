@@ -1,3 +1,4 @@
+import { searchKey } from './kannada';
 import { lowAtOf, lowAtPlaceOf } from './stockTotals';
 import { defaultUnitOf, sellUnitOf } from './units';
 import type { Item, ItemInput } from './types';
@@ -136,3 +137,42 @@ export function formToInput(f: ItemForm, active?: boolean): ItemInput {
 }
 
 const liveSlabs = (u: UnitForm) => u.slabs.filter((x) => x.minQty.trim() !== '' || x.rate.trim() !== '');
+
+/** One "other name" in the item form: the words, and a unit code or '' for any unit. */
+export interface AliasChip {
+  text: string;
+  unit: string;
+}
+
+/** Most other names one item may carry in the form. */
+export const MAX_ALIASES = 20;
+
+/** The form's newline string of other names as chips. Same reading as formToInput. */
+export function aliasChips(s: string): AliasChip[] {
+  return s
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [t, unit] = line.split(',').map((p) => p.trim());
+      return { text: t ?? '', unit: unit ?? '' };
+    })
+    .filter((c) => c.text);
+}
+
+/** Chips back to the form's newline string: "text" or "text, unit" per line. */
+export function aliasesFromChips(chips: AliasChip[]): string {
+  return chips.map((c) => (c.unit ? `${c.text}, ${c.unit}` : c.text)).join('\n');
+}
+
+/**
+ * Adds one name to the chips. Commas are dropped from the name (they split name and unit).
+ * Returns the same list when the name is empty, already there (by search key and unit), or the list is full.
+ */
+export function addAliasChip(chips: AliasChip[], text: string, unit = ''): AliasChip[] {
+  const t = text.replace(/[,\n]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!t || chips.length >= MAX_ALIASES) return chips;
+  const k = searchKey(t);
+  if (chips.some((c) => searchKey(c.text) === k && c.unit === unit)) return chips;
+  return [...chips, { text: t, unit }];
+}

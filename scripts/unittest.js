@@ -628,6 +628,27 @@ async function ledger() {
   check('rack suggestions: a place with none has none', C.rackNames(its, 'g9').length === 0);
 }
 
+// ---------------------------------------------------------------- other names as chips (item form)
+{
+  const chips = C.aliasChips('parle pack, pack\n\n  marie  \nbiscuit ,');
+  check('aliasChips reads lines', JSON.stringify(chips) === JSON.stringify([{ text: 'parle pack', unit: 'pack' }, { text: 'marie', unit: '' }, { text: 'biscuit', unit: '' }]), JSON.stringify(chips));
+  check('aliasesFromChips writes lines', C.aliasesFromChips(chips) === 'parle pack, pack\nmarie\nbiscuit');
+  check('round trip', C.aliasesFromChips(C.aliasChips(C.aliasesFromChips(chips))) === C.aliasesFromChips(chips));
+  let c = C.addAliasChip([], 'Good Day');
+  c = C.addAliasChip(c, 'good  day');
+  check('duplicate ignored', c.length === 1, JSON.stringify(c));
+  c = C.addAliasChip(c, 'good day', 'pack');
+  check('same name other unit kept', c.length === 2);
+  c = C.addAliasChip(c, 'a, b');
+  check('comma dropped from name', c[2].text === 'a b', JSON.stringify(c[2]));
+  check('empty ignored', C.addAliasChip(c, '   ') === c);
+  const form = { ...C.blankItemForm(), aliases: C.aliasesFromChips(c) };
+  check('formToInput reads chips', JSON.stringify(C.formToInput(form).aliases) === JSON.stringify([{ text: 'Good Day' }, { text: 'good day', unit: 'pack' }, { text: 'a b' }]), JSON.stringify(C.formToInput(form).aliases));
+  let full = [];
+  for (let i = 0; i < 25; i++) full = C.addAliasChip(full, 'n' + i);
+  check('max 20 names', full.length === C.MAX_ALIASES && C.MAX_ALIASES === 20, full.length);
+}
+
 // ---------------------------------------------------------------- 3D view: the sample layout from racks
 {
   const its = [
