@@ -244,16 +244,64 @@ function PlaceLink({ p, onClick }: { p: Place; onClick?: () => void }) {
   );
 }
 
-function Sidebar() {
+/** Where the "keep the menu open" choice lives on this device. */
+const MENU_PIN_KEY = 'stock.menuPinned';
+function readMenuPin(): boolean {
+  try {
+    return localStorage.getItem(MENU_PIN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+function writeMenuPin(on: boolean) {
+  try {
+    if (on) localStorage.setItem(MENU_PIN_KEY, '1');
+    else localStorage.removeItem(MENU_PIN_KEY);
+  } catch {
+    /* private window: the choice lasts this visit */
+  }
+}
+/** The open menu closes by itself after this long untouched. */
+const MENU_IDLE_MS = 8000;
+const wideScreen = () => typeof window !== 'undefined' && !!window.matchMedia?.('(min-width: 640px)').matches;
+
+/**
+ * The left menu on tablets and computers: a narrow rail of icons. A tap on the rail or on the menu
+ * button opens it over the page; a pick, a tap outside or 8 s untouched closes it again. "Keep the
+ * menu open" pins it. Phones use the tab bar and the More sheet instead.
+ */
+function Sidebar({ open, pinned, onOpen, onClose, onPin }: { open: boolean; pinned: boolean; onOpen: () => void; onClose: () => void; onPin: (on: boolean) => void }) {
   const { lang } = useSession();
+  const kn = lang === 'kn';
+  const wide = open || pinned;
+  const toggleLabel = open ? (kn ? 'ಮೆನು ಮುಚ್ಚಿ' : 'Close menu') : kn ? 'ಮೆನು ತೆರೆಯಿರಿ' : 'Open menu';
   return (
-    <nav className="side" aria-label={lang === 'kn' ? 'ಮೆನು' : 'Menu'}>
+    <nav
+      className="side"
+      aria-label={kn ? 'ಮೆನು' : 'Menu'}
+      onClick={(e) => {
+        // A tap on the rail itself (not on a place) opens it.
+        if (!wide && !(e.target as HTMLElement).closest('a,button')) onOpen();
+      }}
+    >
       <div className="side-group">
-        <div className="side-head">{lang === 'kn' ? 'ಮೆನು' : 'Menu'}</div>
+        <div className="side-top">
+          {!pinned && (
+            <button type="button" className="icon-btn side-toggle" onClick={() => (open ? onClose() : onOpen())} aria-expanded={open} aria-label={toggleLabel} title={toggleLabel}>
+              <Icon name={open ? 'close' : 'menu'} />
+            </button>
+          )}
+          <div className="side-head">{kn ? 'ಮೆನು' : 'Menu'}</div>
+        </div>
         {ADMIN.map((p) => (
-          <PlaceLink key={p.to} p={p} />
+          <PlaceLink key={p.to} p={p} onClick={open ? onClose : undefined} />
         ))}
       </div>
+      {wide && (
+        <button type="button" className="btn ghost small side-pin" aria-pressed={pinned} onClick={() => onPin(!pinned)}>
+          {pinned ? (kn ? 'ಮೆನು ಚಿಕ್ಕದಾಗಿಸಿ' : 'Shrink the menu') : kn ? 'ಮೆನು ತೆರೆದೇ ಇರಲಿ' : 'Keep the menu open'}
+        </button>
+      )}
     </nav>
   );
 }
@@ -377,6 +425,39 @@ function Shell() {
   const [more, setMore] = useState(false);
   const closeMore = useCallback(() => setMore(false), []);
   useEffect(() => setMore(false), [loc.pathname]);
+  // The left menu (640px and up): a rail, opened over the page on a tap, or pinned open.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPinned, setMenuPinned] = useState(readMenuPin);
+  const { active: tourOn } = useTour();
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+  useEffect(() => setMenuOpen(false), [loc.pathname]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    let timer = setTimeout(closeMenu, MENU_IDLE_MS);
+    const touched = () => {
+      clearTimeout(timer);
+      timer = setTimeout(closeMenu, MENU_IDLE_MS);
+    };
+    const key = (e: KeyboardEvent) => (e.key === 'Escape' ? closeMenu() : touched());
+    document.addEventListener('pointermove', touched);
+    document.addEventListener('pointerdown', touched);
+    document.addEventListener('keydown', key);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('pointermove', touched);
+      document.removeEventListener('pointerdown', touched);
+      document.removeEventListener('keydown', key);
+    };
+  }, [menuOpen, closeMenu]);
+  const pinMenu = (on: boolean) => {
+    writeMenuPin(on);
+    setMenuPinned(on);
+    setMenuOpen(false);
+  };
+  const onMenuButton = () => {
+    if (!wideScreen()) setMore(true);
+    else if (!menuPinned) setMenuOpen((o) => !o);
+  };
   // A customer's link: no sign-in, no menu, whoever (if anyone) is signed in on this phone.
   if (/^\/(t|l)\//.test(loc.pathname))
     return (
@@ -424,10 +505,19 @@ function Shell() {
   // The admin on a worker screen works as the worker picked at the top.
   const onWorker = r === 'admin' && WORKER_TABS.some((t) => t.to === loc.pathname);
   return (
-    <div className={'shell' + (hasNav ? ' has-nav' : '')}>
-      {hasNav && <Sidebar />}
+    <div
+      className={
+        'shell' +
+        (hasNav ? ' has-nav' : '') +
+        (hasNav && menuPinned ? ' menu-pinned' : '') +
+        (hasNav && menuOpen && !menuPinned ? ' menu-open' : '') +
+        (hasNav && tourOn ? ' menu-tour' : '')
+      }
+    >
+      {hasNav && <Sidebar open={menuOpen && !menuPinned} pinned={menuPinned} onOpen={() => setMenuOpen(true)} onClose={closeMenu} onPin={pinMenu} />}
+      {hasNav && menuOpen && !menuPinned && !tourOn && <div className="side-scrim" onClick={closeMenu} aria-hidden="true" />}
       <div className="main-col">
-        <Top onMenu={hasNav ? () => setMore(true) : undefined} />
+        <Top onMenu={hasNav ? onMenuButton : undefined} />
         <main className={'page role-' + r + (loc.pathname === '/worker/screen' ? ' tv' : '')}>
           <SectionTabs tabs={tabs} />
           {onWorker && <ActingFor />}

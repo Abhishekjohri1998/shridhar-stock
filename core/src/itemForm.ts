@@ -176,3 +176,16 @@ export function addAliasChip(chips: AliasChip[], text: string, unit = ''): Alias
   if (chips.some((c) => searchKey(c.text) === k && c.unit === unit)) return chips;
   return [...chips, { text: t, unit }];
 }
+
+/**
+ * The form with a name still sitting in the other-names box (typed, "+ Add" not tapped) added
+ * to its other names, so Save never drops it. Same rules as addAliasChip; a unit the form no
+ * longer has means any unit.
+ */
+export function withPendingAlias(f: ItemForm, pending: { text: string; unit?: string }): ItemForm {
+  if (!pending.text.trim()) return f;
+  const unit = pending.unit && f.units.some((u) => u.code === pending.unit) ? pending.unit : '';
+  const chips = aliasChips(f.aliases);
+  const next = addAliasChip(chips, pending.text, unit);
+  return next === chips ? f : { ...f, aliases: aliasesFromChips(next) };
+}

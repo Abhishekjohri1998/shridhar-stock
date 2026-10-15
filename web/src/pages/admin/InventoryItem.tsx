@@ -5,6 +5,9 @@ import {
   addAliasChip,
   aliasChips,
   aliasesFromChips,
+  withPendingAlias,
+  packRate,
+  slabsFromPacks,
   MAX_ALIASES,
   blankItemForm,
   blankUnit,
@@ -131,6 +134,9 @@ function ItemDetails({
   const [error, setError] = useState('');
   const [saved, setSaved] = useState('');
   const [busy, setBusy] = useState(false);
+  // A name typed in the other-names box but not yet added with "+ Add". Save adds it too, so a name
+  // is never lost because + Add was skipped (or the tablet keyboard's Enter submitted the form).
+  const [pendingAlias, setPendingAlias] = useState({ text: '', unit: '' });
   // A fresh read of the same item (stock moved, a live update) keeps what is being typed; only
   // a change saved to the item itself refills the form.
   useEffect(() => {
@@ -167,9 +173,10 @@ function ItemDetails({
     setError('');
     setSaved('');
     try {
-      const input = formToInput(form, active);
+      const input = formToInput(withPendingAlias(form, pendingAlias), active);
       if (item) {
         await api.saveItem(item.id, input);
+        setPendingAlias({ text: '', unit: '' });
         setSaved(t('common.saved'));
         onSaved?.();
       } else {
@@ -325,6 +332,13 @@ function ItemDetails({
                   + {bi('Price from a quantity', 'ಪ್ರಮಾಣದಿಂದ ಬೆಲೆ')}
                 </button>
               )}
+              {i === 0 && !readOnly && (
+                <PackPricer
+                  base={u.code || base}
+                  packs={form.units.slice(1).filter((x) => x.code.trim() && Number(x.perBase) > 0).map((x) => ({ code: x.code, size: Number(x.perBase) }))}
+                  onApply={(price, slabs) => setUnit(0, { price, slabs })}
+                />
+              )}
             </div>
           ))}
           {!readOnly && (
@@ -340,6 +354,8 @@ function ItemDetails({
           <AliasEditor
             aliases={form.aliases}
             onChange={(aliases) => set({ aliases })}
+            pending={pendingAlias}
+            onPending={setPendingAlias}
             unitCodes={unitChoices.map((u) => u.code)}
             readOnly={readOnly}
             label={t('items.otherNames')}
@@ -702,6 +718,118 @@ function ItemSuppliersCard({
   );
 }
 
+interface PackRow {
+  size: string;
+  price: string;
+  /** '' = from the pack size. */
+  from: string;
+}
+const blankPack = (): PackRow => ({ size: '', price: '', from: '' });
+
+/**
+ * "Price by pack size" on the base unit: each pack's size (in the base unit, or picked from the
+ * item's other units) and its price. It shows the per-base-unit rate and an editable "from", and
+ * Apply writes the base price (the smallest pack's rate) and one slab per other pack.
+ */
+function PackPricer({
+  base,
+  packs,
+  onApply,
+}: {
+  base: string;
+  packs: { code: string; size: number }[];
+  onApply: (price: string, slabs: { minQty: string; rate: string }[]) => void;
+}) {
+  const bi = useBi();
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<PackRow[]>([blankPack(), blankPack()]);
+  const n = (v: string) => (v.trim() === '' ? NaN : Number(v));
+  const setRow = (k: number, patch: Partial<PackRow>) => setRows((r) => r.map((x, j) => (j === k ? { ...x, ...patch } : x)));
+  const result = slabsFromPacks(rows.map((r) => ({ size: n(r.size), price: n(r.price), ...(r.from.trim() ? { from: n(r.from) } : {}) })));
+  const qty = (g: number) => g + ' ' + base;
+  if (!open) {
+    return (
+      <button type="button" className="btn ghost small" onClick={() => setOpen(true)}>
+        + {bi('Price by pack size', 'ಪ್ಯಾಕ್ ಗಾತ್ರದಿಂದ ಬೆಲೆ')}
+      </button>
+    );
+  }
+  return (
+    <div className="card">
+      <b>{bi('Price by pack size', 'ಪ್ಯಾಕ್ ಗಾತ್ರದಿಂದ ಬೆಲೆ')}</b>
+      <p className="muted">
+        {bi(
+          'Each pack size in ' + base + ' and its price. The smallest pack sets the price of 1 ' + base + '; each bigger pack is a price from a quantity.',
+          'ಪ್ರತಿ ಪ್ಯಾಕ್‌ನ ಗಾತ್ರ (' + base + ') ಮತ್ತು ಬೆಲೆ. ಚಿಕ್ಕ ಪ್ಯಾಕ್ 1 ' + base + ' ಬೆಲೆ ನೀಡುತ್ತದೆ; ದೊಡ್ಡ ಪ್ಯಾಕ್‌ಗಳು ಪ್ರಮಾಣದಿಂದ ಬೆಲೆ ಆಗುತ್ತವೆ.',
+        )}
+      </p>
+      {rows.map((r, k) => {
+        const size = n(r.size);
+        const price = n(r.price);
+        const rate = size > 0 && price >= 0 ? packRate({ size, price }) : null;
+        return (
+          <div className="unit-grid" key={k}>
+            <label className="field">
+              <span>{bi('Pack size', 'ಪ್ಯಾಕ್ ಗಾತ್ರ')} ({base})</span>
+              <input inputMode="decimal" value={r.size} onChange={(e) => setRow(k, { size: e.target.value })} />
+            </label>
+            {packs.length > 0 && (
+              <label className="field">
+                <span>{bi('or a unit', 'ಅಥವಾ ಘಟಕ')}</span>
+                <Select
+                  value={packs.find((pk) => String(pk.size) === r.size.trim())?.code ?? ''}
+                  onChange={(code) => {
+                    const pk = packs.find((x) => x.code === code);
+                    if (pk) setRow(k, { size: String(pk.size) });
+                  }}
+                  aria-label={bi('or a unit', 'ಅಥವಾ ಘಟಕ')}
+                  options={[{ value: '', label: '—' }, ...packs.map((pk) => ({ value: pk.code, label: pk.code + ' = ' + qty(pk.size) }))]}
+                />
+              </label>
+            )}
+            <label className="field">
+              <span>{bi('Pack price', 'ಪ್ಯಾಕ್ ಬೆಲೆ')} ₹</span>
+              <input inputMode="decimal" value={r.price} onChange={(e) => setRow(k, { price: e.target.value })} />
+            </label>
+            <label className="field">
+              <span>{bi('From', 'ಇಂದ')} ({base})</span>
+              <input inputMode="decimal" value={r.from} placeholder={r.size} onChange={(e) => setRow(k, { from: e.target.value })} />
+            </label>
+            <div className="field">
+              <span>{bi('Per', 'ಪ್ರತಿ')} {base}</span>
+              <b>{rate == null ? '—' : formatRate(rate)}</b>
+            </div>
+            <button type="button" className="btn ghost small field" aria-label={bi('Remove', 'ತೆಗೆಯಿರಿ')} onClick={() => setRows((x) => x.filter((_, j) => j !== k))}>
+              ×
+            </button>
+          </div>
+        );
+      })}
+      <div className="bar">
+        <button type="button" className="btn ghost small" onClick={() => setRows((x) => [...x, blankPack()])}>
+          + {bi('Pack', 'ಪ್ಯಾಕ್')}
+        </button>
+        <button
+          type="button"
+          className="btn"
+          disabled={!result}
+          onClick={() => result && onApply(String(result.price), result.slabs.map((x) => ({ minQty: String(x.minQty), rate: String(x.rate) })))}
+        >
+          {bi('Apply', 'ಅನ್ವಯಿಸಿ')}
+        </button>
+        <button type="button" className="btn ghost small" onClick={() => setOpen(false)}>
+          {bi('Close', 'ಮುಚ್ಚಿ')}
+        </button>
+      </div>
+      {result && (
+        <p className="muted">
+          {bi('Check', 'ಪರಿಶೀಲನೆ')}: {[...result.quotes].reverse().map((q) => qty(q.size) + ' → ' + formatRupees(q.amount)).join(', ')}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /**
  * Other names as chips. A name goes in with the "+ Add" button, so it never needs the keyboard's
  * Enter key (the tablet's WebView keyboard does not add a line in a textarea). Enter in the box adds too.
@@ -712,16 +840,21 @@ function AliasEditor({
   unitCodes,
   readOnly,
   label,
+  pending,
+  onPending,
 }: {
   aliases: string;
   onChange: (aliases: string) => void;
+  pending: { text: string; unit: string };
+  onPending: (p: { text: string; unit: string }) => void;
   unitCodes: string[];
   readOnly?: boolean;
   label: string;
 }) {
   const bi = useBi();
-  const [text, setText] = useState('');
-  const [unit, setUnit] = useState('');
+  const { text, unit } = pending;
+  const setText = (t: string) => onPending({ text: t, unit });
+  const setUnit = (u: string) => onPending({ text, unit: u });
   const chips = aliasChips(aliases);
   const full = chips.length >= MAX_ALIASES;
   const add = () => {
@@ -761,7 +894,8 @@ function AliasEditor({
             aria-label={label}
             onChange={(e) => setText(e.target.value.replace(/,/g, ' '))}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
+              // keyCode 13: some Android WebView keyboards send key "Unidentified" for Enter.
+              if (e.key === 'Enter' || e.keyCode === 13) {
                 e.preventDefault();
                 add();
               }

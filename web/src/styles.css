@@ -515,12 +515,23 @@ img, svg.ink { max-width: 100%; }
     scrollbar-width: thin;
   }
   .shell.has-nav .side a { justify-content: flex-start; padding: 0 14px; }
-  .shell.has-nav .side .nav-label, .shell.has-nav .side .side-head { opacity: 0; transition: opacity var(--t-fast) var(--ease); }
-  .shell.has-nav .side:hover, .shell.has-nav .side:focus-within { width: var(--side-w); box-shadow: var(--sh-3); }
-  .shell.has-nav .side:hover .nav-label, .shell.has-nav .side:focus-within .nav-label,
-  .shell.has-nav .side:hover .side-head, .shell.has-nav .side:focus-within .side-head { opacity: 1; }
+  .shell.has-nav .side .nav-label, .shell.has-nav .side .side-head, .shell.has-nav .side .side-pin { opacity: 0; transition: opacity var(--t-fast) var(--ease); }
+  /* The rail opens over the page (menu-open), stays open (menu-pinned), or shows its words for a tour. */
+  .shell.has-nav .top-menu { display: inline-flex; }
+  .shell.menu-pinned .top-menu { display: none; }
+  .shell.menu-open .side, .shell.menu-pinned .side, .shell.menu-tour .side { width: var(--side-w); }
+  .shell.menu-open .side, .shell.menu-tour .side { box-shadow: var(--sh-3); }
+  .shell.menu-open .side .nav-label, .shell.menu-open .side .side-head, .shell.menu-open .side .side-pin,
+  .shell.menu-pinned .side .nav-label, .shell.menu-pinned .side .side-head, .shell.menu-pinned .side .side-pin,
+  .shell.menu-tour .side .nav-label, .shell.menu-tour .side .side-head { opacity: 1; }
+  .shell.menu-pinned { padding-left: var(--side-w); }
+  .shell.has-nav .side { cursor: pointer; }
+  .shell.menu-open .side, .shell.menu-pinned .side { cursor: default; }
+  .side-top { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+  .shell .side-scrim { display: block; position: fixed; inset: 0; z-index: 29; background: rgba(20, 18, 15, 0.38); animation: fade var(--t-base) var(--ease); }
   .page { padding: 24px 24px 40px; }
 }
+.side-scrim { display: none; }
 @media (min-width: 640px) and (max-width: 1023px) {
   .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
@@ -530,10 +541,6 @@ img, svg.ink { max-width: 100%; }
 
 /* ---- desktop: sidebar with labels (≥1024) ------------------------------ */
 @media (min-width: 1024px) {
-  .shell.has-nav { padding-left: var(--side-w); }
-  .shell.has-nav .side { width: var(--side-w); padding: 20px 14px; box-shadow: none; }
-  .shell.has-nav .side .nav-label, .shell.has-nav .side .side-head { opacity: 1; }
-  .shell.has-nav .side:hover, .shell.has-nav .side:focus-within { box-shadow: none; }
   .page { padding: 28px 32px 48px; }
 }
 

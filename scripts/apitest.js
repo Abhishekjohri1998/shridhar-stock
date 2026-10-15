@@ -220,6 +220,31 @@ async function main() {
     check('and the new item', (await call('/items?q=sakkare', { token: admin })).body.length === 1);
     check('the godown rack survived the shop-only file', (await call('/items/' + parleId, { token: admin })).body.racks[shop] === 'Rack 3');
 
+
+    // Other names: the item form's own path (chips -> form -> input), on add and on edit.
+    {
+      const F = require('../core/dist/cjs');
+      let f = { ...F.blankItemForm(), nameEn: 'Sugar', nameKn: 'ಸಕ್ಕರೆ' };
+      f.units = [{ ...f.units[0], code: 'g', label: 'Gram', labelKn: 'ಗ್ರಾಂ', price: '0.08' }];
+      let chips = [];
+      for (const n of ['shakkare', 'ಸಕ್ಕರೆ ಪುಡಿ']) chips = F.addAliasChip(chips, n);
+      f = { ...f, aliases: F.aliasesFromChips(chips) };
+      // The third is typed but + Add is not tapped: Save still takes it.
+      const add = await call('/items', { method: 'POST', token: admin, body: F.formToInput(F.withPendingAlias(f, { text: 'cheeni', unit: '' })) });
+      eq('an item with 3 other names is added', add.status, 201);
+      const got = (await call('/items?all=1', { token: admin })).body.find((i) => i.id === add.body.id);
+      eq('3 other names read back', got && got.aliases.length, 3);
+      let e = F.itemToForm(got);
+      e = { ...e, aliases: F.aliasesFromChips(F.addAliasChip(F.aliasChips(e.aliases), 'ಚೀನಿ')) };
+      const put = await call('/items/' + got.id, { method: 'PUT', token: admin, body: F.formToInput(F.withPendingAlias(e, { text: 'sakkre', unit: '' })) });
+      eq('other names are changed', put.status, 200);
+      const back = (await call('/items?all=1', { token: admin })).body.find((i) => i.id === got.id);
+      check('5 other names read back after the edit', back && JSON.stringify(back.aliases.map((x) => x.text)) === JSON.stringify(['shakkare', 'ಸಕ್ಕರೆ ಪುಡಿ', 'cheeni', 'ಚೀನಿ', 'sakkre']), JSON.stringify(back && back.aliases));
+      const three = await call('/items/' + got.id, { method: 'PUT', token: admin, body: { ...F.formToInput(F.itemToForm(back)), aliases: [{ text: 'a1' }, { text: 'ಎರಡು' }, { text: 'a3' }] } });
+      eq('PUT with 3 other names', three.status, 200);
+      eq('GET reads 3 back', (await call('/items?all=1', { token: admin })).body.find((i) => i.id === got.id).aliases.length, 3);
+    }
+
     // ------------------------------------------------ own PIN
     eq('changing my PIN needs the current one', (await call('/auth/pin', { method: 'POST', token: admin, body: { oldPin: '0000', newPin: '5555' } })).status, 400);
     eq('with it, it changes', (await call('/auth/pin', { method: 'POST', token: admin, body: { oldPin: ADMIN_PIN, newPin: '5555' } })).status, 200);

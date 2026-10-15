@@ -647,6 +647,31 @@ async function ledger() {
   let full = [];
   for (let i = 0; i < 25; i++) full = C.addAliasChip(full, 'n' + i);
   check('max 20 names', full.length === C.MAX_ALIASES && C.MAX_ALIASES === 20, full.length);
+  // A name typed but not added with + Add still goes in on Save.
+  const pf = { ...C.blankItemForm(), aliases: 'shakkare\nಸಕ್ಕರೆ ಪುಡಿ' };
+  check('pending name added on save', JSON.stringify(C.formToInput(C.withPendingAlias(pf, { text: ' cheeni ', unit: '' })).aliases) === JSON.stringify([{ text: 'shakkare' }, { text: 'ಸಕ್ಕರೆ ಪುಡಿ' }, { text: 'cheeni' }]));
+  check('empty pending changes nothing', C.withPendingAlias(pf, { text: '  ', unit: '' }) === pf);
+  check('pending unit the form lacks means any unit', C.formToInput(C.withPendingAlias(pf, { text: 'x', unit: 'zz' })).aliases[2].unit === undefined);
+}
+
+// Price by pack size: the Sugar example.
+{
+  const r = C.slabsFromPacks([
+    { size: 1000, price: 55 },
+    { size: 500, price: 28 },
+    { size: 250, price: 14 },
+    { size: 125, price: 8, from: 100 },
+    { size: 50, price: 4 },
+  ]);
+  check('sugar base is the smallest pack rate', r && r.price === 0.08, JSON.stringify(r));
+  check('sugar slabs', JSON.stringify(r.slabs) === JSON.stringify([{ minQty: 100, rate: 0.064 }, { minQty: 250, rate: 0.056 }, { minQty: 500, rate: 0.056 }, { minQty: 1000, rate: 0.055 }]), JSON.stringify(r.slabs));
+  const item = { units: [{ code: 'g', label: 'g', labelKn: '', perBase: 1, price: r.price, slabs: r.slabs }] };
+  for (const [g, want] of [[1000, 55], [500, 28], [250, 14], [125, 8], [50, 4]]) check('sugar ' + g + ' g costs ' + want, C.priceFor(item, 'g', g).amount === want, C.priceFor(item, 'g', g).amount);
+  check('quotes match', JSON.stringify(r.quotes.map((q) => q.amount)) === JSON.stringify([4, 8, 14, 28, 55]), JSON.stringify(r.quotes));
+  check('per-g rate shown exactly', C.formatRate(C.packRate({ size: 500, price: 28 })) === '₹0.056');
+  check('no usable rows', C.slabsFromPacks([{ size: 0, price: 5 }, { size: 10, price: NaN }]) === null);
+  check('one pack: price only', JSON.stringify(C.slabsFromPacks([{ size: 1, price: 3 }])) === JSON.stringify({ price: 3, slabs: [], quotes: [{ size: 1, rate: 3, amount: 3 }] }));
+  check('passes checkItem', C.checkItem({ nameEn: 'Sugar', nameKn: '', units: item.units, aliases: [], racks: {} }).ok);
 }
 
 // ---------------------------------------------------------------- 3D view: the sample layout from racks

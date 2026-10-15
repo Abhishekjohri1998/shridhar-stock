@@ -65,3 +65,49 @@ export function sellPriceOf(item: Pick<Item, 'units'> & { defaultUnit?: string; 
   const unit = sellUnitOf(item);
   return { unit, rate: unitRate1(unit), slabs: unit.slabs ?? [] };
 }
+
+/** One row of the "price by pack size" helper: a pack's size in the base unit, its price, and the quantity its rate starts from. */
+export interface PackPrice {
+  size: number;
+  price: number;
+  /** The base-unit quantity this pack's rate starts from. Defaults to the pack size. */
+  from?: number;
+}
+
+/** What the pack-size helper writes to the base unit, and what each pack then costs. */
+export interface PackSlabs {
+  /** The base unit's own price: the smallest pack's rate. */
+  price: number;
+  /** One slab per other pack, {minQty: from, rate}, sorted by minQty. */
+  slabs: Slab[];
+  /** Each pack's per-base-unit rate and what it costs with the price and slabs above, smallest first. */
+  quotes: { size: number; rate: number; amount: number }[];
+}
+
+/** One pack's per-base-unit rate, exact to 4 places (₹28 for 500 g is 0.056). */
+export const packRate = (p: { size: number; price: number }): number => round4(p.price / p.size);
+
+/**
+ * The base unit's price and slabs from pack sizes and their prices. The smallest pack's rate is the
+ * base price; every other pack becomes a slab from its `from` (or its size). Rows without a size
+ * above 0 or a price of 0 or more are skipped. Returns null when no row is usable.
+ */
+export function slabsFromPacks(packs: PackPrice[]): PackSlabs | null {
+  const ok = packs
+    .filter((p) => Number.isFinite(p.size) && p.size > 0 && Number.isFinite(p.price) && p.price >= 0)
+    .sort((a, b) => a.size - b.size);
+  if (!ok.length) return null;
+  const price = packRate(ok[0]!);
+  const byMin = new Map<number, number>();
+  for (const p of ok.slice(1)) {
+    const from = p.from != null && Number.isFinite(p.from) && p.from > 0 ? p.from : p.size;
+    const rate = packRate(p);
+    const had = byMin.get(from);
+    // Two packs from the same quantity: the cheaper rate wins.
+    byMin.set(from, had == null ? rate : Math.min(had, rate));
+  }
+  const slabs = [...byMin.entries()].sort((a, b) => a[0] - b[0]).map(([minQty, rate]) => ({ minQty, rate }));
+  const unit = { code: 'base', label: '', labelKn: '', perBase: 1, price, slabs } as ItemUnit;
+  const quotes = ok.map((p) => ({ size: p.size, rate: packRate(p), amount: priceFor({ units: [unit] }, 'base', p.size).amount }));
+  return { price, slabs, quotes };
+}
