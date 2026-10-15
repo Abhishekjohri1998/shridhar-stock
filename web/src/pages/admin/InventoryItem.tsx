@@ -7,6 +7,9 @@ import {
   aliasesFromChips,
   withPendingAlias,
   packRate,
+  packsFromItem,
+  applyPacks,
+  type PackRow,
   slabsFromPacks,
   MAX_ALIASES,
   blankItemForm,
@@ -335,8 +338,8 @@ function ItemDetails({
               {i === 0 && !readOnly && (
                 <PackPricer
                   base={u.code || base}
-                  packs={form.units.slice(1).filter((x) => x.code.trim() && Number(x.perBase) > 0).map((x) => ({ code: x.code, size: Number(x.perBase) }))}
-                  onApply={(price, slabs) => setUnit(0, { price, slabs })}
+                  form={form}
+                  setForm={setForm}
                 />
               )}
             </div>
@@ -718,38 +721,40 @@ function ItemSuppliersCard({
   );
 }
 
-interface PackRow {
-  size: string;
-  price: string;
-  /** '' = from the pack size. */
-  from: string;
-}
 const blankPack = (): PackRow => ({ size: '', price: '', from: '' });
 
 /**
- * "Price by pack size" on the base unit: each pack's size (in the base unit, or picked from the
- * item's other units) and its price. It shows the per-base-unit rate and an editable "from", and
- * Apply writes the base price (the smallest pack's rate) and one slab per other pack.
+ * "Price by pack size" on the base unit. It opens with one row per other unit that has a size and a
+ * price (and the base unit's slabs), and every edit at once writes the base price (the smallest
+ * pack's rate) and one slab per other pack into the form; a row from a unit also sets that unit's
+ * price. Close keeps the values; Undo puts back the units as they were when the panel opened.
  */
-function PackPricer({
-  base,
-  packs,
-  onApply,
-}: {
-  base: string;
-  packs: { code: string; size: number }[];
-  onApply: (price: string, slabs: { minQty: string; rate: string }[]) => void;
-}) {
+function PackPricer({ base, form, setForm }: { base: string; form: ItemForm; setForm: (fn: (f: ItemForm) => ItemForm) => void }) {
   const bi = useBi();
   const [open, setOpen] = useState(false);
-  const [rows, setRows] = useState<PackRow[]>([blankPack(), blankPack()]);
+  const [rows, setRows] = useState<PackRow[]>([]);
+  const [before, setBefore] = useState<UnitForm[] | null>(null);
+  const packs = form.units.slice(1).filter((x) => x.code.trim() && Number(x.perBase) > 0).map((x) => ({ code: x.code, size: Number(x.perBase) }));
   const n = (v: string) => (v.trim() === '' ? NaN : Number(v));
-  const setRow = (k: number, patch: Partial<PackRow>) => setRows((r) => r.map((x, j) => (j === k ? { ...x, ...patch } : x)));
+  const edit = (next: PackRow[]) => {
+    setRows(next);
+    setForm((f) => applyPacks(f, next) ?? f);
+  };
+  const setRow = (k: number, patch: Partial<PackRow>) => edit(rows.map((x, j) => (j === k ? { ...x, ...patch } : x)));
   const result = slabsFromPacks(rows.map((r) => ({ size: n(r.size), price: n(r.price), ...(r.from.trim() ? { from: n(r.from) } : {}) })));
   const qty = (g: number) => g + ' ' + base;
   if (!open) {
     return (
-      <button type="button" className="btn ghost small" onClick={() => setOpen(true)}>
+      <button
+        type="button"
+        className="btn ghost small"
+        onClick={() => {
+          setBefore(form.units);
+          const start = packsFromItem(form);
+          edit(start.length ? start : [blankPack(), blankPack()]);
+          setOpen(true);
+        }}
+      >
         + {bi('Price by pack size', 'ಪ್ಯಾಕ್ ಗಾತ್ರದಿಂದ ಬೆಲೆ')}
       </button>
     );
@@ -759,8 +764,8 @@ function PackPricer({
       <b>{bi('Price by pack size', 'ಪ್ಯಾಕ್ ಗಾತ್ರದಿಂದ ಬೆಲೆ')}</b>
       <p className="muted">
         {bi(
-          'Each pack size in ' + base + ' and its price. The smallest pack sets the price of 1 ' + base + '; each bigger pack is a price from a quantity.',
-          'ಪ್ರತಿ ಪ್ಯಾಕ್‌ನ ಗಾತ್ರ (' + base + ') ಮತ್ತು ಬೆಲೆ. ಚಿಕ್ಕ ಪ್ಯಾಕ್ 1 ' + base + ' ಬೆಲೆ ನೀಡುತ್ತದೆ; ದೊಡ್ಡ ಪ್ಯಾಕ್‌ಗಳು ಪ್ರಮಾಣದಿಂದ ಬೆಲೆ ಆಗುತ್ತವೆ.',
+          'Each pack size in ' + base + ' and its price. The smallest pack sets the price of 1 ' + base + '; each bigger pack is a price from a quantity. Changes apply at once.',
+          'ಪ್ರತಿ ಪ್ಯಾಕ್‌ನ ಗಾತ್ರ (' + base + ') ಮತ್ತು ಬೆಲೆ. ಚಿಕ್ಕ ಪ್ಯಾಕ್ 1 ' + base + ' ಬೆಲೆ ನೀಡುತ್ತದೆ; ದೊಡ್ಡ ಪ್ಯಾಕ್‌ಗಳು ಪ್ರಮಾಣದಿಂದ ಬೆಲೆ ಆಗುತ್ತವೆ. ಬದಲಾವಣೆಗಳು ತಕ್ಷಣ ಅನ್ವಯವಾಗುತ್ತವೆ.',
         )}
       </p>
       {rows.map((r, k) => {
@@ -799,7 +804,7 @@ function PackPricer({
               <span>{bi('Per', 'ಪ್ರತಿ')} {base}</span>
               <b>{rate == null ? '—' : formatRate(rate)}</b>
             </div>
-            <button type="button" className="btn ghost small field" aria-label={bi('Remove', 'ತೆಗೆಯಿರಿ')} onClick={() => setRows((x) => x.filter((_, j) => j !== k))}>
+            <button type="button" className="btn ghost small field" aria-label={bi('Remove', 'ತೆಗೆಯಿರಿ')} onClick={() => edit(rows.filter((_, j) => j !== k))}>
               ×
             </button>
           </div>
@@ -811,11 +816,13 @@ function PackPricer({
         </button>
         <button
           type="button"
-          className="btn"
-          disabled={!result}
-          onClick={() => result && onApply(String(result.price), result.slabs.map((x) => ({ minQty: String(x.minQty), rate: String(x.rate) })))}
+          className="btn ghost small"
+          onClick={() => {
+            if (before) setForm((f) => ({ ...f, units: before }));
+            setOpen(false);
+          }}
         >
-          {bi('Apply', 'ಅನ್ವಯಿಸಿ')}
+          {bi('Undo', 'ರದ್ದುಮಾಡಿ')}
         </button>
         <button type="button" className="btn ghost small" onClick={() => setOpen(false)}>
           {bi('Close', 'ಮುಚ್ಚಿ')}

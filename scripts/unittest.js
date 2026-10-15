@@ -674,6 +674,23 @@ async function ledger() {
   check('passes checkItem', C.checkItem({ nameEn: 'Sugar', nameKn: '', units: item.units, aliases: [], racks: {} }).ok);
 }
 
+// Price by pack size, opened on an item: rows from its units and slabs, applied to the form.
+{
+  const u = (code, perBase, price, slabs = []) => ({ ...C.blankUnit(false), code, label: code, perBase, price, slabs });
+  const f = { ...C.blankItemForm(), units: [u('gm', '1', '0.06', [{ minQty: '125', rate: '0.064' }, { minQty: '1000', rate: '0.05' }]), u('Kg', '1000', '55'), u('half', '500', '28'), u('box', '', '9'), u('nop', '250', '')] };
+  const rows = C.packsFromItem(f);
+  check('packsFromItem: units then uncovered slabs', JSON.stringify(rows) === JSON.stringify([{ size: '125', price: '8', from: '' }, { size: '500', price: '28', from: '', unit: 2 }, { size: '1000', price: '55', from: '', unit: 1 }]), JSON.stringify(rows));
+  check('packsFromItem: nothing usable', C.packsFromItem(C.blankItemForm()).length === 0);
+  const g = C.applyPacks(f, rows);
+  check('applyPacks: base price from smallest pack', g.units[0].price === '0.064', g.units[0].price);
+  check('applyPacks: base slabs', JSON.stringify(g.units[0].slabs) === JSON.stringify([{ minQty: '500', rate: '0.056' }, { minQty: '1000', rate: '0.055' }]), JSON.stringify(g.units[0].slabs));
+  const h = C.applyPacks(f, rows.map((r) => (r.unit === 1 ? { ...r, price: '110' } : r)));
+  check('applyPacks: edited unit row sets that unit price', h.units[1].price === '110' && h.units[2].price === '28' && h.units[3].price === '9');
+  check('applyPacks: Kg=1000 at 110 alone sets gm to 0.11', C.applyPacks(f, [{ size: '1000', price: '110', from: '', unit: 1 }]).units[0].price === '0.11');
+  check('applyPacks: no usable row', C.applyPacks(f, [{ size: '', price: '', from: '' }]) === null);
+  check('applyPacks leaves the input alone', f.units[1].price === '55');
+}
+
 // ---------------------------------------------------------------- 3D view: the sample layout from racks
 {
   const its = [

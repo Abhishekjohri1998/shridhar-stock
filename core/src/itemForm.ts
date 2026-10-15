@@ -1,6 +1,8 @@
 import { searchKey } from './kannada';
 import { lowAtOf, lowAtPlaceOf } from './stockTotals';
 import { defaultUnitOf, sellUnitOf } from './units';
+import { round2 } from './money';
+import { slabsFromPacks } from './pricing';
 import type { Item, ItemInput } from './types';
 
 /**
@@ -188,4 +190,53 @@ export function withPendingAlias(f: ItemForm, pending: { text: string; unit?: st
   const chips = aliasChips(f.aliases);
   const next = addAliasChip(chips, pending.text, unit);
   return next === chips ? f : { ...f, aliases: aliasesFromChips(next) };
+}
+
+/** One row of the "price by pack size" panel, as typed. `unit` is the index of the item unit it came from. */
+export interface PackRow {
+  size: string;
+  price: string;
+  from: string;
+  unit?: number;
+}
+
+const numOf = (v: string): number => (v.trim() === '' ? NaN : Number(v));
+
+/**
+ * The pack-size panel's starting rows: one per other unit with a size (perBase) and a price
+ * (Kg = 1000 g at ₹55 is size 1000, price 55), then each base-unit slab no unit already covers,
+ * as a pack of its quantity at its rate.
+ */
+export function packsFromItem(f: ItemForm): PackRow[] {
+  const rows: PackRow[] = [];
+  f.units.forEach((u, i) => {
+    if (i === 0) return;
+    const size = numOf(u.perBase);
+    const price = numOf(u.price);
+    if (u.code.trim() && size > 0 && price >= 0) rows.push({ size: String(size), price: String(price), from: '', unit: i });
+  });
+  for (const sl of f.units[0]?.slabs ?? []) {
+    const minQty = numOf(sl.minQty);
+    const rate = numOf(sl.rate);
+    if (!(minQty > 0 && rate >= 0)) continue;
+    if (rows.some((r) => Number(r.size) === minQty)) continue;
+    rows.push({ size: String(minQty), price: String(round2(minQty * rate)), from: '' });
+  }
+  return rows.sort((a, b) => Number(a.size) - Number(b.size));
+}
+
+/**
+ * The form with the pack rows applied: the base unit's price is the smallest pack's rate and its
+ * slabs one per other pack; a row from a unit also sets that unit's price. Null when no row is usable.
+ */
+export function applyPacks(f: ItemForm, rows: PackRow[]): ItemForm | null {
+  const r = slabsFromPacks(rows.map((x) => ({ size: numOf(x.size), price: numOf(x.price), ...(x.from.trim() ? { from: numOf(x.from) } : {}) })));
+  if (!r) return null;
+  const units = f.units.map((u, i) => {
+    if (i === 0) return { ...u, price: String(r.price), slabs: r.slabs.map((x) => ({ minQty: String(x.minQty), rate: String(x.rate) })) };
+    const row = rows.find((x) => x.unit === i);
+    const price = row ? numOf(row.price) : NaN;
+    return row && price >= 0 ? { ...u, price: row.price.trim() } : u;
+  });
+  return { ...f, units };
 }
