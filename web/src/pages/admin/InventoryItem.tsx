@@ -13,6 +13,10 @@ import {
   slabsFromPacks,
   MAX_ALIASES,
   blankItemForm,
+  biggestUnitIndex,
+  costsFromUnit,
+  toEnglish,
+  toKannada,
   blankUnit,
   defaultUnitOf,
   describeQty,
@@ -43,6 +47,7 @@ import { api, http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
 import { Loading, Select, SuggestInput, Table, Tabs, useBi, when } from '../../components/ui';
+import { ItemLots } from '../../components/ItemLots';
 import { lowWords } from './Inventory';
 
 type Tab = 'details' | 'stock';
@@ -102,6 +107,7 @@ export function InventoryItemPage({ readOnly = false }: { readOnly?: boolean }) 
         <>
           {about.info && <StockSummary item={item} locs={locs} stock={stock} info={about.info} sups={sups} />}
           <ItemStock item={item} locs={locs} stock={stock} readOnly={readOnly} onChanged={reload} />
+          <ItemLots item={item} locs={locs} />
         </>
       )}
     </>
@@ -194,25 +200,58 @@ function ItemDetails({
     }
   };
 
-  const base = form.units[0]?.code || 'pc';
+  const base = form.units[0]?.code || '';
   const unitChoices = form.units.filter((u) => u.code.trim());
+  // Transliterate one name box from the other (same sound, other script). Asks before replacing text.
+  const fillName = (key: 'nameEn' | 'nameKn', value: string) => {
+    if (!value.trim()) return;
+    const had = form[key].trim();
+    if (had && had !== value && !window.confirm(bi('Replace "' + had + '" with "' + value + '"?', '"' + had + '" ಬದಲು "' + value + '" ಹಾಕಬೇಕೆ?'))) return;
+    set({ [key]: value });
+  };
+  const [costFrom, setCostFrom] = useState<number | null>(null);
+  const costIdx = costFrom != null && form.units[costFrom] ? costFrom : biggestUnitIndex(form);
+  const costPreview = costsFromUnit(form, costIdx);
   return (
     <form onSubmit={(e) => save(e)}>
       {!item && <h1 className="title">{t('items.new')}</h1>}
       {error && <div className="msg err">{error}</div>}
       {saved && <div className="msg ok">{saved}</div>}
       <fieldset className="plain-fieldset" disabled={readOnly}>
-        <div className="card">
+        <div className="card item-sticky">
           <div className="grid2">
             <label className="field">
               <span>{t('items.nameKn')}</span>
-              <input value={form.nameKn} onChange={(e) => set({ nameKn: e.target.value })} />
+              <div className="bar mb-0">
+                <input value={form.nameKn} onChange={(e) => set({ nameKn: e.target.value })} />
+                {!readOnly && (
+                  <button type="button" className="btn ghost small" disabled={!form.nameEn.trim()} title={bi('Write the English name in Kannada letters', 'ಇಂಗ್ಲಿಷ್ ಹೆಸರನ್ನು ಕನ್ನಡ ಅಕ್ಷರದಲ್ಲಿ ಬರೆಯಿರಿ')} onClick={() => fillName('nameKn', toKannada(form.nameEn))}>
+                    A → ಅ
+                  </button>
+                )}
+              </div>
             </label>
             <label className="field">
               <span>{t('items.nameEn')}</span>
-              <input value={form.nameEn} onChange={(e) => set({ nameEn: e.target.value })} />
+              <div className="bar mb-0">
+                <input value={form.nameEn} onChange={(e) => set({ nameEn: e.target.value })} />
+                {!readOnly && (
+                  <button type="button" className="btn ghost small" disabled={!form.nameKn.trim()} title={bi('Write the Kannada name in English letters', 'ಕನ್ನಡ ಹೆಸರನ್ನು ಇಂಗ್ಲಿಷ್ ಅಕ್ಷರದಲ್ಲಿ ಬರೆಯಿರಿ')} onClick={() => fillName('nameEn', toEnglish(form.nameKn))}>
+                    ಅ → A
+                  </button>
+                )}
+              </div>
             </label>
           </div>
+          {!readOnly && (
+            <div className="bar mb-0">
+              <button className="btn primary" disabled={busy}>
+                {t('common.save')}
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="card">
           <label className="field">
             <span>{t('items.category')}</span>
             <SuggestInput data-tour="item-category" value={form.category} onChange={(v) => set({ category: v })} suggestions={cats.map((c) => ({ value: c }))} />
@@ -228,6 +267,8 @@ function ItemDetails({
               'ಮೊದಲ ಘಟಕ ಅತಿ ಚಿಕ್ಕದು, ಮೂಲ ಘಟಕ: ಉಳಿದವು ಅದರ ಎಷ್ಟು ಎಂದು. ಅಂಗಡಿಯಲ್ಲಿ ಹೇಳುವ ಯಾವ ಹೆಸರೂ ಆಗುತ್ತದೆ: ಲೈನ್, ಬಂಡಲ್, ಕ್ರೇಟ್.',
             )}
           </p>
+          {unitChoices.length === 0 && <p className="muted">{bi('Type the base unit below first; then choose how stock is counted and sold.', 'ಮೊದಲು ಕೆಳಗೆ ಮೂಲ ಘಟಕ ಬರೆಯಿರಿ; ನಂತರ ಎಣಿಸುವ, ಮಾರುವ ಘಟಕ ಆರಿಸಿ.')}</p>}
+          {unitChoices.length > 0 && (<>
           <label className="field" data-tour="item-default-unit">
             <span>{bi('Count stock in', 'ಸ್ಟಾಕ್ ಎಣಿಸುವ ಘಟಕ')}</span>
             <Select
@@ -249,6 +290,7 @@ function ItemDetails({
               ]}
             />
           </label>
+          </>)}
           <p className="muted">
             {bi(
               'Stock is shown in the counting unit, and counting, moving and buying start with it. Billing starts with the selling unit: rice counted in bags and sold by the kg.',
@@ -273,7 +315,7 @@ function ItemDetails({
               <div className="unit-grid">
                 <label className="field">
                   <span>{t('items.code')}</span>
-                  <SuggestInput value={u.code} onChange={(v) => pickCode(i, v)} aria-label={t('items.code')} suggestions={known.map((k) => ({ value: k.code, hint: itemsWord(k.count) }))} />
+                  <SuggestInput value={u.code} onChange={(v) => pickCode(i, v)} aria-label={t('items.code')} placeholder={i === 0 ? bi('e.g. gm, pc, kg', 'ಉದಾ. gm, pc, kg') : undefined} suggestions={known.map((k) => ({ value: k.code, hint: itemsWord(k.count) }))} />
                 </label>
                 <label className="field">
                   <span>{t('items.label')}</span>
@@ -348,6 +390,29 @@ function ItemDetails({
             <button type="button" className="btn" data-tour="item-add-unit" onClick={() => set({ units: [...form.units, blankUnit(false)] })}>
               + {bi('Add unit', 'ಘಟಕ ಸೇರಿಸಿ')}
             </button>
+          )}
+          {!readOnly && unitChoices.length > 1 && (
+            <div className="unit mt-14">
+              <b>{bi('Work out costs from one unit', 'ಒಂದು ಘಟಕದ ಖರೀದಿ ಬೆಲೆಯಿಂದ ಉಳಿದವು')}</b>
+              <p className="muted">{bi('Type the cost of the unit you buy in (a 50 kg bag at ₹2700), choose it here, and the cost of every other unit is worked out.', 'ನೀವು ಕೊಳ್ಳುವ ಘಟಕದ ಬೆಲೆ ಬರೆಯಿರಿ (50 ಕೆಜಿ ಚೀಲ ₹2700), ಇಲ್ಲಿ ಆರಿಸಿ; ಉಳಿದ ಘಟಕಗಳ ಬೆಲೆ ಲೆಕ್ಕವಾಗುತ್ತದೆ.')}</p>
+              <div className="bar mb-0">
+                <Select
+                  className="w-auto"
+                  value={String(costIdx)}
+                  onChange={(v) => setCostFrom(Number(v))}
+                  aria-label={bi('Work out costs from', 'ಇದರ ಬೆಲೆಯಿಂದ ಲೆಕ್ಕ')}
+                  options={form.units.map((u, i) => ({ value: String(i), label: ((lang === 'kn' && u.labelKn) || u.label || u.code || '?') + (i > 0 ? ' (' + (u.perBase || '?') + ' ' + base + ')' : '') }))}
+                />
+                <button type="button" className="btn" disabled={!costPreview} onClick={() => costPreview && setForm(costPreview)}>
+                  {bi('Fill costs', 'ಬೆಲೆ ತುಂಬಿ')}
+                </button>
+              </div>
+              <p className="muted mb-0">
+                {costPreview
+                  ? costPreview.units.filter((u) => u.code.trim() && u.cost.trim()).map((u) => '1 ' + u.code + ' = ₹' + u.cost).join(' · ')
+                  : bi('Type a cost in the chosen unit first.', 'ಮೊದಲು ಆರಿಸಿದ ಘಟಕದ ಬೆಲೆ ಬರೆಯಿರಿ.')}
+              </p>
+            </div>
           )}
         </div>
 

@@ -21,6 +21,7 @@ import { firstTourSeen, markFirstTourSeen, TourButton, TourProvider, useTour } f
 import { FIRST_TOUR, tourForPath } from './tours';
 import { ExplainerModal, explainerOffered, markExplainerOffered } from './explainer/entry';
 import { Loading } from './components/ui';
+import { CalculatorButton } from './components/Calculator';
 
 /*
  * Screens opened now and then load when first opened, so the first screen downloads much less:
@@ -31,6 +32,7 @@ const named = <K extends string>(load: () => Promise<Record<K, ComponentType>>, 
 const HelpPage = named(() => import('./pages/Help'), 'HelpPage');
 const ReportsPage = named(() => import('./roles/Reports'), 'ReportsPage');
 const PurchasesPage = named(() => import('./roles/admin/Buying'), 'PurchasesPage');
+const CarriersPage = named(() => import('./roles/admin/Carriers'), 'CarriersPage');
 const PlacesPage = named(() => import('./pages/admin/Places'), 'PlacesPage');
 const PeoplePage = named(() => import('./pages/admin/People'), 'PeoplePage');
 const FilesPage = named(() => import('./pages/admin/Files'), 'FilesPage');
@@ -73,7 +75,7 @@ const ADMIN: Place[] = [
     kn: 'ಖರೀದಿ ಮತ್ತು ಸಾಗಣೆ',
     icon: 'cart',
     tour: 'nav-move',
-    tabs: [tab('/admin/purchases', 'Purchases', 'ಖರೀದಿ'), tab('/admin/transfers', 'Transfers', 'ಸಾಗಣೆ'), tab('/admin/deliveries', 'Deliveries', 'ಡೆಲಿವರಿ')],
+    tabs: [tab('/admin/purchases', 'Purchases', 'ಖರೀದಿ'), tab('/admin/carriers', 'Carriers', 'ಸಾಗಣೆದಾರರು'), tab('/admin/transfers', 'Transfers', 'ಸಾಗಣೆ'), tab('/admin/deliveries', 'Deliveries', 'ಡೆಲಿವರಿ')],
   },
   // Every worker screen, without signing in again: "Acting for" at the top picks the worker.
   { to: '/worker', en: 'Worker screens', kn: 'ಕೆಲಸಗಾರರ ಪರದೆ', icon: 'people', tour: 'nav-workers', tabs: WORKER_TABS },
@@ -212,6 +214,7 @@ function Top({ onMenu }: { onMenu?: () => void }) {
       <span className="brand">{t('app.name')}</span>
       {me && <LiveDot />}
       <span className="top-gap" />
+      {me?.role === 'admin' && <CalculatorButton />}
       {me && <TourButton tourId={tourForPath(loc.pathname)} />}
       <button className="icon-btn" onClick={() => setLang(lang === 'kn' ? 'en' : 'kn')} title={t('common.lang')}>
         <Icon name="globe" />
@@ -537,6 +540,7 @@ function Shell() {
                 <Route path="/admin/inventory-3d" element={<Inventory3DPage />} />
                 <Route path="/admin/refill" element={<RefillPage />} />
                 <Route path="/admin/purchases" element={<PurchasesPage />} />
+                <Route path="/admin/carriers" element={<CarriersPage />} />
                 <Route path="/admin/transfers" element={<TransfersPage />} />
                 <Route path="/admin/deliveries" element={<DeliveriesPage />} />
                 <Route path="/admin/places" element={<PlacesPage />} />

@@ -664,7 +664,7 @@ async function ledger() {
     { size: 50, price: 4 },
   ]);
   check('sugar base is the smallest pack rate', r && r.price === 0.08, JSON.stringify(r));
-  check('sugar slabs', JSON.stringify(r.slabs) === JSON.stringify([{ minQty: 100, rate: 0.064 }, { minQty: 250, rate: 0.056 }, { minQty: 500, rate: 0.056 }, { minQty: 1000, rate: 0.055 }]), JSON.stringify(r.slabs));
+  check('sugar slabs', JSON.stringify(r.slabs) === JSON.stringify([{ minQty: 50, rate: 0.08 }, { minQty: 100, rate: 0.064 }, { minQty: 250, rate: 0.056 }, { minQty: 500, rate: 0.056 }, { minQty: 1000, rate: 0.055 }]), JSON.stringify(r.slabs));
   const item = { units: [{ code: 'g', label: 'g', labelKn: '', perBase: 1, price: r.price, slabs: r.slabs }] };
   for (const [g, want] of [[1000, 55], [500, 28], [250, 14], [125, 8], [50, 4]]) check('sugar ' + g + ' g costs ' + want, C.priceFor(item, 'g', g).amount === want, C.priceFor(item, 'g', g).amount);
   check('quotes match', JSON.stringify(r.quotes.map((q) => q.amount)) === JSON.stringify([4, 8, 14, 28, 55]), JSON.stringify(r.quotes));
@@ -683,7 +683,7 @@ async function ledger() {
   check('packsFromItem: nothing usable', C.packsFromItem(C.blankItemForm()).length === 0);
   const g = C.applyPacks(f, rows);
   check('applyPacks: base price from smallest pack', g.units[0].price === '0.064', g.units[0].price);
-  check('applyPacks: base slabs', JSON.stringify(g.units[0].slabs) === JSON.stringify([{ minQty: '500', rate: '0.056' }, { minQty: '1000', rate: '0.055' }]), JSON.stringify(g.units[0].slabs));
+  check('applyPacks: base slabs', JSON.stringify(g.units[0].slabs) === JSON.stringify([{ minQty: '125', rate: '0.064' }, { minQty: '500', rate: '0.056' }, { minQty: '1000', rate: '0.055' }]), JSON.stringify(g.units[0].slabs));
   const h = C.applyPacks(f, rows.map((r) => (r.unit === 1 ? { ...r, price: '110' } : r)));
   check('applyPacks: edited unit row sets that unit price', h.units[1].price === '110' && h.units[2].price === '28' && h.units[3].price === '9');
   check('applyPacks: Kg=1000 at 110 alone sets gm to 0.11', C.applyPacks(f, [{ size: '1000', price: '110', from: '', unit: 1 }]).units[0].price === '0.11');
@@ -743,6 +743,121 @@ async function ledger() {
     check('no round-off text in ' + f, !/round off/i.test(src) && !src.includes('ರೌಂಡ್ ಆಫ್'));
   }
 }
+
+// ================================================================ item form (agent A): costs, blank unit, transliterate, smallest-pack slab
+{
+  const u = (code, perBase, cost) => ({ ...C.blankUnit(false), code, label: code, perBase, price: '1', cost });
+  const bag = { ...C.blankItemForm(), units: [u('g', '1', ''), u('250g', '250', ''), u('500g', '500', ''), u('kg', '1000', ''), u('bag', '50000', '2700')] };
+  const r = C.costsFromUnit(bag, C.biggestUnitIndex(bag));
+  check('A costs: bag is the biggest unit', C.biggestUnitIndex(bag) === 4);
+  check('A costs: bag 2700 -> g 0.054, 250g 13.5, 500g 27, kg 54', JSON.stringify(r.units.map((x) => x.cost)) === JSON.stringify(['0.054', '13.5', '27', '54', '2700']), JSON.stringify(r.units.map((x) => x.cost)));
+  const soap = { ...C.blankItemForm(), units: [u('pc', '1', ''), u('dz', '12', ''), u('box', '60', '540')] };
+  check('A costs: box 540 of 60 -> pc 9, dz 108', JSON.stringify(C.costsFromUnit(soap, 2).units.map((x) => x.cost)) === JSON.stringify(['9', '108', '540']));
+  check('A costs: from the base unit', JSON.stringify(C.costsFromUnit({ ...soap, units: [u('pc', '1', '9'), soap.units[1], soap.units[2]] }, 0).units.map((x) => x.cost)) === JSON.stringify(['9', '108', '540']));
+  check('A costs: no cost in that unit -> null', C.costsFromUnit(soap, 1) === null && C.costsFromUnit(soap, 9) === null);
+  check('A costs: input left alone', soap.units[0].cost === '');
+  const b = C.blankItemForm();
+  check('A blank form: base unit empty, no Piece', b.units.length === 1 && b.units[0].code === '' && b.units[0].label === '' && b.units[0].perBase === '1' && b.lowUnit === '' && b.defaultUnit === '' && b.sellUnit === '');
+  check('A toKannada: sakkare -> ಸಕ್ಕರೆ', C.toKannada('Sakkare') === 'ಸಕ್ಕರೆ', C.toKannada('Sakkare'));
+  check('A toKannada: vimala -> ವಿಮಲ', C.toKannada('vimala') === 'ವಿಮಲ', C.toKannada('vimala'));
+  check('A toKannada: two words', C.toKannada('akki hittu') === 'ಅಕ್ಕಿ ಹಿತ್ತು', C.toKannada('akki hittu'));
+  check('A toEnglish: ಸಕ್ಕರೆ -> Sakkare', C.toEnglish('ಸಕ್ಕರೆ') === 'Sakkare', C.toEnglish('ಸಕ್ಕರೆ'));
+  check('A toEnglish: ವಿಮಲ -> Vimala', C.toEnglish('ವಿಮಲ') === 'Vimala', C.toEnglish('ವಿಮಲ'));
+  check('A round trip finds the same item', C.searchKey(C.toEnglish('ಎಣ್ಣೆ')) === C.searchKey('enne') && C.searchKey(C.toKannada('enne')) === C.searchKey('ಎಣ್ಣೆ'));
+  const s1 = C.slabsFromPacks([{ size: 500, price: 28 }, { size: 1000, price: 55 }]);
+  check('A smallest pack gets a slab from its size', JSON.stringify(s1.slabs) === JSON.stringify([{ minQty: 500, rate: 0.056 }, { minQty: 1000, rate: 0.055 }]), JSON.stringify(s1.slabs));
+  const s2 = C.slabsFromPacks([{ size: 1, price: 5 }, { size: 24, price: 110 }]);
+  check('A smallest pack from 1: no extra slab', JSON.stringify(s2.slabs) === JSON.stringify([{ minQty: 24, rate: 4.5833 }]), JSON.stringify(s2.slabs));
+  const s3 = C.slabsFromPacks([{ size: 250, price: 14, from: 100 }]);
+  check('A smallest pack at its own from', s3.price === 0.056 && JSON.stringify(s3.slabs) === JSON.stringify([{ minQty: 100, rate: 0.056 }]), JSON.stringify(s3));
+}
+// ================================================================ end item form (agent A)
+
+// ================================================================ purchasing (agent B): carriers, landed cost, lots, sorts, calculator
+{
+  // The delivery charge, shared by value, else by quantity; the shares always add up.
+  const byVal = C.splitCharge([{ qty: 2, value: 300 }, { qty: 10, value: 100 }], 100);
+  check('B: charge shared by value 3:1', byVal[0] === 75 && byVal[1] === 25, JSON.stringify(byVal));
+  const byQty = C.splitCharge([{ qty: 1 }, { qty: 3, value: 50 }], 80);
+  check('B: a line without a value shares by quantity', byQty[0] === 20 && byQty[1] === 60, JSON.stringify(byQty));
+  const thirds = C.splitCharge([{ qty: 1 }, { qty: 1 }, { qty: 1 }], 100);
+  check('B: paise rounding goes to the last line, the sum stays exact', thirds[0] === 33.33 && thirds[2] === 33.34 && Math.abs(thirds.reduce((a, b) => a + b, 0) - 100) < 1e-9, JSON.stringify(thirds));
+  check('B: no charge, no shares', C.splitCharge([{ qty: 1 }], 0)[0] === 0 && C.splitCharge([], 50).length === 0);
+  // A 50 kg bag at ₹2700 with ₹100 of delivery on one bag: ₹2800 a bag, per g 0.056, per kg 56.
+  check('B: landed cost = (cost × qty + share) / qty', C.landedUnitCost(2700, 1, 100) === 2800 && C.landedUnitCost(540, 2, 20) === 550);
+  const bag = [
+    { code: 'g', label: 'g', labelKn: '', perBase: 1, price: 0.06 },
+    { code: 'kg', label: 'Kg', labelKn: '', perBase: 1000, price: 60 },
+    { code: 'bag', label: 'Bag', labelKn: '', perBase: 50000, price: 2900 },
+  ];
+  const uc = C.unitCostsFrom(bag, 'bag', 2800);
+  check('B: other units’ costs from the landed one (per-base × perBase)', uc[0].cost === 0.056 && uc[1].cost === 56 && uc[2].cost === 2800, JSON.stringify(uc.map((u) => u.cost)));
+  const soap = C.unitCostsFrom([{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 10 }, { code: 'dozen', label: 'Dozen', labelKn: '', perBase: 12, price: 115 }, { code: 'box', label: 'Box', labelKn: '', perBase: 60, price: 580 }], 'box', 540);
+  check('B: wheel soap box ₹540 → pc ₹9, dozen ₹108', soap[0].cost === 9 && soap[1].cost === 108 && soap[2].cost === 540, JSON.stringify(soap.map((u) => u.cost)));
+  check('B: an unknown unit changes nothing', C.unitCostsFrom(bag, 'tin', 5) === bag);
+
+  // Lots: first expiring, first out, never refusing.
+  const lots = [
+    { id: 'a', itemId: 'i', placeId: 's', qty: 5, expiry: '2026-12-01', receivedAt: '2026-10-01' },
+    { id: 'b', itemId: 'i', placeId: 's', qty: 5, expiry: '2026-11-01', receivedAt: '2026-10-02' },
+  ];
+  const f = C.consumeFefo(lots, 7);
+  const after = Object.fromEntries(f.after.map((l) => [l.id, l.qty]));
+  check('B: FEFO takes the November lot first, then December', after.b === 0 && after.a === 3 && f.taken[0].lot.id === 'b' && f.taken[0].qty === 5 && f.taken[1].qty === 2, JSON.stringify(f));
+  const over = C.consumeFefo(lots, 50);
+  check('B: selling more than the lots hold never fails', over.after.every((l) => l.qty === 0));
+  const exp = C.expiringWithin([...lots, { id: 'c', itemId: 'j', placeId: 's', qty: 2, expiry: '2026-10-10', receivedAt: '2026-09-01' }, { id: 't', itemId: 'j', placeId: 'transit:transfer 3', qty: 1, expiry: '2026-10-11', receivedAt: '' }, { id: 'z', itemId: 'j', placeId: 's', qty: 0, expiry: '2026-10-12', receivedAt: '' }], '2026-10-20', 15);
+  check('B: expiring in 15 days: expired included, soonest first, none in transit or used up', exp.map((l) => l.id).join() === 'c,b', exp.map((l) => l.id).join());
+  check('B: addDays crosses a month', C.addDays('2026-10-20', 15) === '2026-11-04');
+  const soon = C.soonestExpiry(lots);
+  check('B: soonest expiry per item', soon.get('i') === '2026-11-01');
+
+  // The product list's sorts.
+  const it = (id, nameEn, price, category) => ({ id, nameEn, nameKn: '', category, units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price }], aliases: [], racks: {}, active: true, updatedAt: '' });
+  const list = [it('x', 'Sugar', 45, 'Grocery'), it('y', 'Atta', 60), it('z', 'Biscuit', 10, 'Bakery')];
+  const facts = {
+    total: new Map([['x', 5], ['y', 50], ['z', 1]]),
+    sold: new Map([['x', 30], ['z', 90]]),
+    expiry: new Map([['y', '2026-11-02'], ['x', '2026-12-01']]),
+    price: (i) => C.sellPriceOf(i).rate,
+  };
+  const order = (by) => C.sortItems(list, by, facts).map((i) => i.id).join('');
+  check('B: sort by name', order('name') === 'yzx', order('name'));
+  check('B: sort by price, low to high', order('price') === 'zxy', order('price'));
+  check('B: sort by stock, lowest first', order('stock') === 'zxy', order('stock'));
+  check('B: sort by highest selling (30 days)', order('selling') === 'zxy', order('selling'));
+  check('B: sort by category, none last', order('category') === 'zxy', order('category'));
+  check('B: sort by expiry, soonest first, none last', order('expiry') === 'yxz', order('expiry'));
+  check('B: every sort is offered', C.ITEM_SORTS.join() === 'name,price,stock,selling,category,expiry');
+
+  // The calculator: a parser, never eval.
+  const cases = [
+    ['2+3*4', 14],
+    ['(2+3)*4', 20],
+    ['540 ÷ 60', 9],
+    ['9 × 12', 108],
+    ['10 − 2.5', 7.5],
+    ['0.1+0.2', 0.3],
+    ['200 + 10%', 220],
+    ['200 - 10%', 180],
+    ['200 × 10%', 20],
+    ['50%', 0.5],
+    ['-3 + 5', 2],
+    ['2700/50000', 0.054],
+    ['1,250 + 50', 1300],
+    ['.5*4', 2],
+  ];
+  for (const [e, want] of cases) check('B: calc ' + e + ' = ' + want, C.calc(e) === want, String(C.calc(e)));
+  for (const bad of ['', '2+', '1/0', '2**3', 'alert(1)', '(1+2', '1..2', 'process.exit()'])
+    check('B: calc refuses ' + JSON.stringify(bad), C.calc(bad) === null, String(C.calc(bad)));
+  const calcSrc = fs.readFileSync(path.join(__dirname, '..', 'core', 'src', 'purchasing.ts'), 'utf8') + fs.readFileSync(path.join(__dirname, '..', 'web', 'src', 'components', 'Calculator.tsx'), 'utf8');
+  check('B: no eval or Function in the calculator', !/\beval\s*\(|new Function/.test(calcSrc));
+  const help = fs.readFileSync(path.join(__dirname, '..', 'web', 'src', 'pages', 'Help.tsx'), 'utf8');
+  check('B: Help tells about the Samsung handwriting keyboard, in both languages', help.includes('Samsung Keyboard to handwriting mode') && help.includes('ಕೈಬರಹ ಮೋಡ್'));
+  const inv = fs.readFileSync(path.join(__dirname, '..', 'web', 'src', 'pages', 'admin', 'Inventory.tsx'), 'utf8');
+  check('B: the product list has no per-place columns, keeps Total and Price', !inv.includes('locs.map((l) => (\n                  <th') && inv.includes("t('stock.total')") && inv.includes('inv-price'));
+}
+// ================================================================ end purchasing (agent B)
 
 ledger()
   .catch((err) => {

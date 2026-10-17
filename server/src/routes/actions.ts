@@ -2,6 +2,11 @@ import { Router } from 'express';
 import { z } from 'zod';
 import {
   findUnit,
+  landedUnitCost,
+  splitCharge,
+  unitCostsFrom,
+  type CarrierTrip,
+  type Lot,
   poStage,
   searchKey,
   toBase,
@@ -279,19 +284,57 @@ actionRoutes.post(
 
 const supplierBody = z.object({
   name: z.string().trim().min(1, 'Give the supplier a name').max(80),
+  /** The company's phone: optional. */
   phone: z.string().trim().max(20).default(''),
   address: z.string().trim().max(200).optional(),
   notes: z.string().trim().max(300).optional(),
+  gst: z.string().trim().max(20).optional(),
+  contacts: z
+    .array(z.object({ name: z.string().trim().min(1, 'Give each contact a name').max(80), role: z.string().trim().max(40).optional(), phone: z.string().trim().max(20).optional() }))
+    .max(20)
+    .optional(),
+  /** The items they supply. Kept on each item (`item.suppliers`), so both sides always agree. */
+  itemIds: z.array(z.string()).max(5000).optional(),
   active: z.boolean().optional(),
 });
+
+/** The optional fields, written only when given, blank ones dropped. */
+function supplierExtras(b: z.infer<typeof supplierBody>, old?: Supplier): Partial<Supplier> {
+  const out: Partial<Supplier> = {};
+  const gst = b.gst ?? old?.gst;
+  if (gst) out.gst = gst.toUpperCase();
+  const contacts = (b.contacts ?? old?.contacts ?? []).map((c) => ({ name: c.name, ...(c.role ? { role: c.role } : {}), ...(c.phone ? { phone: c.phone } : {}) }));
+  if (contacts.length) out.contacts = contacts;
+  return out;
+}
+
+/** Item <-> supplier: this supplier ends up on exactly the given items' supplier lists. */
+async function syncSupplierItems(supplierId: string, itemIds: string[] | undefined): Promise<boolean> {
+  if (!itemIds) return false;
+  const repo = getRepo();
+  const want = new Set(itemIds);
+  let changed = false;
+  for (const it of await repo.listItems()) {
+    const has = (it.suppliers ?? []).includes(supplierId);
+    if (has === want.has(it.id)) continue;
+    const list = has ? it.suppliers!.filter((x) => x !== supplierId) : [...(it.suppliers ?? []), supplierId];
+    if (list.length) it.suppliers = list;
+    else delete it.suppliers;
+    it.updatedAt = now();
+    await repo.saveItem(it);
+    changed = true;
+  }
+  return changed;
+}
 
 actionRoutes.post(
   '/admin/suppliers',
   admin,
   handler(async (req, res) => {
     const b = supplierBody.parse(req.body);
-    const s: Supplier = { id: newId('sup'), name: b.name, phone: b.phone, ...(b.address ? { address: b.address } : {}), ...(b.notes ? { notes: b.notes } : {}), active: true };
+    const s: Supplier = { id: newId('sup'), name: b.name, phone: b.phone, ...(b.address ? { address: b.address } : {}), ...(b.notes ? { notes: b.notes } : {}), ...supplierExtras(b), active: true };
     await getRepo().putDoc('suppliers', s);
+    if (await syncSupplierItems(s.id, b.itemIds)) emit('items');
     res.status(201).json(s);
   }),
 );
@@ -304,9 +347,22 @@ actionRoutes.put(
     const repo = getRepo();
     const old = await repo.getDoc<Supplier>('suppliers', String(req.params.id));
     if (!old) throw new HttpError(404, 'No such supplier');
-    const s: Supplier = { ...old, name: b.name, phone: b.phone, ...(b.address != null ? { address: b.address } : {}), ...(b.notes != null ? { notes: b.notes } : {}), active: b.active ?? old.active };
+    const { gst: _g, contacts: _c, ...rest } = old;
+    const s: Supplier = { ...rest, name: b.name, phone: b.phone, ...(b.address != null ? { address: b.address } : {}), ...(b.notes != null ? { notes: b.notes } : {}), ...supplierExtras(b, old), active: b.active ?? old.active };
     await repo.putDoc('suppliers', s);
+    if (await syncSupplierItems(s.id, b.itemIds)) emit('items');
     res.json(s);
+  }),
+);
+
+/** The items a supplier supplies, read from the items themselves. */
+actionRoutes.get(
+  '/admin/suppliers/:id/items',
+  admin,
+  handler(async (req, res) => {
+    const id = String(req.params.id);
+    const items = (await getRepo().listItems()).filter((i) => (i.suppliers ?? []).includes(id));
+    res.json(items.map((i) => ({ id: i.id, nameEn: i.nameEn, nameKn: i.nameKn })));
   }),
 );
 
@@ -385,6 +441,11 @@ actionRoutes.post(
         /** Where the goods went, when not where the order said. */
         to: z.string().optional(),
         updateCost: z.boolean().default(false),
+        /** The delivery charge to spread over what arrived: typed in, or taken from a carrier trip. */
+        delivery: z.number().min(0).max(1e7).optional(),
+        tripId: z.string().optional(),
+        /** Per item, an optional expiry date: the goods become a lot, sold first-expiring-first. */
+        expiry: z.record(z.string(), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expiry as a date')).optional(),
       })
       .parse(req.body ?? {});
     const p = await loadPo(String(req.params.id));
@@ -397,22 +458,41 @@ actionRoutes.post(
     const to = body.to ?? p.to;
     if (!locs.some((l) => l.id === to && l.active)) throw new HttpError(400, 'Choose where the goods go');
     const moves: StockMove[] = [];
-    const received: { itemId: string; qty: number; cost: number }[] = [];
+    const received: { itemId: string; qty: number; cost: number; delivery?: number; landed?: number; expiry?: string }[] = [];
     const costChanged = new Set<string>();
-    for (const l of p.lines) {
+    // The delivery charge: typed in, else the linked carrier trip's.
+    let trip: CarrierTrip | null = null;
+    if (body.tripId) {
+      trip = await repo.getDoc<CarrierTrip>('trips', body.tripId);
+      if (!trip) throw new HttpError(404, 'No such trip');
+      if (trip.poId && trip.poId !== p.id) throw new HttpError(409, 'That trip is already linked to another receipt');
+    }
+    const charge = body.delivery ?? trip?.charge ?? 0;
+    const got = p.lines.map((l) => {
       const g = body.got?.[l.itemId];
-      const qty = g?.qty ?? l.qty;
-      const cost = g?.cost ?? l.cost;
-      if (qty > l.qty) throw new HttpError(400, 'More received than ordered: count again, or order the rest separately.');
-      received.push({ itemId: l.itemId, qty, cost });
+      return { l, qty: g?.qty ?? l.qty, cost: g?.cost ?? l.cost };
+    });
+    for (const g of got) if (g.qty > g.l.qty) throw new HttpError(400, 'More received than ordered: count again, or order the rest separately.');
+    // Shared by value (qty x cost) when every line has a cost, else by quantity; nothing to lines that did not come.
+    const arrived = got.filter((g) => g.qty > 0);
+    const shareList = splitCharge(arrived.map((g) => ({ qty: g.qty, value: g.qty * g.cost })), charge);
+    const shareOf = new Map(arrived.map((g, i) => [g.l.itemId, shareList[i]!]));
+    const lots: Lot[] = [];
+    for (const { l, qty, cost } of got) {
+      const share = shareOf.get(l.itemId) ?? 0;
+      const landed = landedUnitCost(cost, qty, share);
+      const expiry = body.expiry?.[l.itemId];
+      received.push({ itemId: l.itemId, qty, cost, ...(share ? { delivery: share, landed } : {}), ...(expiry ? { expiry } : {}) });
       const item = items.get(l.itemId);
       if (!item || qty === 0) continue;
-      moves.push({ id: newId('mv'), key: 'po:' + p.no + ':' + l.itemId, at: now(), kind: 'purchase', itemId: l.itemId, to, qty: toBase(item, l.unit, qty), ref: 'order ' + p.no, by: req.person!.id, ...(qty < l.qty ? { note: l.qty - qty + ' ' + l.unit + ' short' } : {}) });
-      // The price paid becomes the item's cost for that unit, when the admin says so.
+      const baseQty = toBase(item, l.unit, qty);
+      moves.push({ id: newId('mv'), key: 'po:' + p.no + ':' + l.itemId, at: now(), kind: 'purchase', itemId: l.itemId, to, qty: baseQty, ref: 'order ' + p.no, by: req.person!.id, ...(qty < l.qty ? { note: l.qty - qty + ' ' + l.unit + ' short' } : {}) });
+      if (expiry) lots.push({ id: newId('lot'), itemId: l.itemId, placeId: to, qty: baseQty, expiry, receivedAt: now(), ref: 'order ' + p.no });
+      // The landed cost becomes the item's last cost, every other unit worked out from it, when the admin says so.
       if (body.updateCost) {
-        const u = item.units.find((x) => x.code === l.unit);
-        if (u && u.cost !== cost) {
-          u.cost = cost;
+        const units = unitCostsFrom(item.units, l.unit, landed);
+        if (JSON.stringify(units) !== JSON.stringify(item.units)) {
+          item.units = units;
           item.updatedAt = now();
           costChanged.add(item.id);
         }
@@ -425,6 +505,9 @@ actionRoutes.post(
     p.times.received = now();
     await repo.putDoc('pos', p);
     await post(repo, moves);
+    // Lots after the posting, so the purchase itself never takes from them.
+    if (lots.length) await repo.putDocs('lots', lots);
+    if (trip) await repo.putDoc('trips', { ...trip, poId: p.id });
     emit('pos', {}, p.id);
     if (costChanged.size) emit('items');
     res.json({ ok: true });

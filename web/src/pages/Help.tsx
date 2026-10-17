@@ -145,6 +145,34 @@ export function HelpPage() {
       <p className="muted">
         {bi('Every screen has a “?” button at the top that plays its tour again.', 'ಪ್ರತಿ ಪುಟದ ಮೇಲೆ “?” ಗುಂಡಿ ಇದೆ, ಅದು ಆ ಪುಟದ ಪರಿಚಯ ಮತ್ತೆ ತೋರಿಸುತ್ತದೆ.')}
       </p>
+      {/* purchasing (B): tips */}
+      <div className="card help-tips" data-help="tips">
+        <h2 className="subtitle m-0">{bi('Tips', 'ಸಲಹೆಗಳು')}</h2>
+        <ul className="m-0">
+          <li data-help="handwriting">
+            {bi(
+              'Writing with the S Pen on the Samsung tablet: switch the Samsung Keyboard to handwriting mode (tap ✍ on the keyboard toolbar). Then you can write in any box here.',
+              'ಸ್ಯಾಮ್‌ಸಂಗ್ ಟ್ಯಾಬ್ಲೆಟ್‌ನಲ್ಲಿ S Pen ನಿಂದ ಬರೆಯಲು: ಸ್ಯಾಮ್‌ಸಂಗ್ ಕೀಬೋರ್ಡ್ ಅನ್ನು ಕೈಬರಹ ಮೋಡ್‌ಗೆ ಬದಲಿಸಿ (ಕೀಬೋರ್ಡ್ ಮೇಲಿನ ಸಾಲಿನಲ್ಲಿ ✍ ಒತ್ತಿ). ನಂತರ ಇಲ್ಲಿನ ಯಾವ ಬಾಕ್ಸ್‌ನಲ್ಲೂ ಬರೆಯಬಹುದು.',
+            )}
+          </li>
+          {role === 'admin' && (
+            <li>
+              {bi(
+                'For a quick sum, tap 🧮 at the top. “Put in box” writes the answer into the number box you were in.',
+                'ಸಣ್ಣ ಲೆಕ್ಕಕ್ಕೆ ಮೇಲಿನ 🧮 ಒತ್ತಿ. “ಬಾಕ್ಸ್‌ಗೆ ಹಾಕಿ” ಉತ್ತರವನ್ನು ನೀವು ಇದ್ದ ಸಂಖ್ಯೆ ಬಾಕ್ಸ್‌ಗೆ ಬರೆಯುತ್ತದೆ.',
+              )}
+            </li>
+          )}
+          {role === 'admin' && (
+            <li>
+              {bi(
+                'Goods carriers are under Buy & move → Carriers. Add each trip and its charge; link it when you receive the order, and the charge goes into the items’ cost.',
+                'ಸಾಮಾನು ಸಾಗಿಸುವವರು ಖರೀದಿ ಮತ್ತು ಸಾಗಣೆ → ಸಾಗಣೆದಾರರು ಅಡಿಯಲ್ಲಿ. ಪ್ರತಿ ಓಡಾಟ ಮತ್ತು ಅದರ ಬಾಡಿಗೆ ಸೇರಿಸಿ; ಆರ್ಡರ್ ಬಂದಾಗ ಜೋಡಿಸಿ, ಬಾಡಿಗೆ ಸಾಮಾನಿನ ಖರೀದಿ ಬೆಲೆಗೆ ಸೇರುತ್ತದೆ.',
+              )}
+            </li>
+          )}
+        </ul>
+      </div>
       {mine.map((s) => (
         <section className="card help-section" key={s.tour} id={'help-' + s.tour}>
           <div className="bar between">

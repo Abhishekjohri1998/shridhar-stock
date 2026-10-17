@@ -1,4 +1,5 @@
-import { describeQty, lowAtOf, lowBase, totalQty, type StockLevel, type StockMove } from '@stock/core';
+import { consumeFefo, describeQty, lowAtOf, lowBase, totalQty, type Lot, type StockLevel, type StockMove } from '@stock/core';
+import { newId } from './store/types';
 import { emit } from './events';
 import type { InvRepo } from './store/types';
 
@@ -31,12 +32,53 @@ export async function post(repo: InvRepo, moves: StockMove[]): Promise<StockMove
     const places = [...new Set(posted.flatMap((m) => [m.from, m.to]).filter((x): x is string => !!x))];
     emit('stock', { locationIds: places });
     try {
+      await moveLots(repo, posted);
+    } catch (err) {
+      // Lots only say what expires when: a failure here never holds up a sale.
+      console.error('[stock] could not update expiry lots', err);
+    }
+    try {
       await noteLow(repo, posted);
     } catch (err) {
       console.error('[stock] could not check for running low', err);
     }
   }
   return posted;
+}
+
+/**
+ * Expiry lots follow the stock (purchasing, B): anything leaving a place comes out of its lots
+ * earliest expiry first. A transfer carries its lots "in transit" under the transfer's ref and
+ * puts them down where it is received, as much as arrived; a short arrival drops the rest.
+ * Stock with no lot is simply not tracked, so nothing is ever refused here.
+ */
+async function moveLots(repo: InvRepo, posted: StockMove[]): Promise<void> {
+  for (const m of posted) {
+    if (m.from) {
+      const lots = await repo.listDocs<Lot>('lots', { itemId: m.itemId, placeId: m.from });
+      if (!lots.length) continue;
+      const { after, taken } = consumeFefo(lots, m.qty);
+      await saveLots(repo, after, lots);
+      if (m.kind === 'transfer_out' && taken.length)
+        await repo.putDocs<Lot>('lots', taken.map((t) => ({ ...t.lot, id: newId('lot'), placeId: 'transit:' + m.ref, qty: t.qty })));
+    }
+    if (m.to && m.kind === 'transfer_in') {
+      const transit = await repo.listDocs<Lot>('lots', { itemId: m.itemId, placeId: 'transit:' + m.ref });
+      if (!transit.length) continue;
+      const { taken } = consumeFefo(transit, m.qty);
+      for (const l of transit) await repo.deleteDoc('lots', l.id);
+      if (taken.length) await repo.putDocs<Lot>('lots', taken.map((t) => ({ ...t.lot, id: newId('lot'), placeId: m.to!, qty: t.qty })));
+    }
+  }
+}
+
+/** Writes the lots that changed; a lot used up is removed. */
+async function saveLots(repo: InvRepo, after: Lot[], before: Lot[]): Promise<void> {
+  const was = new Map(before.map((l) => [l.id, l.qty]));
+  for (const l of after) {
+    if (l.qty <= 1e-9) await repo.deleteDoc('lots', l.id);
+    else if (was.get(l.id) !== l.qty) await repo.putDoc('lots', l);
+  }
 }
 
 /** One item that went below its level, for the Home "Needs you now" card. */

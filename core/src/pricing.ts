@@ -89,7 +89,8 @@ export const packRate = (p: { size: number; price: number }): number => round4(p
 
 /**
  * The base unit's price and slabs from pack sizes and their prices. The smallest pack's rate is the
- * base price; every other pack becomes a slab from its `from` (or its size). Rows without a size
+ * base price; every other pack becomes a slab from its `from` (or its size). The smallest pack also
+ * gets a slab from its own `from` when that is above 1, so it shows in the ranges too. Rows without a size
  * above 0 or a price of 0 or more are skipped. Returns null when no row is usable.
  */
 export function slabsFromPacks(packs: PackPrice[]): PackSlabs | null {
@@ -99,13 +100,15 @@ export function slabsFromPacks(packs: PackPrice[]): PackSlabs | null {
   if (!ok.length) return null;
   const price = packRate(ok[0]!);
   const byMin = new Map<number, number>();
-  for (const p of ok.slice(1)) {
+  ok.forEach((p, idx) => {
     const from = p.from != null && Number.isFinite(p.from) && p.from > 0 ? p.from : p.size;
+    // The smallest pack's rate is already the base price; it gets its own slab only from above 1.
+    if (idx === 0 && !(from > 1)) return;
     const rate = packRate(p);
     const had = byMin.get(from);
     // Two packs from the same quantity: the cheaper rate wins.
     byMin.set(from, had == null ? rate : Math.min(had, rate));
-  }
+  });
   const slabs = [...byMin.entries()].sort((a, b) => a[0] - b[0]).map(([minQty, rate]) => ({ minQty, rate }));
   const unit = { code: 'base', label: '', labelKn: '', perBase: 1, price, slabs } as ItemUnit;
   const quotes = ok.map((p) => ({ size: p.size, rate: packRate(p), amount: priceFor({ units: [unit] }, 'base', p.size).amount }));

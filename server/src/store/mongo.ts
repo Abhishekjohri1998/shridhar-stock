@@ -134,6 +134,10 @@ export const DOC_INDEXES: Partial<Record<DocCollection, Record<string, 1 | -1>[]
   pos: [{ status: 1, at: -1 }, { at: -1 }],
   // Deliveries: the admin's live list by status, and each worker's own.
   deliveries: [{ status: 1, at: -1 }, { personId: 1, status: 1 }, { at: -1 }],
+  // Purchasing (B): trips by date and carrier, and the one linked to a receipt; lots by item and
+  // place (FEFO on every sale) and by expiry (Home's "expiring soon", the list's expiry sort).
+  trips: [{ date: -1 }, { carrierId: 1, date: -1 }, { poId: 1 }],
+  lots: [{ itemId: 1, placeId: 1 }, { expiry: 1 }, { placeId: 1 }],
 };
 function docSchemaFor(col: DocCollection): Schema {
   const s = docSchema.clone();

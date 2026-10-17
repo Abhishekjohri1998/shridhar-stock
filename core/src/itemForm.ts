@@ -1,7 +1,7 @@
 import { searchKey } from './kannada';
 import { lowAtOf, lowAtPlaceOf } from './stockTotals';
 import { defaultUnitOf, sellUnitOf } from './units';
-import { round2 } from './money';
+import { round2, round4 } from './money';
 import { slabsFromPacks } from './pricing';
 import type { Item, ItemInput } from './types';
 
@@ -43,11 +43,12 @@ export interface ItemForm {
   suppliers: string[];
 }
 
+/** An empty unit. A new item's base unit starts blank too: no "Piece" the shop did not choose. */
 export function blankUnit(base: boolean): UnitForm {
   return {
-    code: base ? 'pc' : '',
-    label: base ? 'Piece' : '',
-    labelKn: base ? 'ಪೀಸ್' : '',
+    code: '',
+    label: '',
+    labelKn: '',
     perBase: base ? '1' : '',
     price: '',
     min: '',
@@ -58,7 +59,7 @@ export function blankUnit(base: boolean): UnitForm {
 }
 
 export function blankItemForm(): ItemForm {
-  return { nameEn: '', nameKn: '', category: '', units: [blankUnit(true)], aliases: '', racks: {}, lowQty: '', lowUnit: 'pc', lowPlace: {}, defaultUnit: '', sellUnit: '', suppliers: [] };
+  return { nameEn: '', nameKn: '', category: '', units: [blankUnit(true)], aliases: '', racks: {}, lowQty: '', lowUnit: '', lowPlace: {}, defaultUnit: '', sellUnit: '', suppliers: [] };
 }
 
 const text = (n: number | undefined) => (n == null ? '' : String(n));
@@ -239,4 +240,36 @@ export function applyPacks(f: ItemForm, rows: PackRow[]): ItemForm | null {
     return row && price >= 0 ? { ...u, price: row.price.trim() } : u;
   });
   return { ...f, units };
+}
+
+/**
+ * Every unit's cost worked out from one unit's cost, usually the biggest one bought:
+ * a 50 kg Bag (50000 g) at ₹2700 gives 0.054 a g (round4), then 250 g 13.5, 1 kg 54 (round2).
+ * Null when that unit has no usable cost or size. The chosen unit keeps its cost as typed.
+ */
+export function costsFromUnit(f: ItemForm, unitIndex: number): ItemForm | null {
+  const from = f.units[unitIndex];
+  if (!from) return null;
+  const cost = numOf(from.cost);
+  const size = unitIndex === 0 ? 1 : numOf(from.perBase);
+  if (!(cost >= 0) || !(size > 0)) return null;
+  const perBase = round4(cost / size);
+  const units = f.units.map((u, i) => {
+    if (i === unitIndex) return u;
+    if (i === 0) return { ...u, cost: String(perBase) };
+    const n = numOf(u.perBase);
+    return n > 0 ? { ...u, cost: String(round2((cost / size) * n)) } : u;
+  });
+  return { ...f, units };
+}
+
+/** The unit with the most base units in it (index), for the cost helper's first choice. */
+export function biggestUnitIndex(f: ItemForm): number {
+  let best = 0;
+  let bestSize = 1;
+  f.units.forEach((u, i) => {
+    const n = i === 0 ? 1 : numOf(u.perBase);
+    if (n > bestSize) { best = i; bestSize = n; }
+  });
+  return best;
 }

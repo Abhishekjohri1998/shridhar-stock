@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { formatRate, formatRupees, pickName, poStage, type Item, type ItemSupplierRow, type Location, type PurchaseOrder, type Refill, type Supplier } from '@stock/core';
+import { formatRate, formatRupees, landedUnitCost, pickName, poStage, splitCharge, type CarrierTrip, type Item, type SupplierContact, type ItemSupplierRow, type Location, type PurchaseOrder, type Refill, type Supplier } from '@stock/core';
 import { api, http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
@@ -11,7 +11,7 @@ import { Empty, Loading, Money, Select, Status, useBi, when, Table } from '../..
 type ItemBrief = Pick<Item, 'id' | 'nameEn' | 'nameKn' | 'defaultUnit'> & { units: { code: string; label: string; labelKn: string; perBase: number; cost?: number }[] };
 
 interface Page {
-  orders: (PurchaseOrder & { received?: { itemId: string; qty: number; cost: number }[] })[];
+  orders: (PurchaseOrder & { received?: { itemId: string; qty: number; cost: number; delivery?: number; landed?: number; expiry?: string }[] })[];
   items: ItemBrief[];
   open: number;
   total: number;
@@ -166,6 +166,23 @@ function OrderCard({
   const [receiving, setReceiving] = useState(false);
   const [to, setTo] = useState(p.to);
   const [updateCost, setUpdateCost] = useState(true);
+  // Delivery (B): a charge typed in, or a carrier trip linked, spread into the landed cost.
+  const [delivery, setDelivery] = useState('');
+  const [tripId, setTripId] = useState('');
+  const [trips, setTrips] = useState<CarrierTrip[]>([]);
+  const [expiry, setExpiry] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!receiving) return;
+    http
+      .get<CarrierTrip[]>('/admin/trips/open')
+      .then((t) => setTrips(t.sort((a, b) => Number(b.supplierId === p.supplierId) - Number(a.supplierId === p.supplierId))))
+      .catch(() => undefined);
+  }, [receiving, p.supplierId]);
+  const trip = trips.find((t) => t.id === tripId);
+  const charge = delivery.trim() !== '' ? Number(delivery) || 0 : (trip?.charge ?? 0);
+  const arrivedNow = p.lines.map((l) => ({ itemId: l.itemId, qty: Number(got[l.itemId]?.qty) || 0, cost: Number(got[l.itemId]?.cost) || 0 })).filter((g) => g.qty > 0);
+  const shareList = splitCharge(arrivedNow.map((g) => ({ qty: g.qty, value: g.qty * g.cost })), charge);
+  const landedOf = new Map(arrivedNow.map((g, i) => [g.itemId, landedUnitCost(g.cost, g.qty, shareList[i]!)]));
   const total = p.lines.reduce((s, l) => s + l.qty * l.cost, 0);
   const rec = new Map((p.received ?? []).map((r) => [r.itemId, r]));
   const placeOf = (id: string) => {
@@ -213,11 +230,22 @@ function OrderCard({
                   <td>
                     <input inputMode="decimal" value={got[l.itemId]!.qty} onChange={(e) => setGot({ ...got, [l.itemId]: { ...got[l.itemId]!, qty: e.target.value } })} className="in-qty" aria-label={bi('Arrived', 'ಬಂದದ್ದು')} />{' '}
                     ₹<input inputMode="decimal" value={got[l.itemId]!.cost} onChange={(e) => setGot({ ...got, [l.itemId]: { ...got[l.itemId]!, cost: e.target.value } })} className="in-price" aria-label={bi('Cost', 'ಬೆಲೆ')} />
+                    {charge > 0 && landedOf.has(l.itemId) && (
+                      <div className="muted landed-note">
+                        {bi('with delivery', 'ಸಾಗಣೆ ಸೇರಿ')} {formatRate(landedOf.get(l.itemId)!)} / {unitWord(l.itemId, l.unit)}
+                      </div>
+                    )}
+                    <label className="expiry-in">
+                      <span className="muted">{bi('Expiry (optional)', 'ಅವಧಿ ಮುಗಿಯುವ ದಿನ (ಬೇಕಿದ್ದರೆ)')}</span>
+                      <input type="date" value={expiry[l.itemId] ?? ''} onChange={(e) => setExpiry({ ...expiry, [l.itemId]: e.target.value })} />
+                    </label>
                   </td>
                 )}
                 {!receiving && stage === 'received' && (
                   <td className={r && r.qty < l.qty ? 'qty-neg' : ''}>
                     {r ? r.qty + ' ' + unitWord(l.itemId, l.unit) + (r.cost !== l.cost ? ' @ ' + formatRate(r.cost) : '') : '—'}
+                    {r?.landed != null && <div className="muted">{bi('landed', 'ಸಾಗಣೆ ಸೇರಿ')} {formatRate(r.landed)}</div>}
+                    {r?.expiry && <div className="muted">{bi('expires', 'ಅವಧಿ')} {r.expiry}</div>}
                   </td>
                 )}
               </tr>
@@ -235,6 +263,19 @@ function OrderCard({
             <input type="checkbox" checked={updateCost} onChange={(e) => setUpdateCost(e.target.checked)} />
             {bi('Use these as the items’ cost', 'ಇದನ್ನೇ ಖರೀದಿ ಬೆಲೆ ಮಾಡಿ')}
           </label>
+          <label className="field">
+            <span>{bi('Carrier trip (delivery charge)', 'ಸಾಗಣೆ ಓಡಾಟ (ಬಾಡಿಗೆ)')}</span>
+            <Select
+              value={tripId}
+              onChange={setTripId}
+              aria-label={bi('Carrier trip', 'ಸಾಗಣೆ ಓಡಾಟ')}
+              options={[{ value: '', label: bi('None', 'ಇಲ್ಲ') }, ...trips.map((t) => ({ value: t.id, label: t.date + ' · ₹' + t.charge, hint: t.supplierId === p.supplierId ? bi('this supplier', 'ಇದೇ ಸರಬರಾಜುದಾರ') : undefined }))]}
+            />
+          </label>
+          <label className="field">
+            <span>{bi('Or delivery charge ₹', 'ಅಥವಾ ಸಾಗಣೆ ಬಾಡಿಗೆ ₹')}</span>
+            <input inputMode="decimal" value={delivery} onChange={(e) => setDelivery(e.target.value)} placeholder={trip ? String(trip.charge) : '0'} />
+          </label>
         </div>
       )}
       <div className="bar mt-8">
@@ -246,7 +287,14 @@ function OrderCard({
               onClick={() =>
                 act(
                   '/admin/pos/' + p.id + '/receive',
-                  { updateCost, to, got: Object.fromEntries(Object.entries(got).map(([k, v]) => [k, { qty: Number(v.qty) || 0, cost: Number(v.cost) || 0 }])) },
+                  {
+                    updateCost,
+                    to,
+                    got: Object.fromEntries(Object.entries(got).map(([k, v]) => [k, { qty: Number(v.qty) || 0, cost: Number(v.cost) || 0 }])),
+                    ...(tripId ? { tripId } : {}),
+                    ...(delivery.trim() !== '' ? { delivery: Number(delivery) || 0 } : {}),
+                    expiry: Object.fromEntries(Object.entries(expiry).filter(([, v]) => /^\d{4}-\d{2}-\d{2}$/.test(v))),
+                  },
                   placeOf(to) + ': ' + p.lines.map((l) => briefName(items.get(l.itemId), l.itemId, lang) + ' +' + (Number(got[l.itemId]?.qty) || 0) + ' ' + unitWord(l.itemId, l.unit)).join(', '),
                 )
               }
@@ -275,7 +323,7 @@ function OrderCard({
 }
 
 /** The server's item search, a moment after typing stops. */
-function useItemSearch(q: string) {
+export function useItemSearch(q: string) {
   const [found, setFound] = useState<Item[]>([]);
   useEffect(() => {
     const text = q.trim();
@@ -493,6 +541,25 @@ function Suppliers({ sups, onDone }: { sups: Supplier[]; onDone: () => void }) {
             </a>
           )}
           {!s.active && <span className="pill bad"> {bi('Switched off', 'ನಿಲ್ಲಿಸಲಾಗಿದೆ')}</span>}
+          {s.gst && <span className="muted"> · GST {s.gst}</span>}
+          {(s.contacts ?? []).length > 0 && (
+            <div className="muted">
+              {s.contacts!.map((c, i) => (
+                <span key={i} className="supplier-contact">
+                  {c.name}
+                  {c.role && ' (' + c.role + ')'}
+                  {c.phone && (
+                    <>
+                      {' '}
+                      <a href={'tel:' + c.phone} onClick={(e) => e.stopPropagation()}>
+                        {c.phone}
+                      </a>
+                    </>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
           {s.notes && <div className="muted">{s.notes}</div>}
         </div>
       ))}
@@ -500,16 +567,41 @@ function Suppliers({ sups, onDone }: { sups: Supplier[]; onDone: () => void }) {
   );
 }
 
+type ItemPick = { id: string; nameEn: string; nameKn: string };
+
 function SupplierForm({ s, onDone }: { s: Supplier | null; onDone: () => void }) {
   const bi = useBi();
+  const { lang } = useSession();
   const [name, setName] = useState(s?.name ?? '');
   const [phone, setPhone] = useState(s?.phone ?? '');
+  const [gst, setGst] = useState(s?.gst ?? '');
   const [notes, setNotes] = useState(s?.notes ?? '');
+  const [contacts, setContacts] = useState<SupplierContact[]>(s?.contacts ?? []);
+  // Items supplied: read from the items, saved back onto them, so the item page agrees.
+  const [supplied, setSupplied] = useState<ItemPick[] | null>(s ? null : []);
+  useEffect(() => {
+    if (!s) return;
+    http
+      .get<ItemPick[]>('/admin/suppliers/' + s.id + '/items')
+      .then(setSupplied)
+      .catch(() => setSupplied([]));
+  }, [s]);
+  const [q, setQ] = useState('');
+  const found = useItemSearch(q).filter((i) => !(supplied ?? []).some((x) => x.id === i.id));
   const [err, setErr] = useState('');
+  const setContact = (i: number, patch: Partial<SupplierContact>) => setContacts(contacts.map((c, j) => (j === i ? { ...c, ...patch } : c)));
   const save = async (active?: boolean) => {
     setErr('');
     try {
-      const body = { name, phone, notes, ...(active != null ? { active } : {}) };
+      const body = {
+        name,
+        phone,
+        gst,
+        notes,
+        contacts: contacts.filter((c) => c.name.trim()),
+        ...(supplied ? { itemIds: supplied.map((i) => i.id) } : {}),
+        ...(active != null ? { active } : {}),
+      };
       if (s) await http.put('/admin/suppliers/' + s.id, body);
       else await http.post('/admin/suppliers', body);
       onDone();
@@ -522,20 +614,77 @@ function SupplierForm({ s, onDone }: { s: Supplier | null; onDone: () => void })
       {err && <div className="msg err">{err}</div>}
       <div className="grid2">
         <label className="field">
-          <span>{bi('Name', 'ಹೆಸರು')}</span>
+          <span>{bi('Company name', 'ಕಂಪನಿ ಹೆಸರು')}</span>
           <input value={name} onChange={(e) => setName(e.target.value)} />
         </label>
         <label className="field">
-          <span>{bi('Phone', 'ಫೋನ್')}</span>
+          <span>{bi('Company phone (optional)', 'ಕಂಪನಿ ಫೋನ್ (ಬೇಕಿದ್ದರೆ)')}</span>
           <input inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
         </label>
+        <label className="field">
+          <span>{bi('GST (optional)', 'ಜಿಎಸ್‌ಟಿ (ಬೇಕಿದ್ದರೆ)')}</span>
+          <input value={gst} onChange={(e) => setGst(e.target.value)} placeholder="29ABCDE1234F1Z5" />
+        </label>
+        <label className="field">
+          <span>{bi('Notes', 'ಟಿಪ್ಪಣಿ')}</span>
+          <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={bi('When they come, how they deliver', 'ಯಾವಾಗ ಬರುತ್ತಾರೆ, ಹೇಗೆ ತಲುಪಿಸುತ್ತಾರೆ')} />
+        </label>
       </div>
-      <label className="field">
-        <span>{bi('Notes', 'ಟಿಪ್ಪಣಿ')}</span>
-        <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={bi('What they supply, when they come', 'ಏನು ಕೊಡುತ್ತಾರೆ, ಯಾವಾಗ ಬರುತ್ತಾರೆ')} />
-      </label>
+      <div className="field">
+        <span>{bi('Contact people', 'ಸಂಪರ್ಕ ವ್ಯಕ್ತಿಗಳು')}</span>
+        {contacts.map((c, i) => (
+          <div className="bar supplier-contact-row" key={i}>
+            <input className="grow" value={c.name} onChange={(e) => setContact(i, { name: e.target.value })} placeholder={bi('Name', 'ಹೆಸರು')} aria-label={bi('Name', 'ಹೆಸರು')} />
+            <input value={c.role ?? ''} onChange={(e) => setContact(i, { role: e.target.value })} placeholder={bi('Role or relation', 'ಹುದ್ದೆ ಅಥವಾ ಸಂಬಂಧ')} aria-label={bi('Role or relation', 'ಹುದ್ದೆ ಅಥವಾ ಸಂಬಂಧ')} />
+            <input inputMode="tel" value={c.phone ?? ''} onChange={(e) => setContact(i, { phone: e.target.value })} placeholder={bi('Phone (optional)', 'ಫೋನ್ (ಬೇಕಿದ್ದರೆ)')} aria-label={bi('Phone', 'ಫೋನ್')} />
+            <button className="btn ghost small" onClick={() => setContacts(contacts.filter((_, j) => j !== i))} aria-label={bi('Remove', 'ತೆಗೆಯಿರಿ')}>
+              ✕
+            </button>
+          </div>
+        ))}
+        <div>
+          <button className="btn small" onClick={() => setContacts([...contacts, { name: '' }])}>
+            + {bi('Contact', 'ಸಂಪರ್ಕ')}
+          </button>
+        </div>
+      </div>
+      <div className="field">
+        <span>{bi('Items supplied', 'ಕೊಡುವ ಸಾಮಾನು')}</span>
+        {supplied == null ? (
+          <Loading />
+        ) : (
+          <>
+            <div className="chips">
+              {supplied.map((i) => (
+                <button key={i.id} type="button" className="chip on" onClick={() => setSupplied(supplied.filter((x) => x.id !== i.id))} title={bi('Remove', 'ತೆಗೆಯಿರಿ')}>
+                  {pickName(i.nameEn, i.nameKn, lang)} ✕
+                </button>
+              ))}
+              {supplied.length === 0 && <span className="muted">{bi('None yet', 'ಇನ್ನೂ ಇಲ್ಲ')}</span>}
+            </div>
+            <input className="mt-6" placeholder={bi('Search an item to add…', 'ಸೇರಿಸಲು ಸಾಮಾನು ಹುಡುಕಿ…')} value={q} onChange={(e) => setQ(e.target.value)} />
+            {found.length > 0 && (
+              <div className="chips mt-6">
+                {found.map((i) => (
+                  <button
+                    key={i.id}
+                    type="button"
+                    className="chip"
+                    onClick={() => {
+                      setSupplied([...supplied, { id: i.id, nameEn: i.nameEn, nameKn: i.nameKn }]);
+                      setQ('');
+                    }}
+                  >
+                    + {pickName(i.nameEn, i.nameKn, lang)}
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
       <div className="bar">
-        <button className="btn primary" onClick={() => save()}>
+        <button className="btn primary" onClick={() => save()} disabled={supplied == null}>
           {bi('Save', 'ಉಳಿಸಿ')}
         </button>
         {s && (

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { describeQty, formatRate, sellPriceOf, isLow, isLowAt, itemMatches, lowAtOf, pickName, totalsByItem, type Item, type Lang, type Location, type StockLevel } from '@stock/core';
-import { api } from '../../lib/api';
+import { describeQty, formatRate, sellPriceOf, isLow, itemMatches, lowAtOf, pickName, sortItems, totalsByItem, ITEM_SORTS, type Item, type ItemSort, type Lang } from '@stock/core';
+import { api, http } from '../../lib/api';
+import { Select } from '../../components/Select';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
 import { Loading, Table, useBi } from '../../components/ui';
@@ -31,19 +32,43 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
   const [note, setNote] = useState('');
   const live = useLive('stock', 'items');
   const { value, error, reload } = useLoad(async () => {
-    const [items, stock, locs] = await Promise.all([api.items(true), api.stock(), api.locations()]);
-    return { items, stock, locs: locs.filter((l) => l.active) };
+    const [items, stock, locs, facts] = await Promise.all([
+      api.items(true),
+      api.stock(),
+      api.locations(),
+      // What the sorts need: 30-day sold and the soonest expiry. The list works without them.
+      http.get<{ sold: Record<string, number>; expiry: Record<string, string> }>('/admin/list-facts').catch(() => ({ sold: {} as Record<string, number>, expiry: {} as Record<string, string> })),
+    ]);
+    return { items, stock, locs: locs.filter((l) => l.active), facts };
   }, [live]);
+  const sortBy: ItemSort = (ITEM_SORTS as readonly string[]).includes(params.get('sort') ?? '') ? (params.get('sort') as ItemSort) : 'name';
+  const setSort = (v: ItemSort) => {
+    const next = new URLSearchParams(params);
+    if (v === 'name') next.delete('sort');
+    else next.set('sort', v);
+    setParams(next, { replace: true });
+  };
 
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
-  const { items, stock, locs } = value;
-  const qty = new Map(stock.map((s: StockLevel) => [s.itemId + '|' + s.locationId, s.qty]));
-  const qtyOf = (i: Item, l: Location) => qty.get(i.id + '|' + l.id) ?? 0;
+  const { items, stock, locs, facts } = value;
   const totals = totalsByItem(stock);
   const low = (i: Item) => isLow(i, totals.get(i.id) ?? 0);
   const shop = locs.find((l) => l.kind === 'shop');
-  const shown = items.filter((i) => (showAll || i.active) && (!q.trim() || itemMatches(i, q)) && (!onlyLow || (i.active && low(i))));
+  const expiry = new Map(Object.entries(facts.expiry));
+  const shown = sortItems(
+    items.filter((i) => (showAll || i.active) && (!q.trim() || itemMatches(i, q)) && (!onlyLow || (i.active && low(i)))),
+    sortBy,
+    { total: totals, sold: new Map(Object.entries(facts.sold)), expiry, price: (i) => sellPriceOf(i).rate, lang },
+  );
+  const SORT_WORDS: Record<ItemSort, [string, string]> = {
+    name: ['Name', 'ಹೆಸರು'],
+    price: ['Price', 'ಬೆಲೆ'],
+    stock: ['Stock level (lowest first)', 'ಸ್ಟಾಕ್ (ಕಡಿಮೆ ಮೊದಲು)'],
+    selling: ['Highest selling (30 days)', 'ಹೆಚ್ಚು ಮಾರಾಟ (30 ದಿನ)'],
+    category: ['Category', 'ವರ್ಗ'],
+    expiry: ['Expiry (soonest first)', 'ಅವಧಿ (ಬೇಗ ಮುಗಿಯುವುದು ಮೊದಲು)'],
+  };
   const lowCount = items.filter((i) => i.active && low(i)).length;
 
   const recount = async () => {
@@ -78,6 +103,10 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
           <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
           {t('items.showInactive')}
         </label>
+        <label className="inv-sort" data-tour="inventory-sort">
+          <span className="muted">{bi('Sort', 'ವಿಂಗಡಿಸಿ')}</span>
+          <Select value={sortBy} onChange={setSort} className="w-auto" aria-label={bi('Sort by', 'ವಿಂಗಡಿಸುವುದು')} options={ITEM_SORTS.map((k) => ({ value: k, label: bi(...SORT_WORDS[k]) }))} />
+        </label>
       </div>
       {items.length === 0 && <div className="card" data-tour="inventory-list">{t('items.empty')}</div>}
       {items.length > 0 && shown.length === 0 && (
@@ -91,11 +120,6 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
             <thead>
               <tr>
                 <th>{t('stock.item')}</th>
-                {locs.map((l) => (
-                  <th key={l.id} className="num">
-                    {pickName(l.name, l.nameKn, lang)}
-                  </th>
-                ))}
                 <th className="num">{t('stock.total')}</th>
                 <th className="num inv-price">{bi('Price', 'ಬೆಲೆ')}</th>
               </tr>
@@ -115,16 +139,9 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
                         <PriceOf i={i} lang={lang} />
                       </div>
                       {!i.active && <span className="pill">{t('items.inactive')}</span>}
+                      {sortBy === 'expiry' && expiry.get(i.id) && <span className="pill warn">{bi('expires', 'ಅವಧಿ')} {expiry.get(i.id)}</span>}
+                      {sortBy === 'selling' && (facts.sold[i.id] ?? 0) > 0 && <span className="muted"> {bi('sold in 30 days', '30 ದಿನದಲ್ಲಿ ಮಾರಾಟ')}: {describeQty(i, facts.sold[i.id]!, lang)}</span>}
                     </td>
-                    {locs.map((l) => {
-                      const v = qtyOf(i, l);
-                      return (
-                        <td key={l.id} className={'num ' + (v < 0 ? 'qty-neg' : isLowAt(i, l.id, v) ? 'qty-low' : '')}>
-                          {describeQty(i, v, lang)}
-                          {l.kind === 'godown' && i.racks[l.id] && <div className="muted">{i.racks[l.id]}</div>}
-                        </td>
-                      );
-                    })}
                     <td className={'num ' + (total < 0 ? 'qty-neg' : isLowNow ? 'qty-low' : '')}>
                       <b>{describeQty(i, total, lang)}</b>
                       {isLowNow && (

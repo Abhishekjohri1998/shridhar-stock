@@ -863,3 +863,37 @@ img, svg.ink { max-width: 100%; }
   .inv-price { display: none; }
   .inv-price-under { display: block; }
 }
+
+/* item form (A) */
+.item-sticky { position: sticky; top: 60px; z-index: 10; }
+
+/* purchasing (B) */
+.calc-btn span { font-size: 1.15rem; line-height: 1; }
+.calc-wrap { align-items: center; justify-content: center; }
+.sheet.calc { width: min(360px, 100%); max-width: 100%; margin: 0 auto; border-radius: var(--r-lg); }
+.calc-in { width: 100%; font-size: 1.2rem; text-align: right; }
+.calc-out { min-height: var(--tap); display: flex; align-items: center; justify-content: flex-end; font-size: 1.5rem; font-weight: 600; color: var(--ink-900); }
+.calc-out.bad { font-size: 1rem; font-weight: 400; color: var(--ink-400); }
+.calc-keys { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--gap); margin-bottom: var(--gap); }
+.calc-key { min-height: var(--tap); padding: 0; font-size: 1.1rem; }
+.calc-key.op { background: var(--brand-wash); color: var(--brand-700); border-color: var(--brand-edge); }
+.calc-put { width: 100%; }
+.carrier-card .bar { flex-wrap: wrap; }
+.trip-list { list-style: none; margin: var(--gap) 0 0; padding: 0; display: grid; gap: var(--gap); }
+.trip-list li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap); padding-top: var(--gap); border-top: 1px solid var(--line); }
+.trip-date { color: var(--ink-500); font-variant-numeric: tabular-nums; }
+.trip-form { background: var(--paper-2); box-shadow: none; }
+.landed-note { font-size: 0.9rem; }
+.expiry-in { display: block; margin-top: var(--gap); }
+.expiry-in span { display: block; font-size: 0.9rem; }
+.supplier-contact + .supplier-contact::before { content: ' · '; }
+.supplier-contact-row { flex-wrap: wrap; margin-bottom: var(--gap); }
+.inv-sort { display: inline-flex; align-items: center; gap: var(--gap); margin-left: auto; }
+.lot-list { list-style: none; margin: 0 0 var(--gap); padding: 0; display: grid; gap: var(--gap); }
+.lot-list li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap); padding-bottom: var(--gap); border-bottom: 1px solid var(--line); }
+.lot-list li.lot-soon b { color: var(--gold-600); }
+.lot-list li.lot-expired b { color: var(--danger-600); }
+.help-tips ul { padding-left: var(--pad); display: grid; gap: var(--gap); margin-top: var(--gap); }
+@media (max-width: 640px) {
+  .inv-sort { margin-left: 0; }
+}

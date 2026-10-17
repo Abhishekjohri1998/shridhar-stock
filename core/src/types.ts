@@ -324,6 +324,10 @@ export interface Supplier {
   address?: string;
   /** Anything the shop wants to remember: what they supply, when they come. */
   notes?: string;
+  /** GST number, when the shop has it. */
+  gst?: string;
+  /** People at the company: name, role or relation, phone. */
+  contacts?: { name: string; role?: string; phone?: string }[];
   active: boolean;
 }
 

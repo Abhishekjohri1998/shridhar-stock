@@ -154,7 +154,7 @@ for (const [latin, independent, sign] of VOWELS) {
  * and the virama removes it. So the inherent vowel is held back until the next character says
  * what became of it. Anything that is not Kannada -- Latin, digits, spaces -- passes through.
  */
-function romanise(text: string): string {
+export function romanise(text: string): string {
   let out = '';
   let owed = '';
   const flush = () => { out += owed; owed = ''; };
@@ -226,4 +226,28 @@ export function searchKey(text: string): string {
 /** True if the text contains at least one Kannada character. */
 export function hasKannada(text: string): boolean {
   return /[ಀ-೿]/.test(text);
+}
+
+/**
+ * The item-form "A -> ಅ" button: an English name written the same way in Kannada (not translated).
+ * Uses the forward tables above, lower-cased first because a name typed in English is ordinary
+ * spelling ("Sakkare"), not the scheme's capitals for retroflex and long sounds.
+ *
+ * Limits: English spelling does not mark long vowels or retroflex consonants, so "enne" gives ಎನ್ನೆ
+ * not ಎಣ್ಣೆ and "haalu"/"halu" differ; English words (Sugar, Parle) come out as sounded letters.
+ * The box stays editable to fix a guess.
+ */
+export function toKannada(english: string): string {
+  return latinToKannada(String(english ?? '').toLowerCase());
+}
+
+/**
+ * The item-form "ಅ -> A" button: a Kannada name in Latin letters, capitalised per word
+ * (ಸಕ್ಕರೆ -> "Sakkare"). Long vowels come back doubled (ರಮೇಶ್ -> "Rameesh"); retroflex and plain
+ * consonants come back as the scheme's letters lower-cased.
+ */
+export function toEnglish(kannada: string): string {
+  return romanise(String(kannada ?? ''))
+    .toLowerCase()
+    .replace(/(^|\s)([a-z])/g, (_, sp: string, c: string) => sp + c.toUpperCase());
 }

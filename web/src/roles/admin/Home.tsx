@@ -1,4 +1,5 @@
-import { pickName } from '@stock/core';
+import { describeQty, pickName, type Lot } from '@stock/core';
+import { api } from '../../lib/api';
 import { http } from '../../lib/api';
 import { useLive, useSettled } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
@@ -86,6 +87,8 @@ export function AdminHome() {
         </div>
       )}
 
+      <ExpiringSoon />
+
       {week && (
         <div data-tour="home-week">
           <WeekChart days={week} />
@@ -107,5 +110,39 @@ export function AdminHome() {
       </div>
 
     </>
+  );
+}
+
+type ExpiringLot = Lot & { nameEn: string; nameKn: string };
+
+/** Lots expiring in the next 15 days, expired ones too: sell or return these first. Hidden when none. */
+function ExpiringSoon() {
+  const bi = useBi();
+  const { lang } = useSession();
+  const live = useSettled(useLive('stock', 'pos'), 2000);
+  const { value } = useLoad(async () => {
+    const [lots, items] = await Promise.all([http.get<ExpiringLot[]>('/admin/expiring?days=15'), api.items(true)]);
+    return { lots, items: new Map(items.map((i) => [i.id, i])) };
+  }, [live]);
+  if (!value || value.lots.length === 0) return null;
+  const today = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+  return (
+    <div className="card mt-10" data-tour="home-expiring">
+      <div className="subtitle mt-0">
+        {bi('Expiring in 15 days', '15 ದಿನದಲ್ಲಿ ಅವಧಿ ಮುಗಿಯುವುದು')} · {value.lots.length}
+      </div>
+      {value.lots.slice(0, 12).map((l) => {
+        const it = value.items.get(l.itemId);
+        return (
+          <Link key={l.id} className="move-row low-row" to={'/admin/inventory/' + l.itemId}>
+            <b>{pickName(l.nameEn, l.nameKn, lang)}</b>{' '}
+            <span className="muted">
+              · {it ? describeQty(it, l.qty, lang) : l.qty} · {l.expiry < today ? bi('expired', 'ಅವಧಿ ಮುಗಿದಿದೆ') + ' ' : ''}
+              {l.expiry}
+            </span>
+          </Link>
+        );
+      })}
+    </div>
   );
 }
