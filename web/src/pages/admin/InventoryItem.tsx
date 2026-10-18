@@ -84,6 +84,8 @@ export function InventoryItemPage({ readOnly = false }: { readOnly?: boolean }) 
   const total = totalQty(item, stock);
   return (
     <>
+      {/* The name, its stock line and the tabs stay pinned under the top bar while the page scrolls. */}
+      <div className="item-head">
       <h1 className="title">{pickName(item.nameEn, item.nameKn, lang)}</h1>
       <p className="muted">
         {bi('In all places', 'ಎಲ್ಲಾ ಕಡೆ ಸೇರಿ')}: <b className={total < 0 ? 'qty-neg' : isLow(item, total) ? 'qty-low' : ''}>{qtyInUnit(item, defaultUnitOf(item).code, total, lang)}</b>
@@ -101,13 +103,14 @@ export function InventoryItemPage({ readOnly = false }: { readOnly?: boolean }) 
         onChange={setTab}
       />
       </div>
+      </div>
       {tab === 'details' ? (
         <ItemDetails item={item} locs={locs} cats={cats} racks={racks} sups={sups} found={about.suppliers} readOnly={readOnly} onSaved={reload} />
       ) : (
         <>
           {about.info && <StockSummary item={item} locs={locs} stock={stock} info={about.info} sups={sups} />}
           <ItemStock item={item} locs={locs} stock={stock} readOnly={readOnly} onChanged={reload} />
-          <ItemLots item={item} locs={locs} />
+          <ItemLots item={item} locs={locs} stock={stock} readOnly={readOnly} />
         </>
       )}
     </>
@@ -218,7 +221,8 @@ function ItemDetails({
       {error && <div className="msg err">{error}</div>}
       {saved && <div className="msg ok">{saved}</div>}
       <fieldset className="plain-fieldset" disabled={readOnly}>
-        <div className="card item-sticky">
+        {/* A new item has no pinned title above, so its name card pins itself; one Save, at the bottom. */}
+        <div className={'card' + (item ? '' : ' item-sticky')}>
           <div className="grid2">
             <label className="field">
               <span>{t('items.nameKn')}</span>
@@ -243,13 +247,6 @@ function ItemDetails({
               </div>
             </label>
           </div>
-          {!readOnly && (
-            <div className="bar mb-0">
-              <button className="btn primary" disabled={busy}>
-                {t('common.save')}
-              </button>
-            </div>
-          )}
         </div>
         <div className="card">
           <label className="field">

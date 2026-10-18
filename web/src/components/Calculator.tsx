@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import { calc } from '@stock/core';
 import { useBi } from './ui';
 
@@ -78,12 +78,43 @@ export function CalculatorButton() {
   );
 }
 
+/**
+ * Where the pop-up may sit: from just under the top bar to the bottom of what is visible (the
+ * phone keyboard taken off), so it never runs off the top or the bottom; it scrolls inside if short.
+ */
+function useFit(): CSSProperties {
+  const measure = () => {
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null;
+    const viewH = vv ? vv.height : window.innerHeight;
+    const offTop = vv ? vv.offsetTop : 0;
+    const bar = document.querySelector('.top');
+    const barBottom = bar ? Math.max(0, bar.getBoundingClientRect().bottom) : 0;
+    const top = Math.max(8, Math.min(barBottom + 8, viewH / 3)) + offTop;
+    return { marginTop: top, maxHeight: Math.max(160, viewH + offTop - top - 8) };
+  };
+  const [style, setStyle] = useState(measure);
+  useEffect(() => {
+    const again = () => setStyle(measure());
+    const vv = window.visualViewport;
+    window.addEventListener('resize', again);
+    vv?.addEventListener('resize', again);
+    vv?.addEventListener('scroll', again);
+    return () => {
+      window.removeEventListener('resize', again);
+      vv?.removeEventListener('resize', again);
+      vv?.removeEventListener('scroll', again);
+    };
+  }, []);
+  return style;
+}
+
 function CalculatorPop({ target, onClose }: { target: HTMLInputElement | null; onClose: () => void }) {
   const bi = useBi();
   const [text, setText] = useState(() => (target?.value && calc(target.value) != null ? target.value : ''));
   const [note, setNote] = useState('');
   const field = useRef<HTMLInputElement>(null);
   const result = text.trim() ? calc(text) : null;
+  const box = useFit();
   const shown = result == null ? '' : String(result);
   useEffect(() => {
     field.current?.focus();
@@ -111,7 +142,7 @@ function CalculatorPop({ target, onClose }: { target: HTMLInputElement | null; o
   };
   return (
     <div className="sheet-wrap calc-wrap" onClick={onClose}>
-      <div className="sheet calc" role="dialog" aria-modal="true" aria-label={bi('Calculator', 'ಕ್ಯಾಲ್ಕುಲೇಟರ್')} onClick={(e) => e.stopPropagation()}>
+      <div className="sheet calc" style={box} role="dialog" aria-modal="true" aria-label={bi('Calculator', 'ಕ್ಯಾಲ್ಕುಲೇಟರ್')} onClick={(e) => e.stopPropagation()}>
         <div className="sheet-top">
           <b>🧮 {bi('Calculator', 'ಕ್ಯಾಲ್ಕುಲೇಟರ್')}</b>
           <button className="btn ghost small" onClick={onClose} aria-label={bi('Close', 'ಮುಚ್ಚಿ')}>

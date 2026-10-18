@@ -169,6 +169,39 @@ async function main() {
     const facts = (await call('/admin/list-facts')).body;
     check('B: list facts give the soonest expiry per item', facts.expiry[soap.id] === '2026-11-30', JSON.stringify(facts));
     check('B: and sold quantities (none yet)', facts.sold && Object.keys(facts.sold).length === 0);
+
+    // ------------------------------------------------ split receiving: a qty per place
+    const dal = (await call('/items', { method: 'POST', body: { nameEn: 'Toor dal', nameKn: 'ತೊಗರಿ', units: [{ code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price: 120 }, { code: 'bag', label: 'Bag', labelKn: '', perBase: 25, price: 2900 }], aliases: [], racks: {} } })).body;
+    const po3 = (await call('/admin/pos', { method: 'POST', body: { supplierId: supId, to: shop, lines: [{ itemId: dal.id, unit: 'bag', qty: 10, cost: 2500 }] } })).body;
+    eq('B: a split that does not add up is refused', (await call('/admin/pos/' + po3.id + '/receive', { method: 'POST', body: { got: { [dal.id]: { qty: 10, places: [{ placeId: shop, qty: 5 }, { placeId: godown, qty: 4 }] } } } })).status, 400);
+    eq('B: a split to an unknown place is refused', (await call('/admin/pos/' + po3.id + '/receive', { method: 'POST', body: { got: { [dal.id]: { qty: 10, places: [{ placeId: shop, qty: 5 }, { placeId: 'loc_none', qty: 5 }] } } } })).status, 400);
+    const sr = await call('/admin/pos/' + po3.id + '/receive', { method: 'POST', body: { delivery: 100, got: { [dal.id]: { qty: 10, cost: 2500, places: [{ placeId: shop, qty: 5 }, { placeId: godown, qty: 5 }] } }, expiry: { [dal.id]: '2027-01-31' } } });
+    eq('B: Shop 5 bag, Godown 5 bag is received', sr.status, 200);
+    const lvl = (await call('/stock')).body.filter((s) => s.itemId === dal.id);
+    const lvAt = (pl) => lvl.find((s) => s.locationId === pl)?.qty ?? 0;
+    check('B: 125 kg went to each place', lvAt(shop) === 125 && lvAt(godown) === 125, JSON.stringify(lvl));
+    const dalLots = (await call('/admin/items/' + dal.id + '/lots')).body;
+    check('B: a lot per place with the expiry', dalLots.length === 2 && dalLots.every((l) => l.qty === 125 && l.expiry === '2027-01-31') && new Set(dalLots.map((l) => l.placeId)).size === 2, JSON.stringify(dalLots));
+    const r3 = (await call('/admin/pos?view=all')).body;
+    const po3After = (r3.orders ?? r3).find((x) => x.id === po3.id);
+    const rc3 = po3After && po3After.received[0];
+    check('B: the receipt keeps the split and the landed cost as before', rc3 && rc3.places.length === 2 && rc3.landed === 2510 && rc3.delivery === 100, JSON.stringify(po3After));
+    // The old single-place body still works.
+    const po4 = (await call('/admin/pos', { method: 'POST', body: { supplierId: supId, to: shop, lines: [{ itemId: dal.id, unit: 'kg', qty: 3, cost: 100 }] } })).body;
+    eq('B: a receive with only "to" still works', (await call('/admin/pos/' + po4.id + '/receive', { method: 'POST', body: { to: godown } })).status, 200);
+    check('B: all of it at that place', (await call('/stock')).body.find((s) => s.itemId === dal.id && s.locationId === godown).qty === 128);
+
+    // ------------------------------------------------ expiry for stock already on hand
+    eq('B: more than the undated stock is refused', (await call('/admin/lots', { method: 'POST', body: { itemId: dal.id, placeId: godown, qty: 4, expiry: '2027-03-01' } })).status, 400);
+    const ml = await call('/admin/lots', { method: 'POST', body: { itemId: dal.id, placeId: godown, qty: 3, unit: 'kg', expiry: '2027-03-01' } });
+    check('B: a date put on 3 kg on the shelf', ml.status === 201 && ml.body.ref === 'manual' && ml.body.qty === 3, JSON.stringify(ml.body));
+    eq('B: a bad date is refused', (await call('/admin/lots', { method: 'POST', body: { itemId: dal.id, placeId: godown, qty: 1, expiry: 'soon' } })).status, 400);
+    eq('B: the lot can be changed', (await call('/admin/lots/' + ml.body.id, { method: 'PUT', body: { placeId: godown, qty: 2, expiry: '2027-04-01' } })).status, 200);
+    let ml2 = (await call('/admin/items/' + dal.id + '/lots')).body.find((l) => l.id === ml.body.id);
+    check('B: with its new date and qty', ml2.qty === 2 && ml2.expiry === '2027-04-01', JSON.stringify(ml2));
+    eq('B: and removed', (await call('/admin/lots/' + ml.body.id, { method: 'DELETE' })).status, 200);
+    check('B: gone', !(await call('/admin/items/' + dal.id + '/lots')).body.some((l) => l.id === ml.body.id));
+    eq('B: an unknown lot is 404', (await call('/admin/lots/lot_none', { method: 'DELETE' })).status, 404);
   } catch (err) {
     failed++;
     console.log('FAIL threw: ' + err.stack);

@@ -46,6 +46,7 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
     const next = new URLSearchParams(params);
     if (v === 'name') next.delete('sort');
     else next.set('sort', v);
+    next.delete('cat');
     setParams(next, { replace: true });
   };
 
@@ -56,8 +57,26 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
   const low = (i: Item) => isLow(i, totals.get(i.id) ?? 0);
   const shop = locs.find((l) => l.kind === 'shop');
   const expiry = new Map(Object.entries(facts.expiry));
+  // Sort = Category: first the categories with their counts; one tapped opens its items (?cat=).
+  const NO_CAT = '-';
+  const catOf = (i: Item) => (i.category ?? '').trim();
+  const cat = sortBy === 'category' ? params.get('cat') : null;
+  const showCats = sortBy === 'category' && cat == null && !q.trim();
+  const openCat = (c: string | null) => {
+    const next = new URLSearchParams(params);
+    if (c == null) next.delete('cat');
+    else next.set('cat', c);
+    setParams(next);
+  };
+  const visible = items.filter((i) => (showAll || i.active) && (!onlyLow || (i.active && low(i))));
+  const catRows = (() => {
+    const counts = new Map<string, number>();
+    for (const i of visible) counts.set(catOf(i), (counts.get(catOf(i)) ?? 0) + 1);
+    const named = [...counts.entries()].filter(([c]) => c).sort((a, b) => a[0].localeCompare(b[0]));
+    return counts.has('') ? [...named, ['', counts.get('')!] as [string, number]] : named;
+  })();
   const shown = sortItems(
-    items.filter((i) => (showAll || i.active) && (!q.trim() || itemMatches(i, q)) && (!onlyLow || (i.active && low(i)))),
+    visible.filter((i) => (!q.trim() || itemMatches(i, q)) && (cat == null || catOf(i) === (cat === NO_CAT ? '' : cat))),
     sortBy,
     { total: totals, sold: new Map(Object.entries(facts.sold)), expiry, price: (i) => sellPriceOf(i).rate, lang },
   );
@@ -108,13 +127,46 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
           <Select value={sortBy} onChange={setSort} className="w-auto" aria-label={bi('Sort by', 'ವಿಂಗಡಿಸುವುದು')} options={ITEM_SORTS.map((k) => ({ value: k, label: bi(...SORT_WORDS[k]) }))} />
         </label>
       </div>
-      {items.length === 0 && <div className="card" data-tour="inventory-list">{t('items.empty')}</div>}
-      {items.length > 0 && shown.length === 0 && (
+      {cat != null && (
+        <div className="bar">
+          <button type="button" className="btn small" onClick={() => openCat(null)}>
+            ← {bi('All categories', 'ಎಲ್ಲಾ ವರ್ಗಗಳು')}
+          </button>
+          <b>{cat === NO_CAT ? bi('No category', 'ವರ್ಗ ಇಲ್ಲ') : cat}</b>
+        </div>
+      )}
+      {showCats && catRows.length > 0 && (
+        <div className="scroll" data-tour="inventory-list">
+          <Table className="list">
+            <thead>
+              <tr>
+                <th>{bi('Category', 'ವರ್ಗ')}</th>
+                <th className="num">{bi('Products', 'ಸಾಮಾನುಗಳು')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {catRows.map(([c, n]) => (
+                <tr key={c || NO_CAT} className="link" onClick={() => openCat(c || NO_CAT)}>
+                  <td>
+                    <div className="name">{c || bi('No category', 'ವರ್ಗ ಇಲ್ಲ')}</div>
+                  </td>
+                  <td className="num">
+                    <b>{n}</b>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </div>
+      )}
+      {!showCats && items.length === 0 && <div className="card" data-tour="inventory-list">{t('items.empty')}</div>}
+      {showCats && items.length > 0 && catRows.length === 0 && <div className="card">{bi('No items here.', 'ಇಲ್ಲಿ ಸಾಮಾನು ಇಲ್ಲ.')}</div>}
+      {!showCats && items.length > 0 && shown.length === 0 && (
         <div className="card" data-tour="inventory-list">
           {onlyLow ? bi('Nothing is running low. Good.', 'ಏನೂ ಮುಗಿಯುತ್ತಿಲ್ಲ. ಒಳ್ಳೆಯದು.') : bi('No item matches. Try another name, or add it with “New item”.', 'ಯಾವ ಸಾಮಾನೂ ಹೊಂದುತ್ತಿಲ್ಲ. ಬೇರೆ ಹೆಸರು ನೋಡಿ, ಅಥವಾ “ಹೊಸ ಸಾಮಾನು” ಒತ್ತಿ ಸೇರಿಸಿ.')}
         </div>
       )}
-      {shown.length > 0 && (
+      {!showCats && shown.length > 0 && (
         <div className="scroll" data-tour="inventory-list">
           <Table className="list">
             <thead>

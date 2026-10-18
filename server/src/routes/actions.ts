@@ -437,7 +437,17 @@ actionRoutes.post(
     const body = z
       .object({
         /** Per item: what arrived (in the order's unit) and what it cost per unit. */
-        got: z.record(z.string(), z.object({ qty: z.number().min(0).max(1e6), cost: z.number().min(0).max(1e7).optional() })).optional(),
+        got: z
+          .record(
+            z.string(),
+            z.object({
+              qty: z.number().min(0).max(1e6),
+              cost: z.number().min(0).max(1e7).optional(),
+              /** A split receipt: how much of the line went to each place, adding up to qty. Else all goes to `to`. */
+              places: z.array(z.object({ placeId: z.string().min(1), qty: z.number().min(0).max(1e6) })).max(20).optional(),
+            }),
+          )
+          .optional(),
         /** Where the goods went, when not where the order said. */
         to: z.string().optional(),
         updateCost: z.boolean().default(false),
@@ -458,7 +468,7 @@ actionRoutes.post(
     const to = body.to ?? p.to;
     if (!locs.some((l) => l.id === to && l.active)) throw new HttpError(400, 'Choose where the goods go');
     const moves: StockMove[] = [];
-    const received: { itemId: string; qty: number; cost: number; delivery?: number; landed?: number; expiry?: string }[] = [];
+    const received: { itemId: string; qty: number; cost: number; delivery?: number; landed?: number; expiry?: string; places?: { placeId: string; qty: number }[] }[] = [];
     const costChanged = new Set<string>();
     // The delivery charge: typed in, else the linked carrier trip's.
     let trip: CarrierTrip | null = null;
@@ -470,7 +480,15 @@ actionRoutes.post(
     const charge = body.delivery ?? trip?.charge ?? 0;
     const got = p.lines.map((l) => {
       const g = body.got?.[l.itemId];
-      return { l, qty: g?.qty ?? l.qty, cost: g?.cost ?? l.cost };
+      const qty = g?.qty ?? l.qty;
+      // Places with nothing in them are dropped; one place left is the same as "all to" it.
+      const split = (g?.places ?? []).filter((x) => x.qty > 0);
+      for (const x of split) if (!locs.some((loc) => loc.id === x.placeId && loc.active)) throw new HttpError(400, 'Choose where the goods go');
+      if (g?.places && Math.abs(split.reduce((n, x) => n + x.qty, 0) - qty) > 1e-6) throw new HttpError(400, 'The places must add up to what arrived');
+      const merged = new Map<string, number>();
+      for (const x of split) merged.set(x.placeId, (merged.get(x.placeId) ?? 0) + x.qty);
+      const places = g?.places && qty > 0 ? [...merged].map(([placeId, q]) => ({ placeId, qty: q })) : [{ placeId: to, qty }];
+      return { l, qty, cost: g?.cost ?? l.cost, places };
     });
     for (const g of got) if (g.qty > g.l.qty) throw new HttpError(400, 'More received than ordered: count again, or order the rest separately.');
     // Shared by value (qty x cost) when every line has a cost, else by quantity; nothing to lines that did not come.
@@ -478,16 +496,21 @@ actionRoutes.post(
     const shareList = splitCharge(arrived.map((g) => ({ qty: g.qty, value: g.qty * g.cost })), charge);
     const shareOf = new Map(arrived.map((g, i) => [g.l.itemId, shareList[i]!]));
     const lots: Lot[] = [];
-    for (const { l, qty, cost } of got) {
+    for (const { l, qty, cost, places } of got) {
       const share = shareOf.get(l.itemId) ?? 0;
       const landed = landedUnitCost(cost, qty, share);
       const expiry = body.expiry?.[l.itemId];
-      received.push({ itemId: l.itemId, qty, cost, ...(share ? { delivery: share, landed } : {}), ...(expiry ? { expiry } : {}) });
+      const isSplit = places.length > 1 || places[0]!.placeId !== to;
+      received.push({ itemId: l.itemId, qty, cost, ...(share ? { delivery: share, landed } : {}), ...(expiry ? { expiry } : {}), ...(isSplit ? { places } : {}) });
       const item = items.get(l.itemId);
       if (!item || qty === 0) continue;
-      const baseQty = toBase(item, l.unit, qty);
-      moves.push({ id: newId('mv'), key: 'po:' + p.no + ':' + l.itemId, at: now(), kind: 'purchase', itemId: l.itemId, to, qty: baseQty, ref: 'order ' + p.no, by: req.person!.id, ...(qty < l.qty ? { note: l.qty - qty + ' ' + l.unit + ' short' } : {}) });
-      if (expiry) lots.push({ id: newId('lot'), itemId: l.itemId, placeId: to, qty: baseQty, expiry, receivedAt: now(), ref: 'order ' + p.no });
+      // One move (and one lot) per place; the single-place key stays as it always was.
+      places.forEach((pl, n) => {
+        const baseQty = toBase(item, l.unit, pl.qty);
+        const key = 'po:' + p.no + ':' + l.itemId + (places.length > 1 || pl.placeId !== to ? ':' + pl.placeId : '');
+        moves.push({ id: newId('mv'), key, at: now(), kind: 'purchase', itemId: l.itemId, to: pl.placeId, qty: baseQty, ref: 'order ' + p.no, by: req.person!.id, ...(n === 0 && qty < l.qty ? { note: l.qty - qty + ' ' + l.unit + ' short' } : {}) });
+        if (expiry) lots.push({ id: newId('lot'), itemId: l.itemId, placeId: pl.placeId, qty: baseQty, expiry, receivedAt: now(), ref: 'order ' + p.no });
+      });
       // The landed cost becomes the item's last cost, every other unit worked out from it, when the admin says so.
       if (body.updateCost) {
         const units = unitCostsFrom(item.units, l.unit, landed);

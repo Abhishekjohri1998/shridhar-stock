@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { formatRate, formatRupees, landedUnitCost, pickName, poStage, splitCharge, type CarrierTrip, type Item, type SupplierContact, type ItemSupplierRow, type Location, type PurchaseOrder, type Refill, type Supplier } from '@stock/core';
 import { api, http } from '../../lib/api';
@@ -11,7 +11,7 @@ import { Empty, Loading, Money, Select, Status, useBi, when, Table } from '../..
 type ItemBrief = Pick<Item, 'id' | 'nameEn' | 'nameKn' | 'defaultUnit'> & { units: { code: string; label: string; labelKn: string; perBase: number; cost?: number }[] };
 
 interface Page {
-  orders: (PurchaseOrder & { received?: { itemId: string; qty: number; cost: number; delivery?: number; landed?: number; expiry?: string }[] })[];
+  orders: (PurchaseOrder & { received?: { itemId: string; qty: number; cost: number; delivery?: number; landed?: number; expiry?: string; places?: { placeId: string; qty: number }[] }[] })[];
   items: ItemBrief[];
   open: number;
   total: number;
@@ -171,6 +171,11 @@ function OrderCard({
   const [tripId, setTripId] = useState('');
   const [trips, setTrips] = useState<CarrierTrip[]>([]);
   const [expiry, setExpiry] = useState<Record<string, string>>({});
+  // Per line: absent = all to the chosen place; else the qty typed for each place (a split).
+  const [split, setSplit] = useState<Record<string, Record<string, string>>>({});
+  const splitSum = (itemId: string) => Object.values(split[itemId] ?? {}).reduce((n, v) => n + (Number(v) || 0), 0);
+  const splitBad = (itemId: string) => !!split[itemId] && Math.abs(splitSum(itemId) - (Number(got[itemId]?.qty) || 0)) > 1e-6;
+  const anySplitBad = p.lines.some((l) => splitBad(l.itemId));
   useEffect(() => {
     if (!receiving) return;
     http
@@ -235,6 +240,28 @@ function OrderCard({
                         {bi('with delivery', 'ಸಾಗಣೆ ಸೇರಿ')} {formatRate(landedOf.get(l.itemId)!)} / {unitWord(l.itemId, l.unit)}
                       </div>
                     )}
+                    <div className="chips mt-6" role="group" aria-label={bi('Where it goes', 'ಎಲ್ಲಿ ಇಡುವುದು')}>
+                      <button type="button" className={'chip' + (split[l.itemId] ? '' : ' on')} onClick={() => setSplit(Object.fromEntries(Object.entries(split).filter(([k]) => k !== l.itemId)))}>
+                        {bi('All to', 'ಎಲ್ಲಾ')} {placeOf(to)}
+                      </button>
+                      <button type="button" className={'chip' + (split[l.itemId] ? ' on' : '')} onClick={() => !split[l.itemId] && setSplit({ ...split, [l.itemId]: Object.fromEntries(locs.map((x) => [x.id, x.id === to ? got[l.itemId]!.qty : ''])) })}>
+                        {bi('Split', 'ಹಂಚಿ')}
+                      </button>
+                    </div>
+                    {split[l.itemId] && (
+                      <div className="split-places">
+                        {locs.map((x) => (
+                          <label key={x.id} className="bar mb-0">
+                            <span className="grow">{pickName(x.name, x.nameKn, lang)}</span>
+                            <input inputMode="decimal" className="in-qty" value={split[l.itemId]![x.id] ?? ''} onChange={(e) => setSplit({ ...split, [l.itemId]: { ...split[l.itemId]!, [x.id]: e.target.value } })} aria-label={pickName(x.name, x.nameKn, lang)} /> {unitWord(l.itemId, l.unit)}
+                          </label>
+                        ))}
+                        <div className={splitBad(l.itemId) ? 'msg err' : 'muted'} aria-live="polite">
+                          {splitSum(l.itemId)} / {Number(got[l.itemId]?.qty) || 0} {unitWord(l.itemId, l.unit)}
+                          {splitBad(l.itemId) && ' · ' + bi('must add up to what arrived', 'ಬಂದದ್ದಕ್ಕೆ ಸಮ ಆಗಬೇಕು')}
+                        </div>
+                      </div>
+                    )}
                     <label className="expiry-in">
                       <span className="muted">{bi('Expiry (optional)', 'ಅವಧಿ ಮುಗಿಯುವ ದಿನ (ಬೇಕಿದ್ದರೆ)')}</span>
                       <input type="date" value={expiry[l.itemId] ?? ''} onChange={(e) => setExpiry({ ...expiry, [l.itemId]: e.target.value })} />
@@ -246,6 +273,7 @@ function OrderCard({
                     {r ? r.qty + ' ' + unitWord(l.itemId, l.unit) + (r.cost !== l.cost ? ' @ ' + formatRate(r.cost) : '') : '—'}
                     {r?.landed != null && <div className="muted">{bi('landed', 'ಸಾಗಣೆ ಸೇರಿ')} {formatRate(r.landed)}</div>}
                     {r?.expiry && <div className="muted">{bi('expires', 'ಅವಧಿ')} {r.expiry}</div>}
+                    {r?.places && <div className="muted">{r.places.map((x) => placeOf(x.placeId) + ' ' + x.qty).join(' · ')}</div>}
                   </td>
                 )}
               </tr>
@@ -284,13 +312,19 @@ function OrderCard({
           <>
             <button
               className="btn primary"
+              disabled={anySplitBad}
               onClick={() =>
                 act(
                   '/admin/pos/' + p.id + '/receive',
                   {
                     updateCost,
                     to,
-                    got: Object.fromEntries(Object.entries(got).map(([k, v]) => [k, { qty: Number(v.qty) || 0, cost: Number(v.cost) || 0 }])),
+                    got: Object.fromEntries(
+                      Object.entries(got).map(([k, v]) => [
+                        k,
+                        { qty: Number(v.qty) || 0, cost: Number(v.cost) || 0, ...(split[k] ? { places: Object.entries(split[k]!).map(([placeId, q]) => ({ placeId, qty: Number(q) || 0 })).filter((x) => x.qty > 0) } : {}) },
+                      ]),
+                    ),
                     ...(tripId ? { tripId } : {}),
                     ...(delivery.trim() !== '' ? { delivery: Number(delivery) || 0 } : {}),
                     expiry: Object.fromEntries(Object.entries(expiry).filter(([, v]) => /^\d{4}-\d{2}-\d{2}$/.test(v))),
@@ -516,54 +550,66 @@ function NewOrder({ locs, sups, fromBuyList, onDone }: { locs: Location[]; sups:
 /** Suppliers are contacts: who to call, and anything worth remembering about them. */
 function Suppliers({ sups, onDone }: { sups: Supplier[]; onDone: () => void }) {
   const bi = useBi();
-  const [editing, setEditing] = useState<Supplier | 'new' | null>(null);
+  // An accordion: one supplier open at a time, its details right under it. "new" is the form on top.
+  const [openId, setOpenId] = useState<string | 'new' | null>(null);
+  const list = useRef<HTMLDivElement>(null);
+  // A tap outside the list closes whatever is open.
+  useEffect(() => {
+    if (!openId) return;
+    const down = (e: PointerEvent) => {
+      const t = e.target as Element | null;
+      if (!t || !document.contains(t) || list.current?.contains(t) || t.closest('[role="listbox"], .sheet-wrap, .top')) return;
+      setOpenId(null);
+    };
+    document.addEventListener('pointerdown', down);
+    return () => document.removeEventListener('pointerdown', down);
+  }, [openId]);
+  const done = () => {
+    setOpenId(null);
+    onDone();
+  };
   return (
-    <>
-      <button className="btn mb-10" onClick={() => setEditing('new')}>
+    <div ref={list} data-tour="suppliers-list">
+      <button className="btn mb-10" onClick={() => setOpenId(openId === 'new' ? null : 'new')}>
         + {bi('New supplier', 'ಹೊಸ ಸರಬರಾಜುದಾರ')}
       </button>
-      {editing && (
-        <SupplierForm
-          s={editing === 'new' ? null : editing}
-          onDone={() => {
-            setEditing(null);
-            onDone();
-          }}
-        />
-      )}
+      {openId === 'new' && <SupplierForm s={null} onDone={done} />}
       {sups.length === 0 && <Empty>{bi('No suppliers yet.', 'ಇನ್ನೂ ಸರಬರಾಜುದಾರರಿಲ್ಲ.')}</Empty>}
       {sups.map((s) => (
-        <div className="card clickable" key={s.id} onClick={() => setEditing(s)}>
-          <span className="name">{s.name}</span>{' '}
-          {s.phone && (
-            <a href={'tel:' + s.phone} onClick={(e) => e.stopPropagation()}>
-              {s.phone}
-            </a>
-          )}
-          {!s.active && <span className="pill bad"> {bi('Switched off', 'ನಿಲ್ಲಿಸಲಾಗಿದೆ')}</span>}
-          {s.gst && <span className="muted"> · GST {s.gst}</span>}
-          {(s.contacts ?? []).length > 0 && (
-            <div className="muted">
-              {s.contacts!.map((c, i) => (
-                <span key={i} className="supplier-contact">
-                  {c.name}
-                  {c.role && ' (' + c.role + ')'}
-                  {c.phone && (
-                    <>
-                      {' '}
-                      <a href={'tel:' + c.phone} onClick={(e) => e.stopPropagation()}>
-                        {c.phone}
-                      </a>
-                    </>
-                  )}
-                </span>
-              ))}
-            </div>
-          )}
-          {s.notes && <div className="muted">{s.notes}</div>}
+        <div key={s.id}>
+          <div className={'card clickable' + (openId === s.id ? ' on' : '')} aria-expanded={openId === s.id} onClick={() => setOpenId(openId === s.id ? null : s.id)}>
+            <span className="name">{s.name}</span>{' '}
+            {s.phone && (
+              <a href={'tel:' + s.phone} onClick={(e) => e.stopPropagation()}>
+                {s.phone}
+              </a>
+            )}
+            {!s.active && <span className="pill bad"> {bi('Switched off', 'ನಿಲ್ಲಿಸಲಾಗಿದೆ')}</span>}
+            {s.gst && <span className="muted"> · GST {s.gst}</span>}
+            {(s.contacts ?? []).length > 0 && (
+              <div className="muted">
+                {s.contacts!.map((c, i) => (
+                  <span key={i} className="supplier-contact">
+                    {c.name}
+                    {c.role && ' (' + c.role + ')'}
+                    {c.phone && (
+                      <>
+                        {' '}
+                        <a href={'tel:' + c.phone} onClick={(e) => e.stopPropagation()}>
+                          {c.phone}
+                        </a>
+                      </>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
+            {s.notes && <div className="muted">{s.notes}</div>}
+          </div>
+          {openId === s.id && <SupplierForm key={s.id} s={s} onDone={done} />}
         </div>
       ))}
-    </>
+    </div>
   );
 }
 
@@ -587,6 +633,8 @@ function SupplierForm({ s, onDone }: { s: Supplier | null; onDone: () => void })
       .catch(() => setSupplied([]));
   }, [s]);
   const [q, setQ] = useState('');
+  // A new supplier starts with the item picker open; an existing one shows its items first.
+  const [editItems, setEditItems] = useState(!s);
   const found = useItemSearch(q).filter((i) => !(supplied ?? []).some((x) => x.id === i.id));
   const [err, setErr] = useState('');
   const setContact = (i: number, patch: Partial<SupplierContact>) => setContacts(contacts.map((c, j) => (j === i ? { ...c, ...patch } : c)));
@@ -648,22 +696,35 @@ function SupplierForm({ s, onDone }: { s: Supplier | null; onDone: () => void })
           </button>
         </div>
       </div>
-      <div className="field">
-        <span>{bi('Items supplied', 'ಕೊಡುವ ಸಾಮಾನು')}</span>
+      <div className="field" data-tour="supplier-items">
+        <div className="bar mb-0">
+          <b>{bi('Items supplied', 'ಕೊಡುವ ಸಾಮಾನು')}</b>
+          {!editItems && (
+            <button type="button" className="btn small" onClick={() => setEditItems(true)}>
+              ✎ {bi('Edit items', 'ಸಾಮಾನು ಬದಲಿಸಿ')}
+            </button>
+          )}
+        </div>
         {supplied == null ? (
           <Loading />
         ) : (
           <>
             <div className="chips">
-              {supplied.map((i) => (
-                <button key={i.id} type="button" className="chip on" onClick={() => setSupplied(supplied.filter((x) => x.id !== i.id))} title={bi('Remove', 'ತೆಗೆಯಿರಿ')}>
-                  {pickName(i.nameEn, i.nameKn, lang)} ✕
-                </button>
-              ))}
+              {supplied.map((i) =>
+                editItems ? (
+                  <button key={i.id} type="button" className="chip on" onClick={() => setSupplied(supplied.filter((x) => x.id !== i.id))} title={bi('Remove', 'ತೆಗೆಯಿರಿ')}>
+                    {pickName(i.nameEn, i.nameKn, lang)} ✕
+                  </button>
+                ) : (
+                  <span key={i.id} className="chip">
+                    {pickName(i.nameEn, i.nameKn, lang)}
+                  </span>
+                ),
+              )}
               {supplied.length === 0 && <span className="muted">{bi('None yet', 'ಇನ್ನೂ ಇಲ್ಲ')}</span>}
             </div>
-            <input className="mt-6" placeholder={bi('Search an item to add…', 'ಸೇರಿಸಲು ಸಾಮಾನು ಹುಡುಕಿ…')} value={q} onChange={(e) => setQ(e.target.value)} />
-            {found.length > 0 && (
+            {editItems && <input className="mt-6" placeholder={bi('Search an item to add…', 'ಸೇರಿಸಲು ಸಾಮಾನು ಹುಡುಕಿ…')} value={q} onChange={(e) => setQ(e.target.value)} />}
+            {editItems && found.length > 0 && (
               <div className="chips mt-6">
                 {found.map((i) => (
                   <button

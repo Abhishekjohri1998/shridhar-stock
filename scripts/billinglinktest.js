@@ -124,6 +124,16 @@ async function main() {
     await put(parle.id, parleBody);
     eq('with no default, the first unit leads again', (await link('/items?q=parle')).body.items[0].units[0].code, 'pc');
 
+    // ---- an other name tied to a unit
+    const hg = (await call('/items', { nameEn: 'Hide and Go', nameKn: 'ಹೈಡ್', units: [{ code: 'pc', label: 'pc', labelKn: 'ಪೀಸ್', perBase: 1, price: 10 }, { code: 'Box', label: 'Box', labelKn: 'ಬಾಕ್ಸ್', perBase: 12, price: 110 }], aliases: [{ text: 'HG box', unit: 'Box' }, { text: 'HG' }], racks: {}, reorderAt: {} })).body;
+    check('an item with a unit alias is made', hg && hg.id, JSON.stringify(hg));
+    const hgBox = (await link('/items?q=' + encodeURIComponent('HG box'))).body.items.find((i) => i.id === hg.id);
+    eq('"HG box" answers its unit', hgBox && hgBox.matchedUnit, 'Box');
+    const hgOnly = (await link('/items?q=HG')).body.items.find((i) => i.id === hg.id);
+    check('"HG" finds it with no matched unit', hgOnly && !('matchedUnit' in hgOnly), JSON.stringify(hgOnly));
+    const hgName = (await link('/items?q=hide')).body.items.find((i) => i.id === hg.id);
+    check('its own name has no matched unit', hgName && !('matchedUnit' in hgName), JSON.stringify(hgName));
+
     // ---- quote
     const q1 = (await link('/quote?item=' + rice.id + '&unit=kg&qty=2')).body;
     check('the plain rate', q1.rate === 60 && q1.amount === 120 && q1.unit === 'kg' && q1.slab === false && q1.warn === null, JSON.stringify(q1));

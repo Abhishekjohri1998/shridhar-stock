@@ -866,11 +866,14 @@ img, svg.ink { max-width: 100%; }
 
 /* item form (A) */
 .item-sticky { position: sticky; top: 60px; z-index: 10; }
+.item-head { position: sticky; top: 60px; z-index: 10; margin: 0 calc(-1 * var(--pad)); padding: 8px var(--pad) 0; background: var(--paper-0); border-bottom: 1px solid var(--line); }
+.item-head .title { margin-top: 0; }
+.item-head .tabs { margin-bottom: 8px; }
 
 /* purchasing (B) */
 .calc-btn span { font-size: 1.15rem; line-height: 1; }
-.calc-wrap { align-items: center; justify-content: center; }
-.sheet.calc { width: min(360px, 100%); max-width: 100%; margin: 0 auto; border-radius: var(--r-lg); }
+.calc-wrap { align-items: flex-start; justify-content: center; padding: 0 var(--pad); overflow: hidden; }
+.sheet.calc { width: min(360px, 100%); max-width: 100%; margin: 0 auto; border-radius: var(--r-lg); overflow-y: auto; padding-bottom: var(--pad); }
 .calc-in { width: 100%; font-size: 1.2rem; text-align: right; }
 .calc-out { min-height: var(--tap); display: flex; align-items: center; justify-content: flex-end; font-size: 1.5rem; font-weight: 600; color: var(--ink-900); }
 .calc-out.bad { font-size: 1rem; font-weight: 400; color: var(--ink-400); }
@@ -878,6 +881,7 @@ img, svg.ink { max-width: 100%; }
 .calc-key { min-height: var(--tap); padding: 0; font-size: 1.1rem; }
 .calc-key.op { background: var(--brand-wash); color: var(--brand-700); border-color: var(--brand-edge); }
 .calc-put { width: 100%; }
+.split-places { display: grid; gap: 4px; margin-top: 6px; }
 .carrier-card .bar { flex-wrap: wrap; }
 .trip-list { list-style: none; margin: var(--gap) 0 0; padding: 0; display: grid; gap: var(--gap); }
 .trip-list li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap); padding-top: var(--gap); border-top: 1px solid var(--line); }

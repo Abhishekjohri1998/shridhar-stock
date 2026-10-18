@@ -170,6 +170,81 @@ purchasingRoutes.get(
   }),
 );
 
+// ---------------------------------------------------------------- expiry for stock already on hand
+
+const lotBody = z.object({
+  itemId: z.string().min(1),
+  placeId: z.string().min(1),
+  qty: z.number().positive('The quantity must be more than 0'),
+  /** The unit the qty is in; the item's base unit when left out. */
+  unit: z.string().optional(),
+  expiry: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Give the expiry as a date'),
+});
+
+/** What of an item at a place has no expiry yet: on hand there, less its lots (one left out). */
+async function untracked(itemId: string, placeId: string, skipLot?: string): Promise<number> {
+  const repo = getRepo();
+  const [levels, lots] = await Promise.all([repo.listStock([itemId]), repo.listDocs<Lot>('lots', { itemId, placeId })]);
+  const onHand = levels.find((s) => s.locationId === placeId)?.qty ?? 0;
+  const inLots = lots.filter((l) => l.id !== skipLot && l.qty > 0).reduce((n, l) => n + l.qty, 0);
+  return Math.max(0, onHand - inLots);
+}
+
+async function lotFrom(b: z.infer<typeof lotBody>, skipLot?: string) {
+  const repo = getRepo();
+  const item = (await repo.listItems()).find((i) => i.id === b.itemId);
+  if (!item) throw new HttpError(404, 'No such item');
+  const loc = (await repo.listLocations()).find((l) => l.id === b.placeId);
+  if (!loc) throw new HttpError(404, 'No such place');
+  const unit = b.unit ? findUnit(item, b.unit) : item.units[0];
+  if (!unit) throw new HttpError(400, 'The item has no unit ' + b.unit);
+  const qty = Math.round(b.qty * unit.perBase * 1e6) / 1e6;
+  const free = await untracked(item.id, loc.id, skipLot);
+  if (qty > free + 1e-9) throw new HttpError(400, 'Only ' + free + ' ' + item.units[0]!.code + ' at this place has no expiry date yet');
+  return { qty, placeId: loc.id, itemId: item.id, expiry: b.expiry };
+}
+
+/** Puts an expiry date on stock already on the shelf: a lot with ref "manual". */
+purchasingRoutes.post(
+  '/admin/lots',
+  admin,
+  handler(async (req, res) => {
+    const b = lotBody.parse(req.body);
+    const lot: Lot = { id: newId('lot'), ...(await lotFrom(b)), receivedAt: now(), ref: 'manual' };
+    await getRepo().putDocs<Lot>('lots', [lot]);
+    emit('pos');
+    res.status(201).json(lot);
+  }),
+);
+
+/** Changes a lot's date, quantity or place; the same on-hand limit applies. */
+purchasingRoutes.put(
+  '/admin/lots/:id',
+  admin,
+  handler(async (req, res) => {
+    const repo = getRepo();
+    const old = await repo.getDoc<Lot>('lots', String(req.params.id));
+    if (!old) throw new HttpError(404, 'No such expiry lot');
+    const b = lotBody.partial({ itemId: true }).parse(req.body);
+    const lot: Lot = { ...old, ...(await lotFrom({ ...b, itemId: old.itemId }, old.id)) };
+    await repo.putDoc('lots', lot);
+    emit('pos');
+    res.json(lot);
+  }),
+);
+
+purchasingRoutes.delete(
+  '/admin/lots/:id',
+  admin,
+  handler(async (req, res) => {
+    const repo = getRepo();
+    if (!(await repo.getDoc<Lot>('lots', String(req.params.id)))) throw new HttpError(404, 'No such expiry lot');
+    await repo.deleteDoc('lots', String(req.params.id));
+    emit('pos');
+    res.json({ ok: true });
+  }),
+);
+
 /** Lots expiring within `days` (15 by default), expired ones included, with the item's names. */
 purchasingRoutes.get(
   '/admin/expiring',

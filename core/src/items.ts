@@ -185,3 +185,21 @@ export function itemMatches(item: { nameEn: string; nameKn: string; aliases?: Al
   }
   return false;
 }
+
+/**
+ * The unit of the other name the search reached, when that name has one: "HG box" on an alias
+ * {text: 'HG box', unit: 'Box'} answers 'Box'. The search must go past the name's first word (or
+ * be the whole of a one-word name), so a bare "HG" still means the item, in its selling unit.
+ */
+export function matchedAliasUnit(item: { aliases?: Alias[] }, query: string): string | undefined {
+  const q = searchKey(query);
+  if (!q) return undefined;
+  for (const a of item.aliases ?? []) {
+    if (!a.unit) continue;
+    const whole = searchKey(a.text);
+    if (!whole.startsWith(q)) continue;
+    const first = searchKey(String(a.text).trim().split(/\s+/)[0] ?? '');
+    if (q.length > first.length || q === whole) return a.unit;
+  }
+  return undefined;
+}

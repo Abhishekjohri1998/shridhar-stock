@@ -145,6 +145,14 @@ const rice = { units: [{ code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price
   check('an other name finds it', C.itemMatches(item, 'sona'));
   check('the middle of a word does not', !C.itemMatches(item, 'soori'));
   check('an empty search finds nothing', !C.itemMatches(item, '  '));
+  {
+    const hg = { aliases: [{ text: 'HG box', unit: 'Box' }, { text: 'Kit', unit: 'pc' }, { text: 'HG' }] };
+    check('an alias with a unit answers it', C.matchedAliasUnit(hg, 'HG box') === 'Box');
+    check('part of its second word too', C.matchedAliasUnit(hg, 'hg b') === 'Box');
+    check('only its first word does not', C.matchedAliasUnit(hg, 'HG') === undefined);
+    check('a whole one-word alias does', C.matchedAliasUnit(hg, 'kit') === 'pc');
+    check('a part of it does not', C.matchedAliasUnit(hg, 'ki') === undefined);
+  }
 }
 
 // ---------------------------------------------------------------- CSV

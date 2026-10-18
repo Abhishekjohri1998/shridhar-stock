@@ -7,6 +7,7 @@ import {
   type Ink,
   isActiveRole,
   itemMatches,
+  matchedAliasUnit,
   normalisePhone,
   priceFor,
   rateRange,
@@ -55,7 +56,11 @@ billingLinkRoutes.get(
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 8));
     const items = q ? (await getRepo().listItems()).filter((i) => i.active && itemMatches(i, q)).slice(0, limit) : [];
     res.json({
-      items: items.map((i) => ({
+      items: items.map((i) => {
+        // Typed through an other name tied to a unit ("HG box" -> Box): billing picks that unit.
+        const au = matchedAliasUnit(i, q);
+        const matchedUnit = au ? findUnit(i, au)?.code : undefined;
+        return {
         id: i.id,
         nameEn: i.nameEn,
         nameKn: i.nameKn,
@@ -72,7 +77,9 @@ billingLinkRoutes.get(
           ...(u.min != null ? { min: u.min } : {}),
           ...(u.max != null ? { max: u.max } : {}),
         })),
-      })),
+        ...(matchedUnit ? { matchedUnit } : {}),
+        };
+      }),
     });
   }),
 );
