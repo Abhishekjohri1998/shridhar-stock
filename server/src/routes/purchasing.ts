@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { expiringWithin, findUnit, soonestExpiry, type Carrier, type CarrierTrip, type Lot, type Supplier } from '@stock/core';
+import { expiringWithin, findUnit, priceVolatility, soonestExpiry, type BillMirror, type Carrier, type CarrierTrip, type Lot, type Supplier } from '@stock/core';
 import { requireRole } from '../auth';
 import { handler, HttpError } from '../http';
 import { getRepo } from '../store';
@@ -264,16 +264,17 @@ purchasingRoutes.get(
   }),
 );
 
-/** What the product list sorts by: each item's last-30-days sold quantity and its soonest expiry. */
+/** What the product list sorts by: each item's last-30-days sold quantity, its soonest expiry, and how often its price changed in 90 days (from the mirrored bills). */
 purchasingRoutes.get(
   '/admin/list-facts',
   admin,
   handler(async (_req, res) => {
     const repo = getRepo();
     const from = new Date(Date.now() - 30 * 86400_000).toISOString();
-    const [moves, lots] = await Promise.all([repo.listMoves({ from }), repo.listDocs<Lot>('lots', { filter: { qty: { gt: 0 } }, fields: ['itemId', 'qty', 'expiry', 'placeId'] })]);
+    const from90 = new Date(Date.now() - 90 * 86400_000).toISOString();
+    const [moves, lots, bills] = await Promise.all([repo.listMoves({ from }), repo.listDocs<Lot>('lots', { filter: { qty: { gt: 0 } }, fields: ['itemId', 'qty', 'expiry', 'placeId'] }), repo.listDocs<BillMirror>('bills', { filter: { at: { gte: from90 } }, omit: ['lines.ink', 'lines.reading', 'customer'] })]);
     const sold: Record<string, number> = {};
     for (const m of moves) if (m.kind === 'sale') sold[m.itemId] = Math.round(((sold[m.itemId] ?? 0) + m.qty) * 1000) / 1000;
-    res.json({ sold, expiry: Object.fromEntries(soonestExpiry(lots.filter((l) => !String(l.placeId).startsWith('transit:')))) });
+    res.json({ sold, expiry: Object.fromEntries(soonestExpiry(lots.filter((l) => !String(l.placeId).startsWith('transit:')))), volatility: Object.fromEntries(priceVolatility(bills)) });
   }),
 );

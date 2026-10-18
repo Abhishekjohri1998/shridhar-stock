@@ -30,6 +30,10 @@ const ADMIN_PIN = '4821';
 async function main() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-purchasing-'));
   // A spare range, clear of 4100/4200 (running servers) and apitest's 4600-4900.
+  // Mirrored bills for the price-volatility fact: two changes in 90 days, one older change left out.
+  const ago = (d) => new Date(Date.now() - d * 86400_000).toISOString();
+  const vb = (id, at, rate) => ({ id, no: Number(id.slice(2)), at, lines: [{ i: 0, name: 'Vol', qty: 1, rate, amount: rate, state: 'typed-match', itemId: 'itm_vol', unit: 'pc' }], total: rate, paid: rate, balance: 0 });
+  fs.writeFileSync(path.join(dir, 'inventory.json'), JSON.stringify({ docs: { bills: Object.fromEntries([vb('b_1', ago(200), 5), vb('b_2', ago(20), 10), vb('b_3', ago(10), 12), vb('b_4', ago(5), 10)].map((b) => [b.id, b])) } }));
   const port = 5300 + Math.floor(Math.random() * 300);
   const base = 'http://localhost:' + port;
   const proc = spawn(process.execPath, [path.join(out, 'index.js')], {
@@ -169,6 +173,8 @@ async function main() {
     const facts = (await call('/admin/list-facts')).body;
     check('B: list facts give the soonest expiry per item', facts.expiry[soap.id] === '2026-11-30', JSON.stringify(facts));
     check('B: and sold quantities (none yet)', facts.sold && Object.keys(facts.sold).length === 0);
+    // 10 -> 12 -> 10 in 90 days (the older 5 left out): 2 changes, spread (12-10)/10.667.
+    check('B: and price changes in 90 days from mirrored bills', facts.volatility?.itm_vol?.changes === 2 && facts.volatility.itm_vol.spread === 0.188, JSON.stringify(facts.volatility));
 
     // ------------------------------------------------ split receiving: a qty per place
     const dal = (await call('/items', { method: 'POST', body: { nameEn: 'Toor dal', nameKn: 'ತೊಗರಿ', units: [{ code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price: 120 }, { code: 'bag', label: 'Bag', labelKn: '', perBase: 25, price: 2900 }], aliases: [], racks: {} } })).body;

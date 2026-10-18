@@ -836,8 +836,42 @@ async function ledger() {
   check('B: sort by highest selling (30 days)', order('selling') === 'zxy', order('selling'));
   check('B: sort by category, none last', order('category') === 'zxy', order('category'));
   check('B: sort by expiry, soonest first, none last', order('expiry') === 'yxz', order('expiry'));
-  check('B: every sort is offered', C.ITEM_SORTS.join() === 'name,price,stock,selling,category,expiry');
+  check('B: every sort is offered', C.ITEM_SORTS.join() === 'name,price,stock,selling,expiry,category,volatility', C.ITEM_SORTS.join());
+  const dirOrder = (by, dir) => C.sortItems(list, by, facts, dir).map((i) => i.id).join('');
+  check('B: name descending', dirOrder('name', 'desc') === 'xzy', dirOrder('name', 'desc'));
+  check('B: price high to low', dirOrder('price', 'desc') === 'yxz', dirOrder('price', 'desc'));
+  check('B: stock highest first', dirOrder('stock', 'desc') === 'yxz', dirOrder('stock', 'desc'));
+  check('B: selling lowest first', dirOrder('selling', 'asc') === 'yxz', dirOrder('selling', 'asc'));
+  check('B: selling default is descending', C.DEFAULT_SORT_DIR.selling === 'desc' && dirOrder('selling', 'desc') === order('selling'));
+  check('B: expiry latest first, none still last', dirOrder('expiry', 'desc') === 'xyz', dirOrder('expiry', 'desc'));
+  check('B: category Z–A, none still last', dirOrder('category', 'desc') === 'xzy', dirOrder('category', 'desc'));
+  // Price volatility: from mirrored bills, per unit, oldest first.
+  const bill = (at, lines, cancelled) => ({ at, cancelled, lines });
+  const vol = C.priceVolatility([
+    bill('2026-10-03', [{ itemId: 'x', unit: 'pc', rate: 50 }, { itemId: 'z', unit: 'pc', rate: 10 }]),
+    bill('2026-10-01', [{ itemId: 'x', unit: 'pc', rate: 45 }, { itemId: 'x', unit: 'box', rate: 400 }]),
+    bill('2026-10-02', [{ itemId: 'x', unit: 'pc', rate: 45 }, { itemId: 'x', unit: 'box', rate: 420 }, { itemId: 'z', unit: 'pc', rate: 10 }]),
+    bill('2026-10-04', [{ itemId: 'x', unit: 'pc', rate: 45 }, { itemId: 'y', unit: 'pc', rate: 1 }]),
+    bill('2026-10-05', [{ itemId: 'y', unit: 'pc', rate: 99 }], true),
+    bill('2026-10-06', [{ itemId: 'y', unit: 'pc', rate: 99, state: 'not-item' }, { name: 'free', rate: 5 }, { itemId: 'z', unit: 'pc', rate: 0 }]),
+  ]);
+  const vx = vol.get('x');
+  // pc: 45,45,50,45 -> 2 changes; box: 400,420 -> 1 change. Spread pc (50-45)/46.25=0.108, box 20/410=0.049.
+  check('B: volatility counts changes between consecutive sales of the same unit', vx && vx.changes === 3, JSON.stringify(vx));
+  check('B: volatility spread is the widest (max-min)/avg', vx && vx.spread === 0.108, JSON.stringify(vx));
+  check('B: steady price has no changes; cancelled, not-stock and zero-rate lines skipped', vol.get('z').changes === 0 && vol.get('z').spread === 0 && vol.get('y').changes === 0, JSON.stringify([...vol]));
+  const vfacts = { ...facts, volatility: new Map([['x', { changes: 2, spread: 0.1 }], ['y', { changes: 2, spread: 0.3 }]]) };
+  const vo = (dir) => C.sortItems(list, 'volatility', vfacts, dir).map((i) => i.id).join('');
+  check('B: volatility: most changes first, spread breaks ties', vo() === 'yxz', vo());
+  check('B: volatility ascending flips it', vo('asc') === 'zxy', vo('asc'));
 
+  // The calculator sheet: whole keypad at every size, bottom sheet when narrow.
+  for (const [w, h, mode] of [[360, 640, 'bottom'], [800, 1280, 'center'], [1280, 800, 'center'], [1024, 600, 'center']]) {
+    const l = C.calcSheetLayout(w, h);
+    check('calc sheet ' + w + 'x' + h + ': ' + mode + ', full keypad, no scroll', l.mode === mode && l.height === C.CALC_SHEET_FULL_H && !l.scroll, JSON.stringify(l));
+  }
+  const tiny = C.calcSheetLayout(800, 300);
+  check('calc sheet in a 300px-tall window scrolls inside, never off screen', tiny.scroll && tiny.height === 268, JSON.stringify(tiny));
   // The calculator: a parser, never eval.
   const cases = [
     ['2+3*4', 14],

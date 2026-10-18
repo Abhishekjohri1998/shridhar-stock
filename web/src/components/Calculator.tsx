@@ -1,5 +1,6 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
-import { calc } from '@stock/core';
+import { createPortal } from 'react-dom';
+import { calc, calcSheetLayout } from '@stock/core';
 import { useBi } from './ui';
 
 /** A number box: one typed as a number, or with a numeric keyboard. */
@@ -37,6 +38,8 @@ export function CalculatorButton() {
   const [target, setTarget] = useState<HTMLInputElement | null>(null);
   const openFor = (box: HTMLInputElement | null) => {
     setTarget(box && document.contains(box) ? box : null);
+    // Close the phone keyboard first: the sheet has its own keys, and an open keyboard squeezes it.
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     setOpen(true);
   };
   // A long press (0.6 s, without moving) on a number box opens the calculator for that box.
@@ -73,39 +76,35 @@ export function CalculatorButton() {
       <button className="icon-btn calc-btn" onClick={() => openFor(lastBox)} aria-label={bi('Calculator', 'ಕ್ಯಾಲ್ಕುಲೇಟರ್')} title={bi('Calculator', 'ಕ್ಯಾಲ್ಕುಲೇಟರ್')} data-tour="calculator">
         <span aria-hidden="true">🧮</span>
       </button>
-      {open && <CalculatorPop target={target} onClose={() => setOpen(false)} />}
+      {/* Into <body>: the top bar is see-through (backdrop-filter), which turns position: fixed inside it into
+          "fixed to the bar" and squeezed the pop-up into a thin strip over the header. */}
+      {open && createPortal(<CalculatorPop target={target} onClose={() => setOpen(false)} />, document.body)}
     </>
   );
 }
 
 /**
- * Where the pop-up may sit: from just under the top bar to the bottom of what is visible (the
- * phone keyboard taken off), so it never runs off the top or the bottom; it scrolls inside if short.
+ * Where the pop-up sits: a bottom sheet on a narrow screen, a centred box on a wider one, always
+ * tall enough for the whole keypad (calcSheetLayout, core). It reads the window, not the
+ * visualViewport: opening the calculator closes the phone keyboard, so a keyboard-shrunk
+ * visualViewport (the old cause of a thin box with no keys) never sizes it.
  */
-function useFit(): CSSProperties {
+function useFit(): { mode: 'bottom' | 'center'; style: CSSProperties } {
   const measure = () => {
-    const vv = typeof window !== 'undefined' ? window.visualViewport : null;
-    const viewH = vv ? vv.height : window.innerHeight;
-    const offTop = vv ? vv.offsetTop : 0;
-    const bar = document.querySelector('.top');
-    const barBottom = bar ? Math.max(0, bar.getBoundingClientRect().bottom) : 0;
-    const top = Math.max(8, Math.min(barBottom + 8, viewH / 3)) + offTop;
-    return { marginTop: top, maxHeight: Math.max(160, viewH + offTop - top - 8) };
+    const l = calcSheetLayout(window.innerWidth, window.innerHeight);
+    return { mode: l.mode, style: { minHeight: l.height, maxHeight: l.room } as CSSProperties };
   };
-  const [style, setStyle] = useState(measure);
+  const [fit, setFit] = useState(measure);
   useEffect(() => {
-    const again = () => setStyle(measure());
-    const vv = window.visualViewport;
+    const again = () => setFit(measure());
     window.addEventListener('resize', again);
-    vv?.addEventListener('resize', again);
-    vv?.addEventListener('scroll', again);
+    window.addEventListener('orientationchange', again);
     return () => {
       window.removeEventListener('resize', again);
-      vv?.removeEventListener('resize', again);
-      vv?.removeEventListener('scroll', again);
+      window.removeEventListener('orientationchange', again);
     };
   }, []);
-  return style;
+  return fit;
 }
 
 function CalculatorPop({ target, onClose }: { target: HTMLInputElement | null; onClose: () => void }) {
@@ -114,10 +113,12 @@ function CalculatorPop({ target, onClose }: { target: HTMLInputElement | null; o
   const [note, setNote] = useState('');
   const field = useRef<HTMLInputElement>(null);
   const result = text.trim() ? calc(text) : null;
-  const box = useFit();
+  const fit = useFit();
   const shown = result == null ? '' : String(result);
   useEffect(() => {
-    field.current?.focus();
+    // A real keyboard (mouse-driven screen) can type the sum straight away; a touch screen must
+    // not, or the phone keyboard opens over the keys.
+    if (window.matchMedia?.('(pointer: fine)').matches) field.current?.focus({ preventScroll: true });
     const key = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
@@ -141,8 +142,8 @@ function CalculatorPop({ target, onClose }: { target: HTMLInputElement | null; o
     onClose();
   };
   return (
-    <div className="sheet-wrap calc-wrap" onClick={onClose}>
-      <div className="sheet calc" style={box} role="dialog" aria-modal="true" aria-label={bi('Calculator', 'ಕ್ಯಾಲ್ಕುಲೇಟರ್')} onClick={(e) => e.stopPropagation()}>
+    <div className={'sheet-wrap calc-wrap ' + fit.mode} onClick={onClose}>
+      <div className="sheet calc" style={fit.style} role="dialog" aria-modal="true" aria-label={bi('Calculator', 'ಕ್ಯಾಲ್ಕುಲೇಟರ್')} onClick={(e) => e.stopPropagation()}>
         <div className="sheet-top">
           <b>🧮 {bi('Calculator', 'ಕ್ಯಾಲ್ಕುಲೇಟರ್')}</b>
           <button className="btn ghost small" onClick={onClose} aria-label={bi('Close', 'ಮುಚ್ಚಿ')}>
@@ -152,6 +153,8 @@ function CalculatorPop({ target, onClose }: { target: HTMLInputElement | null; o
         <input
           ref={field}
           className="calc-in"
+          inputMode="none"
+          autoComplete="off"
           value={text}
           onChange={(e) => {
             setNote('');

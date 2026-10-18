@@ -142,8 +142,26 @@ export function soonestExpiry(lots: Lot[]): Map<string, string> {
 
 // ------------------------------------------------------------------ the product list's sorts
 
-export const ITEM_SORTS = ['name', 'price', 'stock', 'selling', 'category', 'expiry'] as const;
+export const ITEM_SORTS = ['name', 'price', 'stock', 'selling', 'expiry', 'category', 'volatility'] as const;
 export type ItemSort = (typeof ITEM_SORTS)[number];
+export type SortDir = 'asc' | 'desc';
+
+/** The order each sort starts in: A–Z, cheapest, least stock, best selling, soonest expiry, most changed price. */
+export const DEFAULT_SORT_DIR: Record<ItemSort, SortDir> = {
+  name: 'asc',
+  price: 'asc',
+  stock: 'asc',
+  selling: 'desc',
+  expiry: 'asc',
+  category: 'asc',
+  volatility: 'desc',
+};
+
+/** How often an item's selling price moved: changes between consecutive sales, and (max − min) / avg. */
+export interface PriceVolatility {
+  changes: number;
+  spread: number;
+}
 
 export interface SortFacts {
   /** Total stock in base units. */
@@ -154,40 +172,67 @@ export interface SortFacts {
   expiry: Map<string, string>;
   /** Price of one selling unit. */
   price: (i: Item) => number;
+  /** Price changes in the last 90 days. */
+  volatility?: Map<string, PriceVolatility>;
   lang?: 'en' | 'kn';
 }
 
 /**
- * The list in the chosen order: name A–Z, price low to high, stock low to high (what to buy
- * first), highest selling first, category A–Z, expiry soonest first (items with no lot last).
- * Ties fall back to the name.
+ * The list in the chosen order and direction (default per sort: DEFAULT_SORT_DIR). Items with
+ * nothing to sort by (no expiry, no category) stay last either way. Ties fall back to the name A–Z.
  */
-export function sortItems<T extends Item>(items: T[], by: ItemSort, f: SortFacts): T[] {
+export function sortItems<T extends Item>(items: T[], by: ItemSort, f: SortFacts, dir: SortDir = DEFAULT_SORT_DIR[by]): T[] {
   const name = (i: Item) => ((f.lang === 'kn' && i.nameKn) || i.nameEn || i.nameKn || '').toLowerCase();
   const byName = (a: Item, b: Item) => name(a).localeCompare(name(b));
+  const sign = dir === 'desc' ? -1 : 1;
+  /** Ascending compare of optional text; blanks last whatever the direction. */
+  const text = (x: string | undefined, y: string | undefined) => {
+    if ((x ?? '') === (y ?? '')) return 0;
+    if (!x) return 1;
+    if (!y) return -1;
+    return sign * x.localeCompare(y);
+  };
+  const vol = (i: Item) => f.volatility?.get(i.id) ?? { changes: 0, spread: 0 };
   const cmp: Record<ItemSort, (a: T, b: T) => number> = {
-    name: byName,
-    price: (a, b) => f.price(a) - f.price(b),
-    stock: (a, b) => (f.total.get(a.id) ?? 0) - (f.total.get(b.id) ?? 0),
-    selling: (a, b) => (f.sold.get(b.id) ?? 0) - (f.sold.get(a.id) ?? 0),
-    category: (a, b) => {
-      const x = (a.category ?? '').toLowerCase();
-      const y = (b.category ?? '').toLowerCase();
-      if (x === y) return 0;
-      if (!x) return 1;
-      if (!y) return -1;
-      return x.localeCompare(y);
-    },
-    expiry: (a, b) => {
-      const x = f.expiry.get(a.id);
-      const y = f.expiry.get(b.id);
-      if (x === y) return 0;
-      if (!x) return 1;
-      if (!y) return -1;
-      return x.localeCompare(y);
-    },
+    name: (a, b) => sign * byName(a, b),
+    price: (a, b) => sign * (f.price(a) - f.price(b)),
+    stock: (a, b) => sign * ((f.total.get(a.id) ?? 0) - (f.total.get(b.id) ?? 0)),
+    selling: (a, b) => sign * ((f.sold.get(a.id) ?? 0) - (f.sold.get(b.id) ?? 0)),
+    category: (a, b) => text((a.category ?? '').toLowerCase(), (b.category ?? '').toLowerCase()),
+    expiry: (a, b) => text(f.expiry.get(a.id), f.expiry.get(b.id)),
+    volatility: (a, b) => sign * (vol(a).changes - vol(b).changes || vol(a).spread - vol(b).spread),
   };
   return [...items].sort((a, b) => cmp[by](a, b) || byName(a, b));
+}
+
+/**
+ * Per item, from mirrored bills (not cancelled), oldest first: how many times the line rate of
+ * the same unit changed from one sale to the next, and the widest (max − min) / avg of those
+ * rates over its units, rounded to 3 places. Lines with no item, "not stock" or no rate are skipped.
+ */
+export function priceVolatility(bills: { at: string; cancelled?: boolean; lines: { itemId?: string; unit?: string; rate: number; state?: string }[] }[]): Map<string, PriceVolatility> {
+  const seen = new Map<string, number[]>();
+  for (const b of [...bills].sort((x, y) => x.at.localeCompare(y.at))) {
+    if (b.cancelled) continue;
+    for (const l of b.lines ?? []) {
+      if (!l.itemId || l.state === 'not-item' || !(l.rate > 0)) continue;
+      const k = l.itemId + '\u0000' + (l.unit ?? '').toLowerCase();
+      const a = seen.get(k) ?? [];
+      a.push(l.rate);
+      seen.set(k, a);
+    }
+  }
+  const out = new Map<string, PriceVolatility>();
+  for (const [k, rates] of seen) {
+    const id = k.split('\u0000')[0]!;
+    let changes = 0;
+    for (let i = 1; i < rates.length; i++) if (Math.abs(rates[i]! - rates[i - 1]!) > 1e-9) changes++;
+    const avg = rates.reduce((s, r) => s + r, 0) / rates.length;
+    const spread = Math.round(((Math.max(...rates) - Math.min(...rates)) / avg) * 1000) / 1000;
+    const cur = out.get(id) ?? { changes: 0, spread: 0 };
+    out.set(id, { changes: cur.changes + changes, spread: Math.max(cur.spread, spread) });
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------ the calculator
@@ -268,4 +313,21 @@ export function calc(input: string): number | null {
   } catch {
     return null;
   }
+}
+
+/** The calculator sheet's full height: title, sum, answer, five rows of keys and "Put in box". */
+export const CALC_SHEET_FULL_H = 480;
+
+/**
+ * Where the calculator sheet sits for a window of w × h (the layout viewport, not the visual
+ * one: the sheet closes the phone keyboard, so a keyboard-shrunk visualViewport is ignored).
+ * Narrow screens get a bottom sheet, wider ones a centred box. It is always tall enough for the
+ * whole keypad (height, its least), may grow to room, and only scrolls inside when the window
+ * itself is shorter than the keypad.
+ */
+export function calcSheetLayout(w: number, h: number): { mode: 'bottom' | 'center'; height: number; room: number; scroll: boolean } {
+  const mode = w < 640 ? 'bottom' : 'center';
+  const room = Math.max(0, Math.floor(h - (mode === 'center' ? 32 : 8)));
+  const height = Math.min(CALC_SHEET_FULL_H, room);
+  return { mode, height, room, scroll: room < CALC_SHEET_FULL_H };
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { describeQty, formatRate, sellPriceOf, isLow, itemMatches, lowAtOf, pickName, sortItems, totalsByItem, ITEM_SORTS, type Item, type ItemSort, type Lang } from '@stock/core';
+import { describeQty, formatRate, sellPriceOf, isLow, itemMatches, lowAtOf, pickName, sortItems, totalsByItem, DEFAULT_SORT_DIR, ITEM_SORTS, type Item, type ItemSort, type Lang, type PriceVolatility, type SortDir } from '@stock/core';
 import { api, http } from '../../lib/api';
 import { Select } from '../../components/Select';
 import { useLive } from '../../lib/live';
@@ -37,16 +37,29 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
       api.stock(),
       api.locations(),
       // What the sorts need: 30-day sold and the soonest expiry. The list works without them.
-      http.get<{ sold: Record<string, number>; expiry: Record<string, string> }>('/admin/list-facts').catch(() => ({ sold: {} as Record<string, number>, expiry: {} as Record<string, string> })),
+      http
+        .get<{ sold: Record<string, number>; expiry: Record<string, string>; volatility?: Record<string, PriceVolatility> }>('/admin/list-facts')
+        .catch(() => ({ sold: {} as Record<string, number>, expiry: {} as Record<string, string>, volatility: {} as Record<string, PriceVolatility> })),
     ]);
     return { items, stock, locs: locs.filter((l) => l.active), facts };
   }, [live]);
   const sortBy: ItemSort = (ITEM_SORTS as readonly string[]).includes(params.get('sort') ?? '') ? (params.get('sort') as ItemSort) : 'name';
+  const dirParam = params.get('dir');
+  const sortDir: SortDir = dirParam === 'asc' || dirParam === 'desc' ? dirParam : DEFAULT_SORT_DIR[sortBy];
+  // A new sort starts in its own direction; the 🔽/🔼 button flips it. Both live in the URL.
   const setSort = (v: ItemSort) => {
     const next = new URLSearchParams(params);
     if (v === 'name') next.delete('sort');
     else next.set('sort', v);
+    next.delete('dir');
     next.delete('cat');
+    setParams(next, { replace: true });
+  };
+  const flipDir = () => {
+    const next = new URLSearchParams(params);
+    const flipped: SortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    if (flipped === DEFAULT_SORT_DIR[sortBy]) next.delete('dir');
+    else next.set('dir', flipped);
     setParams(next, { replace: true });
   };
 
@@ -57,6 +70,7 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
   const low = (i: Item) => isLow(i, totals.get(i.id) ?? 0);
   const shop = locs.find((l) => l.kind === 'shop');
   const expiry = new Map(Object.entries(facts.expiry));
+  const volatility = new Map(Object.entries(facts.volatility ?? {}));
   // Sort = Category: first the categories with their counts; one tapped opens its items (?cat=).
   const NO_CAT = '-';
   const catOf = (i: Item) => (i.category ?? '').trim();
@@ -72,21 +86,23 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
   const catRows = (() => {
     const counts = new Map<string, number>();
     for (const i of visible) counts.set(catOf(i), (counts.get(catOf(i)) ?? 0) + 1);
-    const named = [...counts.entries()].filter(([c]) => c).sort((a, b) => a[0].localeCompare(b[0]));
+    const named = [...counts.entries()].filter(([c]) => c).sort((a, b) => (sortDir === 'desc' ? -1 : 1) * a[0].localeCompare(b[0]));
     return counts.has('') ? [...named, ['', counts.get('')!] as [string, number]] : named;
   })();
   const shown = sortItems(
     visible.filter((i) => (!q.trim() || itemMatches(i, q)) && (cat == null || catOf(i) === (cat === NO_CAT ? '' : cat))),
     sortBy,
-    { total: totals, sold: new Map(Object.entries(facts.sold)), expiry, price: (i) => sellPriceOf(i).rate, lang },
+    { total: totals, sold: new Map(Object.entries(facts.sold)), expiry, price: (i) => sellPriceOf(i).rate, volatility, lang },
+    sortDir,
   );
   const SORT_WORDS: Record<ItemSort, [string, string]> = {
     name: ['Name', 'ಹೆಸರು'],
     price: ['Price', 'ಬೆಲೆ'],
-    stock: ['Stock level (lowest first)', 'ಸ್ಟಾಕ್ (ಕಡಿಮೆ ಮೊದಲು)'],
-    selling: ['Highest selling (30 days)', 'ಹೆಚ್ಚು ಮಾರಾಟ (30 ದಿನ)'],
+    stock: ['Stock level', 'ಸ್ಟಾಕ್ ಮಟ್ಟ'],
+    selling: ['Selling', 'ಮಾರಾಟ'],
+    expiry: ['Expiry', 'ಅವಧಿ'],
     category: ['Category', 'ವರ್ಗ'],
-    expiry: ['Expiry (soonest first)', 'ಅವಧಿ (ಬೇಗ ಮುಗಿಯುವುದು ಮೊದಲು)'],
+    volatility: ['Price volatility', 'ಬೆಲೆ ಏರಿಳಿತ'],
   };
   const lowCount = items.filter((i) => i.active && low(i)).length;
 
@@ -125,6 +141,19 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
         <label className="inv-sort" data-tour="inventory-sort">
           <span className="muted">{bi('Sort', 'ವಿಂಗಡಿಸಿ')}</span>
           <Select value={sortBy} onChange={setSort} className="w-auto" aria-label={bi('Sort by', 'ವಿಂಗಡಿಸುವುದು')} options={ITEM_SORTS.map((k) => ({ value: k, label: bi(...SORT_WORDS[k]) }))} />
+          <button
+            type="button"
+            className="btn small"
+            onClick={(e) => {
+              e.preventDefault();
+              flipDir();
+            }}
+            aria-label={sortDir === 'desc' ? bi('Descending: tap for ascending', 'ಇಳಿಕೆ: ಏರಿಕೆಗೆ ಒತ್ತಿ') : bi('Ascending: tap for descending', 'ಏರಿಕೆ: ಇಳಿಕೆಗೆ ಒತ್ತಿ')}
+            title={sortDir === 'desc' ? bi('Descending', 'ಇಳಿಕೆ') : bi('Ascending', 'ಏರಿಕೆ')}
+            data-dir={sortDir}
+          >
+            {sortDir === 'desc' ? '🔽' : '🔼'}
+          </button>
         </label>
       </div>
       {cat != null && (
@@ -193,6 +222,11 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
                       {!i.active && <span className="pill">{t('items.inactive')}</span>}
                       {sortBy === 'expiry' && expiry.get(i.id) && <span className="pill warn">{bi('expires', 'ಅವಧಿ')} {expiry.get(i.id)}</span>}
                       {sortBy === 'selling' && (facts.sold[i.id] ?? 0) > 0 && <span className="muted"> {bi('sold in 30 days', '30 ದಿನದಲ್ಲಿ ಮಾರಾಟ')}: {describeQty(i, facts.sold[i.id]!, lang)}</span>}
+                      {sortBy === 'volatility' && (volatility.get(i.id)?.changes ?? 0) > 0 && (
+                        <div className="muted">
+                          {bi('price changed', 'ಬೆಲೆ ಬದಲಾಯಿತು')} {volatility.get(i.id)!.changes}× {bi('in 90 days', '90 ದಿನದಲ್ಲಿ')} · ±{Math.round(volatility.get(i.id)!.spread * 100)}%
+                        </div>
+                      )}
                     </td>
                     <td className={'num ' + (total < 0 ? 'qty-neg' : isLowNow ? 'qty-low' : '')}>
                       <b>{describeQty(i, total, lang)}</b>

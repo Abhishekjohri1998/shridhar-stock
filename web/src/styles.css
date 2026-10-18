@@ -872,8 +872,14 @@ img, svg.ink { max-width: 100%; }
 
 /* purchasing (B) */
 .calc-btn span { font-size: 1.15rem; line-height: 1; }
-.calc-wrap { align-items: flex-start; justify-content: center; padding: 0 var(--pad); overflow: hidden; }
-.sheet.calc { width: min(360px, 100%); max-width: 100%; margin: 0 auto; border-radius: var(--r-lg); overflow-y: auto; padding-bottom: var(--pad); }
+/* Calculator: a modal over everything (top bar included), centred on wide screens, a bottom sheet on narrow ones. Its height comes from calcSheetLayout. */
+.calc-wrap { z-index: 60; justify-content: center; overflow: hidden; }
+.calc-wrap.center { align-items: center; padding: 16px var(--pad); }
+.calc-wrap.bottom { align-items: flex-end; padding: 8px 0 0; }
+.sheet.calc { display: flex; flex-direction: column; width: min(360px, 100%); max-width: 100%; margin: 0 auto; overflow-y: auto; overscroll-behavior: contain; }
+.calc-wrap.center .sheet.calc { border-radius: var(--r-lg); padding-bottom: var(--pad); }
+.calc-wrap.bottom .sheet.calc { width: 100%; max-width: 480px; }
+.sheet.calc > * { flex: none; }
 .calc-in { width: 100%; font-size: 1.2rem; text-align: right; }
 .calc-out { min-height: var(--tap); display: flex; align-items: center; justify-content: flex-end; font-size: 1.5rem; font-weight: 600; color: var(--ink-900); }
 .calc-out.bad { font-size: 1rem; font-weight: 400; color: var(--ink-400); }
