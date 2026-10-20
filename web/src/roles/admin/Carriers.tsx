@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { formatRate, pickName, type Carrier, type CarrierTrip, type Item, type Supplier } from '@stock/core';
+import { formatRate, pickName, type Carrier, type CarrierTrip, type DeliveryChecklist, type Item, type Supplier } from '@stock/core';
 import { api, http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
@@ -8,6 +8,9 @@ import { useItemSearch } from './Buying';
 
 /** Today in India, YYYY-MM-DD. */
 const today = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+
+/** A delivery checklist this carrier brought, with its order and supplier. */
+type CarrierDelivery = DeliveryChecklist & { poId: string; poNo: number; supplierId: string };
 
 type ItemName = Pick<Item, 'id' | 'nameEn' | 'nameKn' | 'units'>;
 
@@ -22,7 +25,7 @@ export function CarriersPage() {
   const [version, setVersion] = useState(0);
   const live = useLive('pos');
   const { value, error } = useLoad(async () => {
-    const [data, sups, items] = await Promise.all([http.get<{ carriers: Carrier[]; trips: CarrierTrip[] }>('/admin/carriers'), http.get<Supplier[]>('/admin/suppliers'), api.items(true)]);
+    const [data, sups, items] = await Promise.all([http.get<{ carriers: Carrier[]; trips: CarrierTrip[]; deliveries?: CarrierDelivery[] }>('/admin/carriers'), http.get<Supplier[]>('/admin/suppliers'), api.items(true)]);
     return { ...data, sups, items: new Map<string, ItemName>(items.map((i) => [i.id, i])) };
   }, [version, live]);
   const [editing, setEditing] = useState<Carrier | 'new' | null>(null);
@@ -51,6 +54,7 @@ export function CarriersPage() {
       {value.carriers.length === 0 && !editing && <Empty>{bi('No carriers yet. Add the vehicles that bring your goods.', 'ಇನ್ನೂ ಸಾಗಣೆದಾರರಿಲ್ಲ. ನಿಮ್ಮ ಸಾಮಾನು ತರುವ ವಾಹನಗಳನ್ನು ಸೇರಿಸಿ.')}</Empty>}
       {value.carriers.map((c) => {
         const trips = value.trips.filter((t) => t.carrierId === c.id);
+        const brought = (value.deliveries ?? []).filter((d) => d.carrierId === c.id);
         return (
           <div className="card carrier-card" key={c.id} data-carrier={c.id}>
             <div className="bar between">
@@ -104,6 +108,30 @@ export function CarriersPage() {
                   </li>
                 ))}
               </ul>
+            )}
+            {brought.length > 0 && (
+              <>
+                <div className="muted mt-10">{bi('Deliveries brought', 'ತಂದ ಸಾಮಾನು')} · {brought.length}</div>
+                <ul className="trip-list" data-carrier-deliveries={c.id}>
+                  {brought.map((d) => {
+                    const short = d.lines.filter((l) => l.condition !== 'ok' || l.arrived < l.ordered).length;
+                    return (
+                      <li key={d.id}>
+                        <span className="trip-date">{d.at.slice(0, 10)}</span>
+                        <span className="grow">
+                          <b>{supName(d.supplierId)}</b> · #{d.poNo}
+                          {d.vehicleNo && <span className="muted"> · {d.vehicleNo}</span>}
+                          <span className="muted">
+                            {' '}
+                            · {d.lines.filter((l) => l.ok).length}/{d.lines.length} {bi('ticked', 'ಗುರುತು')}
+                          </span>
+                        </span>
+                        {short > 0 ? <span className="pill warn">{short} {bi('short or damaged', 'ಕಡಿಮೆ ಅಥವಾ ಹಾಳು')}</span> : <span className="pill ok">{bi('All OK', 'ಎಲ್ಲಾ ಸರಿ')}</span>}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
             )}
           </div>
         );

@@ -131,7 +131,8 @@ export const DOC_INDEXES: Partial<Record<DocCollection, Record<string, 1 | -1>[]
   // Home and To digitise count waiting lines, money due and handwritten bills by query.
   bills: [{ at: -1 }, { no: -1 }, { cancelled: 1, at: -1 }, { 'lines.state': 1 }, { 'lines.state': 1, dismissed: 1 }, { 'lines.state': 1, dismissed: 1, no: 1 }, { balance: 1 }, { hasInk: 1 }],
   transfers: [{ status: 1, at: -1 }, { at: -1 }],
-  pos: [{ status: 1, at: -1 }, { at: -1 }],
+  // Orders also by supplier (its history page) and by the carrier of each delivery checklist.
+  pos: [{ status: 1, at: -1 }, { at: -1 }, { supplierId: 1, at: -1 }, { 'checklists.carrierId': 1 }],
   // Deliveries: the admin's live list by status, and each worker's own.
   deliveries: [{ status: 1, at: -1 }, { personId: 1, status: 1 }, { at: -1 }],
   // Purchasing (B): trips by date and carrier, and the one linked to a receipt; lots by item and

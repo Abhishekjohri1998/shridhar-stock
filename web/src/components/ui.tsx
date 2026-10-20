@@ -77,6 +77,8 @@ const TONE: Record<string, string> = {
   received: 'ok',
   cancelled: 'muted',
   ordered: 'warn',
+  on_way: 'info',
+  part: 'warn',
   confirmed: 'info',
   dispatched: 'info',
   pending: 'warn',

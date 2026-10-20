@@ -2,7 +2,7 @@
  * Purchasing (agent B), end to end against a real server on the JSON file store in a temp
  * folder: supplier details and the item <-> supplier link, carriers and trips, the landed cost on
  * receive, expiry lots used first-expiring-first through sales and transfers, Home's expiring
- * list and the product list's facts. Never a database.
+ * list and the product list's facts; vendor history (delivery, checklists, payments). Never a database.
  */
 const path = require('node:path');
 const fs = require('node:fs');
@@ -208,6 +208,86 @@ async function main() {
     eq('B: and removed', (await call('/admin/lots/' + ml.body.id, { method: 'DELETE' })).status, 200);
     check('B: gone', !(await call('/admin/items/' + dal.id + '/lots')).body.some((l) => l.id === ml.body.id));
     eq('B: an unknown lot is 404', (await call('/admin/lots/lot_none', { method: 'DELETE' })).status, 404);
+
+    // ------------------------------------------------ vendor history: delivery, checklists, payments
+    const v = (await call('/admin/suppliers', { method: 'POST', body: { name: 'Hubli Oils', phone: '9833333333' } })).body.id;
+    const oil = (await call('/items', { method: 'POST', body: { nameEn: 'Oil', nameKn: 'ಎಣ್ಣೆ', units: [{ code: 'ltr', label: 'Ltr', labelKn: '', perBase: 1, price: 150 }, { code: 'tin', label: 'Tin', labelKn: '', perBase: 15, price: 2100 }], aliases: [], racks: {} } })).body;
+    eq('V: a carrier order needs its carrier', (await call('/admin/pos', { method: 'POST', body: { supplierId: v, to: godown, lines: [{ itemId: oil.id, unit: 'tin', qty: 1, cost: 1 }], delivery: { mode: 'carrier' } } })).status, 400);
+    // Self delivery: 10 tins at 1800 and 5 kg dal at 100.
+    const vs = await call('/admin/pos', { method: 'POST', body: { supplierId: v, to: godown, lines: [{ itemId: oil.id, unit: 'tin', qty: 10, cost: 1800 }, { itemId: dal.id, unit: 'kg', qty: 5, cost: 100 }], delivery: { mode: 'self', expectedOn: '2026-10-25' } } });
+    check('V: an order keeps how it comes', vs.status === 201 && vs.body.delivery.mode === 'self' && vs.body.delivery.expectedOn === '2026-10-25', JSON.stringify(vs.body));
+    const selfPo = vs.body.id;
+    const ow = await call('/admin/purchases/' + selfPo + '/delivery', { method: 'POST', body: { mode: 'self', expectedOn: '2026-10-25', onWay: true } });
+    check('V: marked on the way', ow.status === 200 && ow.body.progress === 'on_way' && !!ow.body.delivery.onWayAt, JSON.stringify(ow.body));
+    // Before anything arrives the bill is what was ordered: 18000 + 500.
+    const pay0 = await call('/admin/purchases/' + selfPo + '/payments', { method: 'POST', body: { amount: 2000, method: 'upi', note: 'advance' } });
+    check('V: an advance paid: paid 2000, pending 16500', pay0.status === 201 && pay0.body.paid === 2000 && pay0.body.pending === 16500 && pay0.body.billTotal === 18500, JSON.stringify(pay0.body));
+    eq('V: a payment method must be known', (await call('/admin/purchases/' + selfPo + '/payments', { method: 'POST', body: { amount: 1, method: 'cheque' } })).status, 400);
+    // Partial: 6 tins ok, 1 damaged in those, dal short (0). Stock 6 tins = 90 ltr.
+    eq('V: a checklist with nothing arrived is refused', (await call('/admin/purchases/' + selfPo + '/checklist', { method: 'POST', body: { lines: [{ itemId: oil.id, arrived: 0 }] } })).status, 400);
+    eq('V: a checklist line not on the order is refused', (await call('/admin/purchases/' + selfPo + '/checklist', { method: 'POST', body: { lines: [{ itemId: soap.id, arrived: 1 }] } })).status, 400);
+    eq('V: more than ordered is refused', (await call('/admin/purchases/' + selfPo + '/checklist', { method: 'POST', body: { lines: [{ itemId: oil.id, arrived: 11 }] } })).status, 400);
+    const c1 = await call('/admin/purchases/' + selfPo + '/checklist', { method: 'POST', body: { lines: [{ itemId: oil.id, arrived: 6, ok: true, condition: 'damaged', note: '1 tin dented' }, { itemId: dal.id, arrived: 0, ok: false, condition: 'short' }] } });
+    check('V: a partial delivery leaves the order part received', c1.status === 200 && c1.body.progress === 'part' && c1.body.status === 'ordered', JSON.stringify(c1.body));
+    const cl1 = c1.body.checklists[0];
+    check('V: the self checklist is stored with its lines', cl1.mode === 'self' && !cl1.carrierId && cl1.receipt === 1 && cl1.lines[0].ordered === 10 && cl1.lines[0].arrived === 6 && cl1.lines[0].condition === 'damaged' && cl1.lines[1].ok === false && cl1.lines[1].ordered === 5, JSON.stringify(cl1));
+    const oilAt = async () => (await call('/stock')).body.find((s) => s.itemId === oil.id && s.locationId === godown)?.qty ?? 0;
+    eq('V: 6 tins posted, 90 ltr', await oilAt(), 90);
+    check('V: the bill is now what arrived (6 x 1800)', c1.body.billTotal === 10800 && c1.body.pending === 8800, JSON.stringify(c1.body));
+    // The rest: 4 tins and 5 kg dal, with carrier confirmed this time (the shop sent its carrier).
+    const c2 = await call('/admin/purchases/' + selfPo + '/checklist', { method: 'POST', body: { mode: 'carrier', carrierId: car.id, carrierConfirmed: true, delivery: 50, lines: [{ itemId: oil.id, arrived: 4, ok: true }, { itemId: dal.id, arrived: 5, ok: true }] } });
+    check('V: the next checklist continues it, and it is received', c2.status === 200 && c2.body.progress === 'received' && c2.body.checklists.length === 2 && c2.body.checklists[1].lines[0].ordered === 4 && c2.body.checklists[1].receipt === 2, JSON.stringify(c2.body));
+    check('V: the carrier checklist takes the carrier’s vehicle', c2.body.checklists[1].carrierId === car.id && c2.body.checklists[1].vehicleNo === 'KA 09 AB 1234' && c2.body.checklists[1].carrierConfirmed === true, JSON.stringify(c2.body.checklists[1]));
+    eq('V: 10 tins in all, 150 ltr', await oilAt(), 150);
+    // 10 x 1800 + 5 x 100 + 50 delivery.
+    eq('V: bill: received costs plus the delivery charge', c2.body.billTotal, 18550);
+    eq('V: a received order takes no more checklists', (await call('/admin/purchases/' + selfPo + '/checklist', { method: 'POST', body: { lines: [{ itemId: oil.id, arrived: 1 }] } })).status, 409);
+    eq('V: overpay is refused', (await call('/admin/purchases/' + selfPo + '/payments', { method: 'POST', body: { amount: 16551, method: 'cash' } })).status, 400);
+    const pay1 = await call('/admin/purchases/' + selfPo + '/payments', { method: 'POST', body: { amount: 6550, method: 'cash', at: '2026-10-20' } });
+    check('V: a payment: paid 8550, pending 10000', pay1.body.paid === 8550 && pay1.body.pending === 10000 && pay1.body.payments.length === 2, JSON.stringify(pay1.body));
+    eq('V: the invoice total cannot go under what is paid', (await call('/admin/purchases/' + selfPo + '/bill', { method: 'POST', body: { billTotal: 8000 } })).status, 400);
+    eq('V: the invoice total can be typed in', (await call('/admin/purchases/' + selfPo + '/bill', { method: 'POST', body: { billTotal: 18600 } })).body.pending, 10050);
+
+    // A carrier order, ticked in one go.
+    const vc = (await call('/admin/pos', { method: 'POST', body: { supplierId: v, to: godown, lines: [{ itemId: oil.id, unit: 'tin', qty: 2, cost: 1900 }], delivery: { mode: 'carrier', carrierId: car.id, driverName: 'Shivu' } } })).body;
+    check('V: a carrier order fills in the vehicle', vc.delivery.carrierId === car.id && vc.delivery.vehicleNo === 'KA 09 AB 1234', JSON.stringify(vc));
+    const c3 = await call('/admin/purchases/' + vc.id + '/checklist', { method: 'POST', body: { carrierConfirmed: true, lines: [{ itemId: oil.id, arrived: 2, ok: true }] } });
+    check('V: a carrier checklist from the order', c3.status === 200 && c3.body.progress === 'received' && c3.body.checklists[0].mode === 'carrier' && c3.body.checklists[0].driverName === 'Shivu', JSON.stringify(c3.body));
+    // Closed short: the rest will not come.
+    const vx = (await call('/admin/pos', { method: 'POST', body: { supplierId: v, to: godown, lines: [{ itemId: oil.id, unit: 'tin', qty: 3, cost: 2000 }] } })).body;
+    const c4 = await call('/admin/purchases/' + vx.id + '/checklist', { method: 'POST', body: { close: true, lines: [{ itemId: oil.id, arrived: 1, condition: 'short' }] } });
+    check('V: closed with what arrived', c4.body.progress === 'received' && c4.body.billTotal === 2000, JSON.stringify(c4.body));
+
+    // History: 18600 + 3800 + 2000 bought, 8550 paid.
+    const h = (await call('/admin/suppliers/' + v + '/history')).body;
+    check('V: history totals', h.summary.bought === 24400 && h.summary.paid === 8550 && h.summary.pending === 15850 && h.summary.orders === 3 && h.summary.lastPurchase === vx.at, JSON.stringify(h.summary));
+    check('V: purchases newest first with bill and status', h.purchases.length === 3 && h.purchases[0].id === vx.id && h.purchases[2].pending === 10050 && h.purchases[2].progress === 'received', JSON.stringify(h.purchases.map((p) => [p.id, p.pending, p.progress])));
+    check('V: every delivery checklist, newest first, with its order', h.deliveries.length === 4 && h.deliveries[0].poId === vx.id && h.deliveries.every((d, i) => i === 0 || h.deliveries[i - 1].at >= d.at) && h.deliveries.some((d) => d.poNo === vs.body.no && d.lines[0].condition === 'damaged'), JSON.stringify(h.deliveries));
+    eq('V: an unknown supplier has no history', (await call('/admin/suppliers/sup_none/history')).status, 404);
+
+    // Pay pending, oldest first: 11000 pays the first order's 10050, then 950 of the next.
+    eq('V: paying more than is pending in all is refused', (await call('/admin/suppliers/' + v + '/pay', { method: 'POST', body: { amount: 15851, method: 'bank' } })).status, 400);
+    const pp = await call('/admin/suppliers/' + v + '/pay', { method: 'POST', body: { amount: 11000, method: 'bank' } });
+    check('V: shared oldest first', pp.status === 201 && pp.body.paid.length === 2 && pp.body.paid[0].id === selfPo && pp.body.paid[0].amount === 10050 && pp.body.paid[1].id === vc.id && pp.body.paid[1].amount === 950, JSON.stringify(pp.body));
+    const h2 = (await call('/admin/suppliers/' + v + '/history')).body;
+    check('V: pending after', h2.summary.pending === 4850 && h2.purchases.find((p) => p.id === selfPo).pending === 0 && h2.purchases.find((p) => p.id === vc.id).pending === 2850, JSON.stringify(h2.summary));
+
+    // The carrier shows what it brought.
+    const cd = (await call('/admin/carriers')).body.deliveries;
+    check('V: the carrier shows its deliveries', cd.length === 2 && cd.every((d) => d.carrierId === car.id && d.supplierId === v) && cd.some((d) => d.poId === vc.id) && cd.some((d) => d.poId === selfPo && d.receipt === 2), JSON.stringify(cd));
+
+    // Back-compat: the old receive on a part-received order posts only what is still due, with new keys.
+    const vb2 = (await call('/admin/pos', { method: 'POST', body: { supplierId: v, to: godown, lines: [{ itemId: oil.id, unit: 'tin', qty: 4, cost: 1000 }] } })).body;
+    await call('/admin/purchases/' + vb2.id + '/checklist', { method: 'POST', body: { lines: [{ itemId: oil.id, arrived: 1 }] } });
+    const before = await oilAt();
+    eq('V: the old receive still works after a checklist', (await call('/admin/pos/' + vb2.id + '/receive', { method: 'POST', body: {} })).status, 200);
+    eq('V: and posts the 3 tins still due', (await oilAt()) - before, 45);
+    const vb2After = (await call('/admin/suppliers/' + v + '/history')).body.purchases.find((p) => p.id === vb2.id);
+    check('V: two receipts recorded, received, bill 4000', vb2After.received.length === 2 && vb2After.receipts === 2 && vb2After.progress === 'received' && vb2After.billTotal === 4000, JSON.stringify(vb2After));
+    // Old orders (one receive, no checklist or payments) read as before: po3 is received, nothing paid.
+    const old = (await call('/admin/suppliers/' + supId + '/history')).body;
+    const old3 = old.purchases.find((p) => p.id === po3.id);
+    check('V: an old order reads with its bill and no payments', old3.progress === 'received' && old3.paid === 0 && old3.billTotal === 25100 && old.deliveries.length === 0, JSON.stringify(old3));
   } catch (err) {
     failed++;
     console.log('FAIL threw: ' + err.stack);

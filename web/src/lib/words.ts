@@ -8,6 +8,8 @@ export const STATUS: Record<string, [en: string, kn: string]> = {
   received: ['Received', 'ತಲುಪಿದೆ'],
   cancelled: ['Cancelled', 'ರದ್ದು'],
   ordered: ['Ordered', 'ಆರ್ಡರ್ ಮಾಡಲಾಗಿದೆ'],
+  on_way: ['On the way', 'ದಾರಿಯಲ್ಲಿದೆ'],
+  part: ['Part received', 'ಸ್ವಲ್ಪ ಬಂದಿದೆ'],
   confirmed: ['Confirmed', 'ಒಪ್ಪಿಗೆ'],
   dispatched: ['Dispatched', 'ಕಳುಹಿಸಲಾಗಿದೆ'],
   pending: ['To go', 'ಹೋಗಬೇಕು'],

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { expiringWithin, findUnit, priceVolatility, soonestExpiry, type BillMirror, type Carrier, type CarrierTrip, type Lot, type Supplier } from '@stock/core';
+import { expiringWithin, findUnit, priceVolatility, soonestExpiry, type BillMirror, type Carrier, type CarrierTrip, type Lot, type PurchaseOrder, type Supplier } from '@stock/core';
 import { requireRole } from '../auth';
 import { handler, HttpError } from '../http';
 import { getRepo } from '../store';
@@ -39,15 +39,23 @@ function carrierFrom(b: z.infer<typeof carrierBody>, id: string, old?: Carrier):
   };
 }
 
-/** Every carrier, with their trips newest first (the last 200 trips in all). */
+/** Every carrier, with their trips newest first (the last 200 trips in all), and the deliveries each brought (from the orders' checklists, newest first). */
 purchasingRoutes.get(
   '/admin/carriers',
   admin,
   handler(async (_req, res) => {
     const repo = getRepo();
-    const [carriers, trips] = await Promise.all([repo.listDocs<Carrier>('carriers'), repo.listDocs<CarrierTrip>('trips', { sort: { date: -1, at: -1 }, limit: 200 })]);
+    const [carriers, trips, pos] = await Promise.all([
+      repo.listDocs<Carrier>('carriers'),
+      repo.listDocs<CarrierTrip>('trips', { sort: { date: -1, at: -1 }, limit: 200 }),
+      repo.listDocs<PurchaseOrder>('pos', { filter: { 'checklists.carrierId': { exists: true } }, fields: ['no', 'supplierId', 'checklists'] }),
+    ]);
     carriers.sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name));
-    res.json({ carriers, trips });
+    const deliveries = pos
+      .flatMap((p) => (p.checklists ?? []).filter((c) => c.carrierId).map((c) => ({ ...c, poId: p.id, poNo: p.no, supplierId: p.supplierId })))
+      .sort((a, b) => b.at.localeCompare(a.at))
+      .slice(0, 300);
+    res.json({ carriers, trips, deliveries });
   }),
 );
 

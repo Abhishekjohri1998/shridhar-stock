@@ -331,3 +331,147 @@ export function calcSheetLayout(w: number, h: number): { mode: 'bottom' | 'cente
   const height = Math.min(CALC_SHEET_FULL_H, room);
   return { mode, height, room, scroll: room < CALC_SHEET_FULL_H };
 }
+
+// ------------------------------------------------------------------ vendor history: delivery, checklists, payments
+
+/** Who brings an order: the vendor themselves, or a goods carrier from the Carriers list. */
+export type DeliveryMode = 'self' | 'carrier';
+export const DELIVERY_MODES = ['self', 'carrier'] as const;
+
+export interface PoDelivery {
+  mode: DeliveryMode;
+  carrierId?: string;
+  vehicleNo?: string;
+  driverName?: string;
+  /** YYYY-MM-DD. */
+  expectedOn?: string;
+  /** When the shop marked it "on the way". */
+  onWayAt?: string;
+}
+
+export const PAY_METHODS = ['cash', 'upi', 'bank', 'credit'] as const;
+export type PayMethod = (typeof PAY_METHODS)[number];
+
+export interface PoPayment {
+  id: string;
+  at: string;
+  amount: number;
+  method: PayMethod;
+  note?: string;
+  by?: string;
+}
+
+export const CHECK_CONDITIONS = ['ok', 'damaged', 'short'] as const;
+export type CheckCondition = (typeof CHECK_CONDITIONS)[number];
+
+/** One line of a delivery checklist: what was still due, what arrived, ticked, and its state. */
+export interface ChecklistLine {
+  itemId: string;
+  /** Still due on the order when this delivery came, in the order's unit. */
+  ordered: number;
+  arrived: number;
+  /** Ticked as checked. */
+  ok: boolean;
+  condition: CheckCondition;
+  note?: string;
+}
+
+export interface DeliveryChecklist {
+  id: string;
+  at: string;
+  by: string;
+  mode: DeliveryMode;
+  carrierId?: string;
+  vehicleNo?: string;
+  driverName?: string;
+  /** The carrier and vehicle were checked against the order. */
+  carrierConfirmed?: boolean;
+  /** Which receipt of the order this was (1, 2, ...). */
+  receipt: number;
+  lines: ChecklistLine[];
+}
+
+/** What arrived of one line in one receipt. */
+export interface ReceivedLine {
+  itemId: string;
+  qty: number;
+  cost: number;
+  delivery?: number;
+  landed?: number;
+  expiry?: string;
+  places?: { placeId: string; qty: number }[];
+  receipt?: number;
+}
+
+type PoLike = {
+  status: string;
+  at: string;
+  lines: { itemId: string; qty: number; cost: number }[];
+  received?: ReceivedLine[];
+  payments?: PoPayment[];
+  billTotal?: number;
+  delivery?: PoDelivery;
+};
+
+/** All that arrived of an item on an order, over every receipt. */
+export function receivedQty(p: Pick<PoLike, 'received'>, itemId: string): number {
+  return Math.round((p.received ?? []).filter((r) => r.itemId === itemId).reduce((n, r) => n + r.qty, 0) * 1e6) / 1e6;
+}
+
+export type PoProgress = 'ordered' | 'on_way' | 'part' | 'received' | 'cancelled';
+
+/** Ordered → On the way → Part received → Received (or Cancelled). */
+export function poProgress(p: PoLike): PoProgress {
+  if (p.status === 'cancelled') return 'cancelled';
+  if (p.status === 'received') return 'received';
+  if ((p.received ?? []).some((r) => r.qty > 0)) return 'part';
+  if (p.delivery?.onWayAt) return 'on_way';
+  return 'ordered';
+}
+
+/**
+ * The bill and what is left to pay. The bill is the vendor's invoice total when typed in; else
+ * what arrived at its cost plus the delivery charge; before anything arrives, what was ordered
+ * (so an advance can be paid). A cancelled order with nothing received owes nothing.
+ */
+export function poBill(p: PoLike): { billTotal: number; paid: number; pending: number } {
+  const rec = p.received ?? [];
+  const worked = rec.length
+    ? rec.reduce((s, r) => s + r.qty * r.cost + (r.delivery ?? 0), 0)
+    : p.status === 'cancelled'
+      ? 0
+      : p.lines.reduce((s, l) => s + l.qty * l.cost, 0);
+  const billTotal = round2(p.billTotal ?? worked);
+  const paid = round2((p.payments ?? []).reduce((s, x) => s + x.amount, 0));
+  return { billTotal, paid, pending: round2(Math.max(0, billTotal - paid)) };
+}
+
+/** A payment shared over orders oldest first, each taking up to what it still owes. */
+export function allocateOldestFirst(orders: { id: string; at: string; pending: number }[], amount: number): { id: string; amount: number }[] {
+  let left = round2(amount);
+  const out: { id: string; amount: number }[] = [];
+  for (const o of [...orders].sort((a, b) => a.at.localeCompare(b.at))) {
+    if (left <= 0) break;
+    if (!(o.pending > 0)) continue;
+    const take = round2(Math.min(o.pending, left));
+    out.push({ id: o.id, amount: take });
+    left = round2(left - take);
+  }
+  return out;
+}
+
+/** A supplier's totals over its orders (cancelled ones left out): bought, paid, pending, last purchase. */
+export function supplierSummary(pos: PoLike[]): { bought: number; paid: number; pending: number; orders: number; lastPurchase: string | null } {
+  const live = pos.filter((p) => p.status !== 'cancelled');
+  let bought = 0;
+  let paid = 0;
+  let pending = 0;
+  for (const p of live) {
+    const b = poBill(p);
+    bought += b.billTotal;
+    paid += b.paid;
+    pending += b.pending;
+  }
+  const last = live.map((p) => p.at).sort().pop() ?? null;
+  return { bought: round2(bought), paid: round2(paid), pending: round2(pending), orders: live.length, lastPurchase: last };
+}

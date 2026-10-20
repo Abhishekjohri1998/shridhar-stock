@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { formatRate, formatRupees, landedUnitCost, pickName, poStage, splitCharge, type CarrierTrip, type Item, type SupplierContact, type ItemSupplierRow, type Location, type PurchaseOrder, type Refill, type Supplier } from '@stock/core';
+import { CHECK_CONDITIONS, formatRate, landedUnitCost, pickName, poBill, poProgress, poStage, receivedQty, splitCharge, type Carrier, type CarrierTrip, type CheckCondition, type DeliveryMode, type Item, type SupplierContact, type ItemSupplierRow, type Location, type PurchaseOrder, type Refill, type Supplier } from '@stock/core';
 import { api, http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
 import { statusWord } from '../../lib/words';
 import { Empty, Loading, Money, Select, Status, useBi, when, Table } from '../../components/ui';
+import { BillLine, ChecklistList, CONDITION_WORDS, DeliveryText, PaymentForm, PaymentsList, SupplierHistory, useCarriers } from './VendorHistory';
 
 /** An item as the orders page needs it: names and units, never the whole catalogue. */
 type ItemBrief = Pick<Item, 'id' | 'nameEn' | 'nameKn' | 'defaultUnit'> & { units: { code: string; label: string; labelKn: string; perBase: number; cost?: number }[] };
 
 interface Page {
-  orders: (PurchaseOrder & { received?: { itemId: string; qty: number; cost: number; delivery?: number; landed?: number; expiry?: string; places?: { placeId: string; qty: number }[] }[] })[];
+  orders: PurchaseOrder[];
   items: ItemBrief[];
   open: number;
   total: number;
@@ -66,6 +67,7 @@ export function PurchasesPage() {
     ]);
     return { page, sups, locs: locs.filter((l) => l.active) };
   }, [version, live, tab, shown]);
+  const carriers = useCarriers();
   const [making, setMaking] = useState(params.get('new') === 'buy');
   const [err, setErr] = useState('');
   const [note, setNote] = useState('');
@@ -111,11 +113,12 @@ export function PurchasesPage() {
         <NewOrder
           locs={value.locs}
           sups={value.sups.filter((s) => s.active)}
+          carriers={carriers}
           fromBuyList={params.get('new') === 'buy'}
           onDone={(saved) => {
             setMaking(false);
             setParams({});
-            if (saved) setNote(bi('Order saved. Stock goes up when you tap “Mark received”.', 'ಆರ್ಡರ್ ಉಳಿಸಲಾಗಿದೆ. “ಬಂದಿದೆ ಎಂದು ಗುರುತಿಸಿ” ಒತ್ತಿದಾಗ ಸ್ಟಾಕ್ ಹೆಚ್ಚುತ್ತದೆ.'));
+            if (saved) setNote(bi('Order saved. Stock goes up when you tick the delivery checklist.', 'ಆರ್ಡರ್ ಉಳಿಸಲಾಗಿದೆ. ಸಾಮಾನು ಪರಿಶೀಲನೆ ಗುರುತಿಸಿದಾಗ ಸ್ಟಾಕ್ ಹೆಚ್ಚುತ್ತದೆ.'));
             setVersion((v) => v + 1);
           }}
         />
@@ -132,7 +135,7 @@ export function PurchasesPage() {
             </Empty>
           )}
           {value.page.orders.map((p) => (
-            <OrderCard key={p.id + ':' + p.status} p={p} supplier={value.sups.find((s) => s.id === p.supplierId)} items={items} locs={value.locs} lang={lang} act={act} />
+            <OrderCard key={p.id + ':' + p.status + ':' + (p.receipts ?? 0)} p={p} carriers={carriers} reload={(m) => { setNote(m); setVersion((v) => v + 1); }} supplier={value.sups.find((s) => s.id === p.supplierId)} items={items} locs={value.locs} lang={lang} act={act} />
           ))}
           {value.page.next != null && (
             <button className="btn" onClick={() => setShown((n) => n + 30)}>
@@ -147,6 +150,8 @@ export function PurchasesPage() {
 
 function OrderCard({
   p,
+  carriers,
+  reload,
   supplier,
   items,
   locs,
@@ -154,6 +159,8 @@ function OrderCard({
   act,
 }: {
   p: Page['orders'][number];
+  carriers: Carrier[];
+  reload: (msg: string) => void;
   supplier?: Supplier;
   items: Map<string, ItemBrief>;
   locs: Location[];
@@ -162,7 +169,23 @@ function OrderCard({
 }) {
   const bi = useBi();
   const stage = poStage(p.status);
-  const [got, setGot] = useState<Record<string, { qty: string; cost: string }>>(() => Object.fromEntries(p.lines.map((l) => [l.itemId, { qty: String(l.qty), cost: String(l.cost) }])));
+  const progress = poProgress(p);
+  const bill = poBill(p);
+  // What is still due of each line: the checklist starts with that as arrived.
+  const due = (itemId: string, qty: number) => Math.max(0, Math.round((qty - receivedQty(p, itemId)) * 1e6) / 1e6);
+  const [got, setGot] = useState<Record<string, { qty: string; cost: string }>>(() => Object.fromEntries(p.lines.map((l) => [l.itemId, { qty: String(due(l.itemId, l.qty)), cost: String(l.cost) }])));
+  // The delivery checklist: a tick and a condition per line, the carrier confirmed, and whether the rest will come.
+  const [tick, setTick] = useState<Record<string, boolean>>({});
+  const [cond, setCond] = useState<Record<string, CheckCondition>>({});
+  const [lineNote, setLineNote] = useState<Record<string, string>>({});
+  const [mode, setMode] = useState<DeliveryMode>(p.delivery?.mode ?? 'self');
+  const [carrierId, setCarrierId] = useState(p.delivery?.carrierId ?? '');
+  const [vehicleNo, setVehicleNo] = useState(p.delivery?.vehicleNo ?? '');
+  const [driverName, setDriverName] = useState(p.delivery?.driverName ?? '');
+  const [carrierOk, setCarrierOk] = useState(false);
+  const [closeRest, setCloseRest] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [details, setDetails] = useState(false);
   const [receiving, setReceiving] = useState(false);
   const [to, setTo] = useState(p.to);
   const [updateCost, setUpdateCost] = useState(true);
@@ -189,7 +212,12 @@ function OrderCard({
   const shareList = splitCharge(arrivedNow.map((g) => ({ qty: g.qty, value: g.qty * g.cost })), charge);
   const landedOf = new Map(arrivedNow.map((g, i) => [g.itemId, landedUnitCost(g.cost, g.qty, shareList[i]!)]));
   const total = p.lines.reduce((s, l) => s + l.qty * l.cost, 0);
-  const rec = new Map((p.received ?? []).map((r) => [r.itemId, r]));
+  // Every receipt of a line together: the quantity added up, the last receipt's cost and details.
+  const rec = new Map<string, NonNullable<PurchaseOrder['received']>[number]>();
+  for (const r of p.received ?? []) {
+    const was = rec.get(r.itemId);
+    rec.set(r.itemId, was ? { ...r, qty: Math.round((was.qty + r.qty) * 1e6) / 1e6 } : r);
+  }
   const placeOf = (id: string) => {
     const l = locs.find((x) => x.id === id);
     return l ? pickName(l.name, l.nameKn, lang) : id;
@@ -204,7 +232,11 @@ function OrderCard({
         <span className="name">
           #{p.no} · {supplier?.name ?? p.supplierId} → {placeOf(p.to)}
         </span>
-        <Status s={stage} label={statusWord(stage, lang)} />
+        <Status s={progress} label={statusWord(progress, lang)} />
+      </div>
+      <div className="muted" data-tour="purchases-delivery">
+        <DeliveryText d={p.delivery} carriers={carriers} />
+        {p.delivery?.expectedOn && ' · ' + bi('expected', 'ನಿರೀಕ್ಷೆ') + ' ' + p.delivery.expectedOn}
       </div>
       <div className="muted">
         {bi('Ordered', 'ಆರ್ಡರ್')} {when(p.times.ordered ?? p.at, lang)}
@@ -218,7 +250,7 @@ function OrderCard({
             <th>{bi('Item', 'ಸಾಮಾನು')}</th>
             <th className="num">{bi('Ordered', 'ಆರ್ಡರ್')}</th>
             <th className="num">{bi('Cost', 'ಬೆಲೆ')}</th>
-            {(receiving || stage === 'received') && <th>{bi('Arrived', 'ಬಂದದ್ದು')}</th>}
+            {(receiving || (p.received ?? []).length > 0) && <th>{bi('Arrived', 'ಬಂದದ್ದು')}</th>}
           </tr>
         </thead>
         <tbody>
@@ -233,6 +265,11 @@ function OrderCard({
                 <td className="num">{l.cost ? formatRate(l.cost) : '—'}</td>
                 {receiving && (
                   <td>
+                    <label className="check-inline">
+                      <input type="checkbox" checked={tick[l.itemId] ?? false} onChange={(e) => setTick({ ...tick, [l.itemId]: e.target.checked })} aria-label={bi('Ticked', 'ಗುರುತು')} />
+                      {bi('Due', 'ಬರಬೇಕಾದ್ದು')} {due(l.itemId, l.qty)} {unitWord(l.itemId, l.unit)}
+                    </label>
+                    <br />
                     <input inputMode="decimal" value={got[l.itemId]!.qty} onChange={(e) => setGot({ ...got, [l.itemId]: { ...got[l.itemId]!, qty: e.target.value } })} className="in-qty" aria-label={bi('Arrived', 'ಬಂದದ್ದು')} />{' '}
                     ₹<input inputMode="decimal" value={got[l.itemId]!.cost} onChange={(e) => setGot({ ...got, [l.itemId]: { ...got[l.itemId]!, cost: e.target.value } })} className="in-price" aria-label={bi('Cost', 'ಬೆಲೆ')} />
                     {charge > 0 && landedOf.has(l.itemId) && (
@@ -240,6 +277,14 @@ function OrderCard({
                         {bi('with delivery', 'ಸಾಗಣೆ ಸೇರಿ')} {formatRate(landedOf.get(l.itemId)!)} / {unitWord(l.itemId, l.unit)}
                       </div>
                     )}
+                    <div className="chips mt-6" role="group" aria-label={bi('Condition', 'ಸ್ಥಿತಿ')}>
+                      {CHECK_CONDITIONS.map((c) => (
+                        <button key={c} type="button" className={'chip' + ((cond[l.itemId] ?? 'ok') === c ? ' on' : '')} onClick={() => setCond({ ...cond, [l.itemId]: c })}>
+                          {bi(CONDITION_WORDS[c]![0], CONDITION_WORDS[c]![1])}
+                        </button>
+                      ))}
+                    </div>
+                    {(cond[l.itemId] ?? 'ok') !== 'ok' && <input className="mt-6" value={lineNote[l.itemId] ?? ''} onChange={(e) => setLineNote({ ...lineNote, [l.itemId]: e.target.value })} placeholder={bi('What is wrong (optional)', 'ಏನು ತೊಂದರೆ (ಬೇಕಿದ್ದರೆ)')} aria-label={bi('Note', 'ಟಿಪ್ಪಣಿ')} />}
                     <div className="chips mt-6" role="group" aria-label={bi('Where it goes', 'ಎಲ್ಲಿ ಇಡುವುದು')}>
                       <button type="button" className={'chip' + (split[l.itemId] ? '' : ' on')} onClick={() => setSplit(Object.fromEntries(Object.entries(split).filter(([k]) => k !== l.itemId)))}>
                         {bi('All to', 'ಎಲ್ಲಾ')} {placeOf(to)}
@@ -268,7 +313,7 @@ function OrderCard({
                     </label>
                   </td>
                 )}
-                {!receiving && stage === 'received' && (
+                {!receiving && (p.received ?? []).length > 0 && (
                   <td className={r && r.qty < l.qty ? 'qty-neg' : ''}>
                     {r ? r.qty + ' ' + unitWord(l.itemId, l.unit) + (r.cost !== l.cost ? ' @ ' + formatRate(r.cost) : '') : '—'}
                     {r?.landed != null && <div className="muted">{bi('landed', 'ಸಾಗಣೆ ಸೇರಿ')} {formatRate(r.landed)}</div>}
@@ -281,6 +326,51 @@ function OrderCard({
           })}
         </tbody>
       </Table>
+      {receiving && (
+        <div className="mt-8" data-tour="purchases-checklist">
+          <div className="chips" role="group" aria-label={bi('Who brought it', 'ಯಾರು ತಂದರು')}>
+            <button type="button" className={'chip' + (mode === 'self' ? ' on' : '')} onClick={() => setMode('self')}>
+              🏪 {bi('Vendor brought it', 'ಮಾರಾಟಗಾರರೇ ತಂದರು')}
+            </button>
+            <button type="button" className={'chip' + (mode === 'carrier' ? ' on' : '')} onClick={() => setMode('carrier')}>
+              🚚 {bi('Goods carrier', 'ಸಾಗಣೆ ವಾಹನ')}
+            </button>
+          </div>
+          {mode === 'carrier' && (
+            <div className="grid2 mt-6">
+              <label className="field">
+                <span>{bi('Carrier', 'ಸಾಗಣೆದಾರ')}</span>
+                <Select
+                  value={carrierId}
+                  onChange={(id) => {
+                    setCarrierId(id);
+                    const c = carriers.find((x) => x.id === id);
+                    if (c?.vehicleNo) setVehicleNo(c.vehicleNo);
+                  }}
+                  aria-label={bi('Carrier', 'ಸಾಗಣೆದಾರ')}
+                  options={[{ value: '', label: bi('Choose', 'ಆರಿಸಿ') }, ...carriers.filter((c) => c.active || c.id === carrierId).map((c) => ({ value: c.id, label: c.name, hint: c.vehicleNo }))]}
+                />
+              </label>
+              <label className="field">
+                <span>{bi('Vehicle no.', 'ವಾಹನ ಸಂಖ್ಯೆ')}</span>
+                <input value={vehicleNo} onChange={(e) => setVehicleNo(e.target.value)} />
+              </label>
+              <label className="field">
+                <span>{bi('Driver (optional)', 'ಚಾಲಕ (ಬೇಕಿದ್ದರೆ)')}</span>
+                <input value={driverName} onChange={(e) => setDriverName(e.target.value)} />
+              </label>
+              <label className="check">
+                <input type="checkbox" checked={carrierOk} onChange={(e) => setCarrierOk(e.target.checked)} />
+                {bi('Carrier and vehicle checked', 'ಸಾಗಣೆದಾರ, ವಾಹನ ಪರಿಶೀಲಿಸಲಾಗಿದೆ')}
+              </label>
+            </div>
+          )}
+          <label className="check">
+            <input type="checkbox" checked={closeRest} onChange={(e) => setCloseRest(e.target.checked)} />
+            {bi('The rest will not come: close the order', 'ಉಳಿದದ್ದು ಬರುವುದಿಲ್ಲ: ಆರ್ಡರ್ ಮುಗಿಸಿ')}
+          </label>
+        </div>
+      )}
       {receiving && (
         <div className="grid2 mt-8">
           <label className="field">
@@ -307,24 +397,41 @@ function OrderCard({
         </div>
       )}
       <div className="bar mt-8">
-        <b className="grow">{total > 0 && <Money v={total} />}</b>
+        <b className="grow">
+          {total > 0 && <Money v={total} />}
+          {(bill.paid > 0 || (p.received ?? []).length > 0) && (
+            <div className="muted">
+              <BillLine p={p} />
+            </div>
+          )}
+        </b>
         {receiving ? (
           <>
             <button
               className="btn primary"
-              disabled={anySplitBad}
+              disabled={anySplitBad || (mode === 'carrier' && !carrierId)}
               onClick={() =>
                 act(
-                  '/admin/pos/' + p.id + '/receive',
+                  '/admin/purchases/' + p.id + '/checklist',
                   {
                     updateCost,
                     to,
-                    got: Object.fromEntries(
-                      Object.entries(got).map(([k, v]) => [
-                        k,
-                        { qty: Number(v.qty) || 0, cost: Number(v.cost) || 0, ...(split[k] ? { places: Object.entries(split[k]!).map(([placeId, q]) => ({ placeId, qty: Number(q) || 0 })).filter((x) => x.qty > 0) } : {}) },
-                      ]),
-                    ),
+                    mode,
+                    ...(mode === 'carrier' ? { carrierId, vehicleNo, driverName, carrierConfirmed: carrierOk } : {}),
+                    close: closeRest,
+                    lines: p.lines.map((l) => {
+                      const v = got[l.itemId]!;
+                      const k = l.itemId;
+                      return {
+                        itemId: k,
+                        arrived: Number(v.qty) || 0,
+                        ok: tick[k] ?? false,
+                        condition: cond[k] ?? 'ok',
+                        ...(lineNote[k]?.trim() ? { note: lineNote[k]!.trim() } : {}),
+                        cost: Number(v.cost) || 0,
+                        ...(split[k] ? { places: Object.entries(split[k]!).map(([placeId, q]) => ({ placeId, qty: Number(q) || 0 })).filter((x) => x.qty > 0) } : {}),
+                      };
+                    }),
                     ...(tripId ? { tripId } : {}),
                     ...(delivery.trim() !== '' ? { delivery: Number(delivery) || 0 } : {}),
                     expiry: Object.fromEntries(Object.entries(expiry).filter(([, v]) => /^\d{4}-\d{2}-\d{2}$/.test(v))),
@@ -333,25 +440,62 @@ function OrderCard({
                 )
               }
             >
-              ✓ {bi('Save received', 'ಬಂದಿದೆ ಎಂದು ಉಳಿಸಿ')}
+              ✓ {bi('Save checklist', 'ಪರಿಶೀಲನೆ ಉಳಿಸಿ')}
             </button>
             <button className="btn" onClick={() => setReceiving(false)}>
               {bi('Back', 'ಹಿಂದೆ')}
             </button>
           </>
         ) : (
-          stage === 'ordered' && (
-            <>
-              <button className="btn primary" data-tour="purchases-receive" onClick={() => setReceiving(true)}>
-                {bi('Mark received', 'ಬಂದಿದೆ ಎಂದು ಗುರುತಿಸಿ')}
+          <>
+            {stage === 'ordered' && (
+              <>
+                <button className="btn primary" data-tour="purchases-receive" onClick={() => setReceiving(true)}>
+                  {progress === 'part' ? bi('Next delivery', 'ಮುಂದಿನ ಸಾಮಾನು') : bi('Goods arrived', 'ಸಾಮಾನು ಬಂತು')}
+                </button>
+                {progress === 'ordered' && p.delivery && (
+                  <button className="btn" onClick={() => act('/admin/purchases/' + p.id + '/delivery', { ...p.delivery, onWay: true }, bi('Marked on the way.', 'ದಾರಿಯಲ್ಲಿದೆ ಎಂದು ಗುರುತಿಸಲಾಗಿದೆ.'))}>
+                    🚚 {bi('On the way', 'ದಾರಿಯಲ್ಲಿದೆ')}
+                  </button>
+                )}
+                {progress !== 'part' && (
+                  <button className="btn" onClick={() => act('/admin/pos/' + p.id + '/cancel', {}, bi('Order cancelled.', 'ಆರ್ಡರ್ ರದ್ದಾಗಿದೆ.'))}>
+                    {bi('Cancel order', 'ಆರ್ಡರ್ ರದ್ದು')}
+                  </button>
+                )}
+              </>
+            )}
+            {bill.pending > 0 && stage !== 'cancelled' && !paying && (
+              <button className="btn" onClick={() => setPaying(true)}>
+                + {bi('Payment', 'ಪಾವತಿ')}
               </button>
-              <button className="btn" onClick={() => act('/admin/pos/' + p.id + '/cancel', {}, bi('Order cancelled.', 'ಆರ್ಡರ್ ರದ್ದಾಗಿದೆ.'))}>
-                {bi('Cancel order', 'ಆರ್ಡರ್ ರದ್ದು')}
+            )}
+            {((p.payments ?? []).length > 0 || (p.checklists ?? []).length > 0) && (
+              <button className="btn ghost" aria-expanded={details} onClick={() => setDetails(!details)}>
+                {details ? bi('Hide details', 'ವಿವರ ಮುಚ್ಚಿ') : bi('Payments and deliveries', 'ಪಾವತಿ, ಸಾಮಾನು ವಿವರ')}
               </button>
-            </>
-          )
+            )}
+          </>
         )}
       </div>
+      {paying && (
+        <PaymentForm
+          path={'/admin/purchases/' + p.id + '/payments'}
+          max={bill.pending}
+          onDone={(msg) => {
+            setPaying(false);
+            if (msg) reload(msg);
+          }}
+        />
+      )}
+      {details && (
+        <div className="mt-8">
+          <b>{bi('Payments', 'ಪಾವತಿಗಳು')}</b>
+          <PaymentsList list={p.payments ?? []} />
+          <b className="mt-8">{bi('Delivery checklists', 'ಸಾಮಾನು ಪರಿಶೀಲನೆ')}</b>
+          <ChecklistList list={p.checklists ?? []} carriers={carriers} nameOf={(id) => briefName(items.get(id), id, lang)} />
+        </div>
+      )}
     </div>
   );
 }
@@ -380,12 +524,18 @@ export function useItemSearch(q: string) {
   return found;
 }
 
-function NewOrder({ locs, sups, fromBuyList, onDone }: { locs: Location[]; sups: Supplier[]; fromBuyList: boolean; onDone: (saved: boolean) => void }) {
+function NewOrder({ locs, sups, carriers, fromBuyList, onDone }: { locs: Location[]; sups: Supplier[]; carriers: Carrier[]; fromBuyList: boolean; onDone: (saved: boolean) => void }) {
   const bi = useBi();
   const { lang } = useSession();
   const [supplierId, setSupplier] = useState(sups[0]?.id ?? '');
   const [to, setTo] = useState(locs.find((l) => l.kind === 'godown')?.id ?? locs[0]?.id ?? '');
   const [lines, setLines] = useState<Line[]>([]);
+  // How it comes: the vendor themselves, or a goods carrier (who, which vehicle, when).
+  const [mode, setMode] = useState<DeliveryMode>('self');
+  const [carrierId, setCarrierId] = useState('');
+  const [vehicleNo, setVehicleNo] = useState('');
+  const [driverName, setDriverName] = useState('');
+  const [expectedOn, setExpectedOn] = useState('');
   const [known, setKnown] = useState<Map<string, ItemBrief>>(new Map());
   const [q, setQ] = useState('');
   const [err, setErr] = useState('');
@@ -440,12 +590,13 @@ function NewOrder({ locs, sups, fromBuyList, onDone }: { locs: Location[]; sups:
     setQ('');
   };
   const set = (i: number, patch: Partial<Line>) => setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
-  const ok = lines.length > 0 && lines.every((l) => Number(l.qty) > 0 && (l.cost.trim() === '' || Number(l.cost) >= 0));
+  const ok = (mode === 'self' || !!carrierId) && lines.length > 0 && lines.every((l) => Number(l.qty) > 0 && (l.cost.trim() === '' || Number(l.cost) >= 0));
   const save = async () => {
     setErr('');
     setBusy(true);
     try {
-      await http.post('/admin/pos', { supplierId, to, lines: lines.map((l) => ({ itemId: l.itemId, unit: l.unit, qty: Number(l.qty), cost: Number(l.cost) || 0 })) });
+      const delivery = { mode, ...(mode === 'carrier' ? { carrierId, ...(vehicleNo.trim() ? { vehicleNo: vehicleNo.trim() } : {}), ...(driverName.trim() ? { driverName: driverName.trim() } : {}) } : {}), ...(expectedOn ? { expectedOn } : {}) };
+      await http.post('/admin/pos', { supplierId, to, delivery, lines: lines.map((l) => ({ itemId: l.itemId, unit: l.unit, qty: Number(l.qty), cost: Number(l.cost) || 0 })) });
       onDone(true);
     } catch (e) {
       setErr((e as Error).message);
@@ -466,6 +617,48 @@ function NewOrder({ locs, sups, fromBuyList, onDone }: { locs: Location[]; sups:
           <Select value={to} onChange={setTo} aria-label={bi('Goods go to', 'ಸಾಮಾನು ಹೋಗುವುದು')} options={locs.map((l) => ({ value: l.id, label: pickName(l.name, l.nameKn, lang) }))} />
         </label>
       </div>
+      <div className="field" data-tour="purchases-new-delivery">
+        <span>{bi('How it comes', 'ಹೇಗೆ ಬರುತ್ತದೆ')}</span>
+        <div className="chips">
+          <button type="button" className={'chip' + (mode === 'self' ? ' on' : '')} onClick={() => setMode('self')}>
+            🏪 {bi('Vendor brings it', 'ಮಾರಾಟಗಾರರೇ ತರುತ್ತಾರೆ')}
+          </button>
+          <button type="button" className={'chip' + (mode === 'carrier' ? ' on' : '')} onClick={() => setMode('carrier')}>
+            🚚 {bi('Goods carrier', 'ಸಾಗಣೆ ವಾಹನ')}
+          </button>
+        </div>
+      </div>
+      <div className="grid2">
+        {mode === 'carrier' && (
+          <>
+            <label className="field">
+              <span>{bi('Carrier', 'ಸಾಗಣೆದಾರ')}</span>
+              <Select
+                value={carrierId}
+                onChange={(id) => {
+                  setCarrierId(id);
+                  setVehicleNo(carriers.find((x) => x.id === id)?.vehicleNo ?? '');
+                }}
+                aria-label={bi('Carrier', 'ಸಾಗಣೆದಾರ')}
+                options={[{ value: '', label: bi('Choose', 'ಆರಿಸಿ') }, ...carriers.filter((c) => c.active).map((c) => ({ value: c.id, label: c.name, hint: c.vehicleNo }))]}
+              />
+            </label>
+            <label className="field">
+              <span>{bi('Vehicle no.', 'ವಾಹನ ಸಂಖ್ಯೆ')}</span>
+              <input value={vehicleNo} onChange={(e) => setVehicleNo(e.target.value)} />
+            </label>
+            <label className="field">
+              <span>{bi('Driver (optional)', 'ಚಾಲಕ (ಬೇಕಿದ್ದರೆ)')}</span>
+              <input value={driverName} onChange={(e) => setDriverName(e.target.value)} />
+            </label>
+          </>
+        )}
+        <label className="field">
+          <span>{bi('Expected on (optional)', 'ಬರುವ ದಿನ (ಬೇಕಿದ್ದರೆ)')}</span>
+          <input type="date" value={expectedOn} onChange={(e) => setExpectedOn(e.target.value)} />
+        </label>
+      </div>
+      {mode === 'carrier' && carriers.length === 0 && <div className="muted">{bi('Add carriers in Buy & move → Carriers.', 'ಸಾಗಣೆದಾರರನ್ನು ಖರೀದಿ → ಸಾಗಣೆದಾರರು ಇಲ್ಲಿ ಸೇರಿಸಿ.')}</div>}
       {groups.length > 0 && (
         <div className="field" data-tour="purchases-groups">
           <span>{bi('The buy list, by usual supplier: one order each', 'ಖರೀದಿ ಪಟ್ಟಿ, ಯಾವಾಗಲೂ ಕೊಡುವವರ ಪ್ರಕಾರ: ಒಬ್ಬರಿಗೆ ಒಂದು ಆರ್ಡರ್')}</span>
@@ -607,6 +800,7 @@ function Suppliers({ sups, onDone }: { sups: Supplier[]; onDone: () => void }) {
             {s.notes && <div className="muted">{s.notes}</div>}
           </div>
           {openId === s.id && <SupplierForm key={s.id} s={s} onDone={done} />}
+          {openId === s.id && <SupplierHistory supplierId={s.id} />}
         </div>
       ))}
     </div>

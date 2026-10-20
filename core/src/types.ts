@@ -365,6 +365,18 @@ export interface PurchaseOrder {
   eta?: string;
   at: string;
   times: Partial<Record<POStatus, string>>;
+  /** How the goods come: the vendor themselves, or a goods carrier (who, which vehicle). */
+  delivery?: import('./purchasing').PoDelivery;
+  /** What arrived, one entry per line per receipt (a partial delivery adds more). */
+  received?: import('./purchasing').ReceivedLine[];
+  /** How many receipts were posted: each one's stock moves carry its own key. */
+  receipts?: number;
+  /** The checklist filled in at each delivery, oldest first. */
+  checklists?: import('./purchasing').DeliveryChecklist[];
+  /** Money paid to the vendor for this order, oldest first. */
+  payments?: import('./purchasing').PoPayment[];
+  /** The vendor's invoice total, when typed in; else worked out (poBill). */
+  billTotal?: number;
 }
 
 // ------------------------------------------------------------------ deliveries (done by Workers) and orders (old records only)
