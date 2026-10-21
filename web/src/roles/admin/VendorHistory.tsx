@@ -119,7 +119,29 @@ export function PaymentsList({ list }: { list: PoPayment[] }) {
 }
 
 /** Delivery checklists: date, how it came, lines ticked, and any shortage or damage by name. */
-export function ChecklistList({ list, carriers, nameOf, showOrder }: { list: (DeliveryChecklist & { poNo?: number })[]; carriers: Carrier[]; nameOf: (id: string) => string; showOrder?: boolean }) {
+/**
+ * Deletes an order's record, after a confirm. Not received: gone outright. Received or part
+ * received: the record only; the stock it brought stays as it is. Payments go with it.
+ * Returns the message to show, or '' when the admin said no.
+ */
+export async function deletePurchase(p: Pick<PurchaseOrder, 'id' | 'no' | 'received'>, bi: (en: string, kn: string) => string): Promise<string> {
+  const got = (p.received ?? []).some((r) => r.qty > 0);
+  const ask = got
+    ? bi('Order #' + p.no + ' was received. Delete the record only (stock stays as it is)? Its payments go with it.', 'ಆರ್ಡರ್ #' + p.no + ' ಬಂದಿದೆ. ದಾಖಲೆ ಮಾತ್ರ ಅಳಿಸಬೇಕೆ (ಸ್ಟಾಕ್ ಹಾಗೆಯೇ ಇರುತ್ತದೆ)? ಅದರ ಪಾವತಿಗಳೂ ಹೋಗುತ್ತವೆ.')
+    : bi('Delete order #' + p.no + '? Its payments go with it.', 'ಆರ್ಡರ್ #' + p.no + ' ಅಳಿಸಬೇಕೆ? ಅದರ ಪಾವತಿಗಳೂ ಹೋಗುತ್ತವೆ.');
+  if (!window.confirm(ask)) return '';
+  await http.del('/admin/purchases/' + p.id + (got ? '?recordOnly=1' : ''));
+  return got ? bi('Order record deleted. Stock is unchanged.', 'ಆರ್ಡರ್ ದಾಖಲೆ ಅಳಿಸಲಾಗಿದೆ. ಸ್ಟಾಕ್ ಬದಲಾಗಿಲ್ಲ.') : bi('Order deleted.', 'ಆರ್ಡರ್ ಅಳಿಸಲಾಗಿದೆ.');
+}
+
+/** Deletes one delivery checklist's record, after a confirm. The stock is unchanged. */
+export async function deleteChecklist(poId: string, cid: string, bi: (en: string, kn: string) => string): Promise<string> {
+  if (!window.confirm(bi('Delete this checklist record? Stock stays as it is.', 'ಈ ಪರಿಶೀಲನೆ ದಾಖಲೆ ಅಳಿಸಬೇಕೆ? ಸ್ಟಾಕ್ ಹಾಗೆಯೇ ಇರುತ್ತದೆ.'))) return '';
+  await http.del('/admin/purchases/' + poId + '/checklists/' + cid);
+  return bi('Checklist deleted. Stock is unchanged.', 'ಪರಿಶೀಲನೆ ಅಳಿಸಲಾಗಿದೆ. ಸ್ಟಾಕ್ ಬದಲಾಗಿಲ್ಲ.');
+}
+
+export function ChecklistList({ list, carriers, nameOf, showOrder, onDelete }: { list: (DeliveryChecklist & { poNo?: number; poId?: string })[]; carriers: Carrier[]; nameOf: (id: string) => string; showOrder?: boolean; onDelete?: (c: DeliveryChecklist & { poId?: string }) => void }) {
   const bi = useBi();
   const { lang } = useSession();
   if (!list.length) return <div className="muted">{bi('No deliveries yet.', 'ಇನ್ನೂ ಸಾಮಾನು ಬಂದಿಲ್ಲ.')}</div>;
@@ -145,6 +167,21 @@ export function ChecklistList({ list, carriers, nameOf, showOrder }: { list: (De
               )}
             </span>
             {bad.length > 0 ? <span className="pill warn">{bi('Short or damaged', 'ಕಡಿಮೆ ಅಥವಾ ಹಾಳು')}</span> : <span className="pill ok">{bi('All OK', 'ಎಲ್ಲಾ ಸರಿ')}</span>}
+            {onDelete && (
+              <button
+                type="button"
+                className="btn ghost small"
+                data-delete-checklist={c.id}
+                aria-label={bi('Delete checklist', 'ಪರಿಶೀಲನೆ ಅಳಿಸಿ')}
+                title={bi('Delete checklist', 'ಪರಿಶೀಲನೆ ಅಳಿಸಿ')}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(c);
+                }}
+              >
+                🗑
+              </button>
+            )}
           </li>
         );
       })}
@@ -173,6 +210,7 @@ export function SupplierHistory({ supplierId }: { supplierId: string }) {
   const [open, setOpen] = useState<string | null>(null);
   const [paying, setPaying] = useState<string | null>(null);
   const [note, setNote] = useState('');
+  const [err, setErr] = useState('');
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
   const { h, names } = value;
@@ -182,9 +220,19 @@ export function SupplierHistory({ supplierId }: { supplierId: string }) {
     setNote(msg);
     if (msg) setVersion((v) => v + 1);
   };
+  const run = async (f: () => Promise<string>) => {
+    setErr('');
+    try {
+      const msg = await f();
+      if (msg) done(msg);
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
   return (
     <div className="card" data-tour="supplier-history" onClick={(e) => e.stopPropagation()}>
       {note && <div className="msg ok">{note}</div>}
+      {err && <div className="msg err">{err}</div>}
       <div className="grid2">
         <div className="field">
           <span>{bi('Total bought', 'ಒಟ್ಟು ಖರೀದಿ')}</span>
@@ -241,6 +289,19 @@ export function SupplierHistory({ supplierId }: { supplierId: string }) {
               </div>
             </span>
             <Status s={p.progress} label={statusWord(p.progress, lang)} />
+            <button
+              type="button"
+              className="btn ghost small"
+              data-delete-order={p.id}
+              aria-label={bi('Delete order', 'ಆರ್ಡರ್ ಅಳಿಸಿ')}
+              title={bi('Delete order', 'ಆರ್ಡರ್ ಅಳಿಸಿ')}
+              onClick={(e) => {
+                e.stopPropagation();
+                void run(() => deletePurchase(p, bi));
+              }}
+            >
+              🗑
+            </button>
             {open === p.id && (
               <div className="grow" onClick={(e) => e.stopPropagation()}>
                 <div className="muted mt-6">{p.lines.map((l) => nameOf(l.itemId) + ' ' + l.qty + ' ' + l.unit).join(', ')}</div>
@@ -253,7 +314,7 @@ export function SupplierHistory({ supplierId }: { supplierId: string }) {
                 )}
                 {paying === p.id && <PaymentForm path={'/admin/purchases/' + p.id + '/payments'} max={p.pending} onDone={done} />}
                 <b className="mt-8">{bi('Delivery checklists', 'ಸಾಮಾನು ಪರಿಶೀಲನೆ')}</b>
-                <ChecklistList list={p.checklists ?? []} carriers={carriers} nameOf={nameOf} />
+                <ChecklistList list={p.checklists ?? []} carriers={carriers} nameOf={nameOf} onDelete={(c) => void run(() => deleteChecklist(p.id, c.id, bi))} />
               </div>
             )}
           </li>
@@ -261,7 +322,7 @@ export function SupplierHistory({ supplierId }: { supplierId: string }) {
       </ul>
 
       <h3 className="mt-14">{bi('Delivery history', 'ಸಾಮಾನು ಬಂದ ಇತಿಹಾಸ')}</h3>
-      <ChecklistList list={h.deliveries} carriers={carriers} nameOf={nameOf} showOrder />
+      <ChecklistList list={h.deliveries} carriers={carriers} nameOf={nameOf} showOrder onDelete={(c) => c.poId && void run(() => deleteChecklist(c.poId!, c.id, bi))} />
     </div>
   );
 }

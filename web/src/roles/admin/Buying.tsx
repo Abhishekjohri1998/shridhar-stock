@@ -6,7 +6,7 @@ import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
 import { statusWord } from '../../lib/words';
 import { Empty, Loading, Money, Select, Status, useBi, when, Table } from '../../components/ui';
-import { BillLine, ChecklistList, CONDITION_WORDS, DeliveryText, PaymentForm, PaymentsList, SupplierHistory, useCarriers } from './VendorHistory';
+import { BillLine, ChecklistList, CONDITION_WORDS, deleteChecklist, deletePurchase, DeliveryText, PaymentForm, PaymentsList, SupplierHistory, useCarriers } from './VendorHistory';
 
 /** An item as the orders page needs it: names and units, never the whole catalogue. */
 type ItemBrief = Pick<Item, 'id' | 'nameEn' | 'nameKn' | 'defaultUnit'> & { units: { code: string; label: string; labelKn: string; perBase: number; cost?: number }[] };
@@ -187,7 +187,13 @@ function OrderCard({
   const [paying, setPaying] = useState(false);
   const [details, setDetails] = useState(false);
   const [receiving, setReceiving] = useState(false);
-  const [to, setTo] = useState(p.to);
+  // Per line, where it is stored: where this item last went on this order, else the old order-level place, else the first place.
+  const lastPlace = (itemId: string) => {
+    const r = [...(p.received ?? [])].reverse().find((x) => x.itemId === itemId && x.qty > 0);
+    const id = r?.places?.length ? r.places[0]!.placeId : p.to;
+    return id && locs.some((l) => l.id === id) ? id : (locs[0]?.id ?? '');
+  };
+  const [storeIn, setStoreIn] = useState<Record<string, string>>(() => Object.fromEntries(p.lines.map((l) => [l.itemId, lastPlace(l.itemId)])));
   const [updateCost, setUpdateCost] = useState(true);
   // Delivery (B): a charge typed in, or a carrier trip linked, spread into the landed cost.
   const [delivery, setDelivery] = useState('');
@@ -230,7 +236,7 @@ function OrderCard({
     <div className="card" data-tour="purchases-card">
       <div className="bar between">
         <span className="name">
-          #{p.no} · {supplier?.name ?? p.supplierId} → {placeOf(p.to)}
+          #{p.no} · {supplier?.name ?? p.supplierId}
         </span>
         <Status s={progress} label={statusWord(progress, lang)} />
       </div>
@@ -285,11 +291,22 @@ function OrderCard({
                       ))}
                     </div>
                     {(cond[l.itemId] ?? 'ok') !== 'ok' && <input className="mt-6" value={lineNote[l.itemId] ?? ''} onChange={(e) => setLineNote({ ...lineNote, [l.itemId]: e.target.value })} placeholder={bi('What is wrong (optional)', 'ಏನು ತೊಂದರೆ (ಬೇಕಿದ್ದರೆ)')} aria-label={bi('Note', 'ಟಿಪ್ಪಣಿ')} />}
-                    <div className="chips mt-6" role="group" aria-label={bi('Where it goes', 'ಎಲ್ಲಿ ಇಡುವುದು')}>
-                      <button type="button" className={'chip' + (split[l.itemId] ? '' : ' on')} onClick={() => setSplit(Object.fromEntries(Object.entries(split).filter(([k]) => k !== l.itemId)))}>
-                        {bi('All to', 'ಎಲ್ಲಾ')} {placeOf(to)}
-                      </button>
-                      <button type="button" className={'chip' + (split[l.itemId] ? ' on' : '')} onClick={() => !split[l.itemId] && setSplit({ ...split, [l.itemId]: Object.fromEntries(locs.map((x) => [x.id, x.id === to ? got[l.itemId]!.qty : ''])) })}>
+                    <div className="bar mt-6" role="group" aria-label={bi('Where it goes', 'ಎಲ್ಲಿ ಇಡುವುದು')}>
+                      {!split[l.itemId] && (
+                        <label className="field grow mb-0">
+                          <span>{bi('Store in', 'ಇಡುವುದು')}</span>
+                          <Select value={storeIn[l.itemId] ?? ''} onChange={(v) => setStoreIn({ ...storeIn, [l.itemId]: v })} aria-label={bi('Store in', 'ಇಡುವುದು')} options={locs.map((x) => ({ value: x.id, label: pickName(x.name, x.nameKn, lang) }))} />
+                        </label>
+                      )}
+                      <button
+                        type="button"
+                        className={'chip' + (split[l.itemId] ? ' on' : '')}
+                        onClick={() =>
+                          split[l.itemId]
+                            ? setSplit(Object.fromEntries(Object.entries(split).filter(([k]) => k !== l.itemId)))
+                            : setSplit({ ...split, [l.itemId]: Object.fromEntries(locs.map((x) => [x.id, x.id === storeIn[l.itemId] ? got[l.itemId]!.qty : ''])) })
+                        }
+                      >
                         {bi('Split', 'ಹಂಚಿ')}
                       </button>
                     </div>
@@ -373,10 +390,6 @@ function OrderCard({
       )}
       {receiving && (
         <div className="grid2 mt-8">
-          <label className="field">
-            <span>{bi('Put the goods in', 'ಸಾಮಾನು ಇಡುವುದು')}</span>
-            <Select value={to} onChange={setTo} aria-label={bi('Put the goods in', 'ಸಾಮಾನು ಇಡುವುದು')} options={locs.map((l) => ({ value: l.id, label: pickName(l.name, l.nameKn, lang) }))} />
-          </label>
           <label className="check">
             <input type="checkbox" checked={updateCost} onChange={(e) => setUpdateCost(e.target.checked)} />
             {bi('Use these as the items’ cost', 'ಇದನ್ನೇ ಖರೀದಿ ಬೆಲೆ ಮಾಡಿ')}
@@ -415,7 +428,6 @@ function OrderCard({
                   '/admin/purchases/' + p.id + '/checklist',
                   {
                     updateCost,
-                    to,
                     mode,
                     ...(mode === 'carrier' ? { carrierId, vehicleNo, driverName, carrierConfirmed: carrierOk } : {}),
                     close: closeRest,
@@ -429,6 +441,7 @@ function OrderCard({
                         condition: cond[k] ?? 'ok',
                         ...(lineNote[k]?.trim() ? { note: lineNote[k]!.trim() } : {}),
                         cost: Number(v.cost) || 0,
+                        ...(!split[k] && storeIn[k] ? { placeId: storeIn[k] } : {}),
                         ...(split[k] ? { places: Object.entries(split[k]!).map(([placeId, q]) => ({ placeId, qty: Number(q) || 0 })).filter((x) => x.qty > 0) } : {}),
                       };
                     }),
@@ -436,7 +449,7 @@ function OrderCard({
                     ...(delivery.trim() !== '' ? { delivery: Number(delivery) || 0 } : {}),
                     expiry: Object.fromEntries(Object.entries(expiry).filter(([, v]) => /^\d{4}-\d{2}-\d{2}$/.test(v))),
                   },
-                  placeOf(to) + ': ' + p.lines.map((l) => briefName(items.get(l.itemId), l.itemId, lang) + ' +' + (Number(got[l.itemId]?.qty) || 0) + ' ' + unitWord(l.itemId, l.unit)).join(', '),
+                  p.lines.map((l) => briefName(items.get(l.itemId), l.itemId, lang) + ' +' + (Number(got[l.itemId]?.qty) || 0) + ' ' + unitWord(l.itemId, l.unit) + (split[l.itemId] ? '' : ' → ' + placeOf(storeIn[l.itemId] ?? ''))).join(', '),
                 )
               }
             >
@@ -470,6 +483,16 @@ function OrderCard({
                 + {bi('Payment', 'ಪಾವತಿ')}
               </button>
             )}
+            <button
+              type="button"
+              className="btn ghost"
+              data-delete-order={p.id}
+              aria-label={bi('Delete order', 'ಆರ್ಡರ್ ಅಳಿಸಿ')}
+              title={bi('Delete order', 'ಆರ್ಡರ್ ಅಳಿಸಿ')}
+              onClick={() => void deletePurchase(p, bi).then((m) => m && reload(m), (e: Error) => window.alert(e.message))}
+            >
+              🗑
+            </button>
             {((p.payments ?? []).length > 0 || (p.checklists ?? []).length > 0) && (
               <button className="btn ghost" aria-expanded={details} onClick={() => setDetails(!details)}>
                 {details ? bi('Hide details', 'ವಿವರ ಮುಚ್ಚಿ') : bi('Payments and deliveries', 'ಪಾವತಿ, ಸಾಮಾನು ವಿವರ')}
@@ -493,7 +516,7 @@ function OrderCard({
           <b>{bi('Payments', 'ಪಾವತಿಗಳು')}</b>
           <PaymentsList list={p.payments ?? []} />
           <b className="mt-8">{bi('Delivery checklists', 'ಸಾಮಾನು ಪರಿಶೀಲನೆ')}</b>
-          <ChecklistList list={p.checklists ?? []} carriers={carriers} nameOf={(id) => briefName(items.get(id), id, lang)} />
+          <ChecklistList list={p.checklists ?? []} carriers={carriers} nameOf={(id) => briefName(items.get(id), id, lang)} onDelete={(c) => void deleteChecklist(p.id, c.id, bi).then((m) => m && reload(m), (e: Error) => window.alert(e.message))} />
         </div>
       )}
     </div>
@@ -528,7 +551,6 @@ function NewOrder({ locs, sups, carriers, fromBuyList, onDone }: { locs: Locatio
   const bi = useBi();
   const { lang } = useSession();
   const [supplierId, setSupplier] = useState(sups[0]?.id ?? '');
-  const [to, setTo] = useState(locs.find((l) => l.kind === 'godown')?.id ?? locs[0]?.id ?? '');
   const [lines, setLines] = useState<Line[]>([]);
   // How it comes: the vendor themselves, or a goods carrier (who, which vehicle, when).
   const [mode, setMode] = useState<DeliveryMode>('self');
@@ -596,7 +618,7 @@ function NewOrder({ locs, sups, carriers, fromBuyList, onDone }: { locs: Locatio
     setBusy(true);
     try {
       const delivery = { mode, ...(mode === 'carrier' ? { carrierId, ...(vehicleNo.trim() ? { vehicleNo: vehicleNo.trim() } : {}), ...(driverName.trim() ? { driverName: driverName.trim() } : {}) } : {}), ...(expectedOn ? { expectedOn } : {}) };
-      await http.post('/admin/pos', { supplierId, to, delivery, lines: lines.map((l) => ({ itemId: l.itemId, unit: l.unit, qty: Number(l.qty), cost: Number(l.cost) || 0 })) });
+      await http.post('/admin/pos', { supplierId, delivery, lines: lines.map((l) => ({ itemId: l.itemId, unit: l.unit, qty: Number(l.qty), cost: Number(l.cost) || 0 })) });
       onDone(true);
     } catch (e) {
       setErr((e as Error).message);
@@ -611,10 +633,6 @@ function NewOrder({ locs, sups, carriers, fromBuyList, onDone }: { locs: Locatio
         <label className="field">
           <span>{bi('Supplier', 'ಸರಬರಾಜುದಾರ')}</span>
           <Select value={supplierId} onChange={setSupplier} aria-label={bi('Supplier', 'ಸರಬರಾಜುದಾರ')} options={sups.map((s) => ({ value: s.id, label: s.name, hint: s.phone }))} />
-        </label>
-        <label className="field">
-          <span>{bi('Goods go to', 'ಸಾಮಾನು ಹೋಗುವುದು')}</span>
-          <Select value={to} onChange={setTo} aria-label={bi('Goods go to', 'ಸಾಮಾನು ಹೋಗುವುದು')} options={locs.map((l) => ({ value: l.id, label: pickName(l.name, l.nameKn, lang) }))} />
         </label>
       </div>
       <div className="field" data-tour="purchases-new-delivery">

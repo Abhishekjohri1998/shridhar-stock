@@ -288,6 +288,64 @@ async function main() {
     const old = (await call('/admin/suppliers/' + supId + '/history')).body;
     const old3 = old.purchases.find((p) => p.id === po3.id);
     check('V: an old order reads with its bill and no payments', old3.progress === 'received' && old3.paid === 0 && old3.billTotal === 25100 && old.deliveries.length === 0, JSON.stringify(old3));
+
+    // W: no destination on the order; a place per line at arrival; deletes.
+    const oilIn = async (loc) => (await call('/stock')).body.find((s) => s.itemId === oil.id && s.locationId === loc)?.qty ?? 0;
+    const w1 = await call('/admin/pos', { method: 'POST', body: { supplierId: v, lines: [{ itemId: oil.id, unit: 'tin', qty: 3, cost: 1000 }] } });
+    eq('W: an order without a destination is made', w1.status, 201);
+    check('W: and has no place on it', w1.body.to === undefined, JSON.stringify(w1.body));
+    eq('W: a bad destination is still refused', (await call('/admin/pos', { method: 'POST', body: { supplierId: v, to: 'nope', lines: [{ itemId: oil.id, unit: 'tin', qty: 1 }] } })).status, 400);
+    eq('W: arrival with no place for a line is refused', (await call('/admin/purchases/' + w1.body.id + '/checklist', { method: 'POST', body: { lines: [{ itemId: oil.id, arrived: 1 }] } })).status, 400);
+    const [s0, g0] = [await oilIn(shop), await oilIn(godown)];
+    eq('W: arrival with a place per line', (await call('/admin/purchases/' + w1.body.id + '/checklist', { method: 'POST', body: { lines: [{ itemId: oil.id, arrived: 1, placeId: shop }] } })).status, 200);
+    eq('W: it went to that place', (await oilIn(shop)) - s0, 15);
+    eq('W: and not elsewhere', (await oilIn(godown)) - g0, 0);
+    eq('W: a split, with no order-level place', (await call('/admin/purchases/' + w1.body.id + '/checklist', { method: 'POST', body: { lines: [{ itemId: oil.id, arrived: 2, places: [{ placeId: shop, qty: 1 }, { placeId: godown, qty: 1 }] }] } })).status, 200);
+    check('W: the split posted to both places', (await oilIn(shop)) - s0 === 30 && (await oilIn(godown)) - g0 === 15);
+    // Back-compat: an old-style order with `to`, received with the old `to` on the checklist.
+    const w2 = (await call('/admin/pos', { method: 'POST', body: { supplierId: v, to: godown, lines: [{ itemId: oil.id, unit: 'tin', qty: 1, cost: 1000 }] } })).body;
+    eq('W: the old `to` is still kept', w2.to, godown);
+    const g1 = await oilIn(godown);
+    eq('W: the old checklist with `to` still works', (await call('/admin/purchases/' + w2.id + '/checklist', { method: 'POST', body: { to: godown, lines: [{ itemId: oil.id, arrived: 1 }] } })).status, 200);
+    eq('W: and goes to it', (await oilIn(godown)) - g1, 15);
+
+    // A worker may not delete.
+    eq('W: a worker is added', (await call('/people', { method: 'POST', body: { name: 'Ravi', phone: '9000000099', role: 'worker', pin: '2580' } })).status, 201);
+    const adminToken = token;
+    token = (await call('/auth/login', { method: 'POST', body: { phone: '9000000099', pin: '2580' } })).body.token;
+    eq('W: a worker cannot delete an order', (await call('/admin/purchases/' + w2.id, { method: 'DELETE' })).status, 403);
+    eq('W: nor a checklist', (await call('/admin/purchases/' + w2.id + '/checklists/x', { method: 'DELETE' })).status, 403);
+    token = adminToken;
+
+    // Deleting an unreceived order: gone outright.
+    const w3 = (await call('/admin/pos', { method: 'POST', body: { supplierId: v, lines: [{ itemId: oil.id, unit: 'tin', qty: 2, cost: 500 }] } })).body;
+    eq('W: an unreceived order is deleted', (await call('/admin/purchases/' + w3.id, { method: 'DELETE' })).status, 200);
+    check('W: and is gone from the history', !(await call('/admin/suppliers/' + v + '/history')).body.purchases.some((p) => p.id === w3.id));
+
+    // A received order: refused unless "record only"; then stock stays, payments go, totals update.
+    await call('/admin/purchases/' + w2.id + '/payments', { method: 'POST', body: { amount: 400, method: 'cash' } });
+    const h0 = (await call('/admin/suppliers/' + v + '/history')).body.summary;
+    eq('W: a received order is not deleted without "record only"', (await call('/admin/purchases/' + w2.id, { method: 'DELETE' })).status, 409);
+    const g2 = await oilIn(godown);
+    const del = await call('/admin/purchases/' + w2.id + '?recordOnly=1', { method: 'DELETE' });
+    eq('W: the record only is deleted', del.status, 200);
+    eq('W: stock stays as it is', (await oilIn(godown)) - g2, 0);
+    const h1 = (await call('/admin/suppliers/' + v + '/history')).body;
+    check('W: supplier totals update', h1.summary.orders === h0.orders - 1 && Math.abs(h0.bought - h1.summary.bought - 1000) < 1e-6 && Math.abs(h0.paid - h1.summary.paid - 400) < 1e-6, JSON.stringify([h0, h1.summary]));
+    check('W: its deliveries are gone too', !h1.deliveries.some((d) => d.poId === w2.id));
+    eq('W: a deleted order is not found', (await call('/admin/purchases/' + w2.id, { method: 'DELETE' })).status, 404);
+
+    // Deleting one checklist: the record only, stock unchanged, the carrier list follows.
+    const w1h = h1.purchases.find((p) => p.id === w1.body.id);
+    const cid = w1h.checklists[0].id;
+    const [s3, g3] = [await oilIn(shop), await oilIn(godown)];
+    const dc = await call('/admin/purchases/' + w1.body.id + '/checklists/' + cid, { method: 'DELETE' });
+    eq('W: a checklist is deleted', dc.status, 200);
+    check('W: one checklist left, receipts kept', dc.body.checklists.length === 1 && dc.body.received.length === 2, JSON.stringify(dc.body));
+    check('W: stock unchanged after a checklist delete', (await oilIn(shop)) === s3 && (await oilIn(godown)) === g3);
+    check('W: gone from the delivery history', !(await call('/admin/suppliers/' + v + '/history')).body.deliveries.some((d) => d.id === cid));
+    check('W: and from the carriers\' deliveries', !(await call('/admin/carriers')).body.deliveries.some((d) => d.id === cid));
+    eq('W: an unknown checklist is 404', (await call('/admin/purchases/' + w1.body.id + '/checklists/nope', { method: 'DELETE' })).status, 404);
   } catch (err) {
     failed++;
     console.log('FAIL threw: ' + err.stack);

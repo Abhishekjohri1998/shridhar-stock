@@ -404,7 +404,8 @@ actionRoutes.post(
     const body = z
       .object({
         supplierId: z.string(),
-        to: z.string(),
+        /** Where the goods go is chosen per line at arrival; an old client may still send it. */
+        to: z.string().optional(),
         lines: z.array(z.object({ itemId: z.string(), unit: z.string(), qty: z.number().positive().max(1e6), cost: z.number().min(0).max(1e7).default(0) })).min(1).max(100),
         /** How it comes: the vendor themselves, or a carrier (who, which vehicle, when). */
         delivery: deliveryBody.optional(),
@@ -413,7 +414,7 @@ actionRoutes.post(
     const repo = getRepo();
     const [sup, locs, items] = await Promise.all([repo.getDoc<Supplier>('suppliers', body.supplierId), repo.listLocations(), itemsFor(body.lines.map((l) => l.itemId))]);
     if (!sup || !sup.active) throw new HttpError(404, 'No such supplier');
-    if (!locs.some((l) => l.id === body.to && l.active)) throw new HttpError(400, 'Choose where the goods go');
+    if (body.to && !locs.some((l) => l.id === body.to && l.active)) throw new HttpError(400, 'Choose where the goods go');
     if (new Set(body.lines.map((l) => l.itemId)).size !== body.lines.length) throw new HttpError(400, 'An item is on this order twice');
     for (const l of body.lines) {
       const item = items.get(l.itemId)!;
@@ -421,7 +422,7 @@ actionRoutes.post(
     }
     const no = await repo.nextNo('po');
     const delivery = body.delivery ? await deliveryFrom(body.delivery) : undefined;
-    const p: PurchaseOrder = { id: 'po_' + no, no, supplierId: body.supplierId, to: body.to, lines: body.lines, status: 'ordered', at: now(), times: { ordered: now() }, ...(delivery ? { delivery } : {}) };
+    const p: PurchaseOrder = { id: 'po_' + no, no, supplierId: body.supplierId, ...(body.to ? { to: body.to } : {}), lines: body.lines, status: 'ordered', at: now(), times: { ordered: now() }, ...(delivery ? { delivery } : {}) };
     await repo.putDoc('pos', p);
     emit('pos', {}, p.id);
     res.status(201).json(p);
@@ -457,6 +458,8 @@ const receiveBody = z.object({
       z.object({
         qty: z.number().min(0).max(1e6),
         cost: z.number().min(0).max(1e7).optional(),
+        /** Where all of this line went (when not split). Else the order-level `to`. */
+        placeId: z.string().min(1).optional(),
         /** A split receipt: how much of the line went to each place, adding up to qty. Else all goes to `to`. */
         places: z.array(z.object({ placeId: z.string().min(1), qty: z.number().min(0).max(1e6) })).max(20).optional(),
       }),
@@ -486,7 +489,8 @@ async function receiveGoods(req: Request, p: PurchaseOrder, body: ReceiveInput, 
   const [all, locs] = await Promise.all([repo.listItems(), repo.listLocations()]);
   const items = new Map(all.filter((i) => want.has(i.id)).map((i) => [i.id, i]));
   const to = body.to ?? p.to;
-  if (!locs.some((l) => l.id === to && l.active)) throw new HttpError(400, 'Choose where the goods go');
+  const activePlace = (id?: string) => !!id && locs.some((l) => l.id === id && l.active);
+  if (body.to && !activePlace(body.to)) throw new HttpError(400, 'Choose where the goods go');
   const receipt = (p.receipts ?? (p.received?.length ? 1 : 0)) + 1;
   const suffix = receipt > 1 ? ':r' + receipt : '';
   const moves: StockMove[] = [];
@@ -510,7 +514,13 @@ async function receiveGoods(req: Request, p: PurchaseOrder, body: ReceiveInput, 
     if (g?.places && Math.abs(split.reduce((n, x) => n + x.qty, 0) - qty) > 1e-6) throw new HttpError(400, 'The places must add up to what arrived');
     const merged = new Map<string, number>();
     for (const x of split) merged.set(x.placeId, (merged.get(x.placeId) ?? 0) + x.qty);
-    const places = g?.places && qty > 0 ? [...merged].map(([placeId, q]) => ({ placeId, qty: q })) : [{ placeId: to, qty }];
+    let places: { placeId: string; qty: number }[];
+    if (g?.places && qty > 0) places = [...merged].map(([placeId, q]) => ({ placeId, qty: q }));
+    else if (qty > 0) {
+      const one = g?.placeId ?? to;
+      if (!activePlace(one)) throw new HttpError(400, 'Choose where the goods go');
+      places = [{ placeId: one!, qty }];
+    } else places = [];
     return { l, due, qty, cost: g?.cost ?? l.cost, places };
   });
   for (const g of got) if (g.qty > g.due + 1e-6) throw new HttpError(400, 'More received than ordered: count again, or order the rest separately.');
@@ -526,14 +536,14 @@ async function receiveGoods(req: Request, p: PurchaseOrder, body: ReceiveInput, 
     const share = shareOf.get(l.itemId) ?? 0;
     const landed = landedUnitCost(cost, qty, share);
     const expiry = body.expiry?.[l.itemId];
-    const isSplit = places.length > 1 || places[0]!.placeId !== to;
+    const isSplit = places.length > 1 || (places.length === 1 && places[0]!.placeId !== to);
     received.push({ itemId: l.itemId, qty, cost, ...(share ? { delivery: share, landed } : {}), ...(expiry ? { expiry } : {}), ...(isSplit ? { places } : {}), ...(receipt > 1 ? { receipt } : {}) });
     const item = items.get(l.itemId);
     if (!item || qty === 0) continue;
     // One move (and one lot) per place; the single-place key stays as it always was.
     places.forEach((pl, n) => {
       const baseQty = toBase(item, l.unit, pl.qty);
-      const key = 'po:' + p.no + ':' + l.itemId + (places.length > 1 || pl.placeId !== to ? ':' + pl.placeId : '') + suffix;
+      const key = 'po:' + p.no + ':' + l.itemId + (places.length > 1 || (to && pl.placeId !== to) ? ':' + pl.placeId : '') + suffix;
       moves.push({ id: newId('mv'), key, at: now(), kind: 'purchase', itemId: l.itemId, to: pl.placeId, qty: baseQty, ref: 'order ' + p.no, by: req.person!.id, ...(n === 0 && qty < due ? { note: round3(due - qty) + ' ' + l.unit + ' short' } : {}) });
       if (expiry) lots.push({ id: newId('lot'), itemId: l.itemId, placeId: pl.placeId, qty: baseQty, expiry, receivedAt: now(), ref: 'order ' + p.no });
     });
@@ -552,7 +562,7 @@ async function receiveGoods(req: Request, p: PurchaseOrder, body: ReceiveInput, 
   p.received = [...(p.received ?? []), ...received];
   p.receipts = receipt;
   if (checklist) p.checklists = [...(p.checklists ?? []), { ...checklist, receipt, lines: checklist.lines.map((x) => ({ ...x, ordered: dueBefore.get(x.itemId) ?? 0 })) }];
-  p.to = to;
+  if (to) p.to = to;
   const allIn = p.lines.every((l) => receivedQty(p, l.itemId) >= l.qty - 1e-6);
   if (close || allIn) {
     p.status = 'received';
@@ -650,6 +660,7 @@ actionRoutes.post(
               condition: z.enum(CHECK_CONDITIONS).default('ok'),
               note: z.string().trim().max(200).optional(),
               cost: z.number().min(0).max(1e7).optional(),
+              placeId: z.string().min(1).optional(),
               places: z.array(z.object({ placeId: z.string().min(1), qty: z.number().min(0).max(1e6) })).max(20).optional(),
             }),
           )
@@ -686,7 +697,7 @@ actionRoutes.post(
       // A line left off the checklist did not come this time.
       got: Object.fromEntries(p.lines.map((l) => {
         const c = byItem.get(l.itemId);
-        return [l.itemId, { qty: c?.arrived ?? 0, ...(c?.cost != null ? { cost: c.cost } : {}), ...(c?.places ? { places: c.places } : {}) }];
+        return [l.itemId, { qty: c?.arrived ?? 0, ...(c?.cost != null ? { cost: c.cost } : {}), ...(c?.placeId ? { placeId: c.placeId } : {}), ...(c?.places ? { places: c.places } : {}) }];
       })),
     };
     p.delivery ??= { mode, ...(carrierId ? { carrierId } : {}), ...(vehicleNo ? { vehicleNo } : {}), ...(driverName ? { driverName } : {}) };
@@ -702,6 +713,46 @@ actionRoutes.post(
       ...(mode === 'carrier' && b.carrierConfirmed != null ? { carrierConfirmed: b.carrierConfirmed } : {}),
       lines: b.lines.map((l) => ({ itemId: l.itemId, arrived: l.arrived, ok: l.ok ?? l.arrived > 0, condition: l.condition, ...(l.note ? { note: l.note } : {}) })),
     });
+    res.json(withBill(p));
+  }),
+);
+
+/**
+ * Deletes an order's record. Not received: gone outright. Received or part received: only when
+ * the admin says `recordOnly` — the stock it brought stays as it is (never reversed), and its
+ * payments and checklists go with it, so the supplier's totals update.
+ */
+actionRoutes.delete(
+  '/admin/purchases/:id',
+  admin,
+  handler(async (req, res) => {
+    const p = await loadPo(String(req.params.id));
+    const got = (p.received ?? []).some((r) => r.qty > 0);
+    const recordOnly = req.query.recordOnly === '1' || req.query.recordOnly === 'true' || req.body?.recordOnly === true;
+    if (got && !recordOnly) throw new HttpError(409, 'Goods on this order were received. Delete the record only (stock stays as it is)?');
+    const repo = getRepo();
+    const trips = await repo.listDocs<CarrierTrip>('trips', { filter: { poId: p.id } });
+    for (const t of trips) {
+      const { poId: _drop, ...rest } = t;
+      await repo.putDoc('trips', rest as CarrierTrip);
+    }
+    await repo.deleteDoc('pos', p.id);
+    emit('pos', {}, p.id);
+    res.json({ ok: true, recordOnly: got });
+  }),
+);
+
+/** Deletes one delivery checklist's record; the stock it posted is unchanged. */
+actionRoutes.delete(
+  '/admin/purchases/:id/checklists/:cid',
+  admin,
+  handler(async (req, res) => {
+    const p = await loadPo(String(req.params.id));
+    const cid = String(req.params.cid);
+    if (!(p.checklists ?? []).some((c) => c.id === cid)) throw new HttpError(404, 'No such checklist');
+    p.checklists = p.checklists!.filter((c) => c.id !== cid);
+    await getRepo().putDoc('pos', p);
+    emit('pos', {}, p.id);
     res.json(withBill(p));
   }),
 );

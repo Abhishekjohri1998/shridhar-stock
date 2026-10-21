@@ -357,7 +357,8 @@ export interface PurchaseOrder {
   id: string;
   no: number;
   supplierId: string;
-  to: string;
+  /** Old orders only: where the goods were to go. New ones choose per line at arrival. */
+  to?: string;
   lines: POLine[];
   status: POStatus;
   invoiceNo?: string;
