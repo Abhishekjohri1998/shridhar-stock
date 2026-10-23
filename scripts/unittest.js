@@ -363,6 +363,18 @@ check('every role has a home screen', C.ROLES.every((r) => typeof C.ROLE_HOME[r]
   check('empty ink is not writing', !C.hasInk({ w: 1, h: 1, strokes: [[]] }) && C.hasInk(ink));
 }
 
+// ---------------------------------------------------------------- suggested buy qty (new order form)
+{
+  const it = { units: [{ code: 'pc', perBase: 1 }, { code: 'box', perBase: 60 }, { code: 'pack', perBase: 12 }], lowAt: { qty: 2, unit: 'box' } };
+  const s = C.suggestBuyQty(it, 30);
+  check('suggest: up to twice the level, biggest unit, rounded up', s && s.unit === 'box' && s.qty === 4, JSON.stringify(s));
+  const d = C.suggestBuyQty({ ...it, defaultUnit: 'pack' }, 100);
+  check('suggest: in the default unit when chosen', d && d.unit === 'pack' && d.qty === 12, JSON.stringify(d));
+  check('suggest: at least one', C.suggestBuyQty({ units: [{ code: 'box', perBase: 60 }], lowAt: { qty: 1, unit: 'box' } }, 59.9).qty === 2 && C.suggestBuyQty({ units: [{ code: 'pc', perBase: 1 }, { code: 'box', perBase: 1000 }], lowAt: { qty: 1, unit: 'pc' } }, 0).qty === 1);
+  check('suggest: none when not low', C.suggestBuyQty(it, 120) === undefined);
+  check('suggest: none without a level', C.suggestBuyQty({ units: it.units }, 0) === undefined);
+}
+
 // ---------------------------------------------------------------- posting and reconcile (server code, file store)
 // ---------------------------------------------------------------- round off
 {

@@ -84,3 +84,27 @@ export function isLowAt(item: PlaceLowItem, locId: string, qty: number): boolean
   const level = placeLowBase(item, locId);
   return level != null && qty < level;
 }
+
+/**
+ * The unit an item is bought in: its default unit when the shop chose one, else the biggest one,
+ * which is how suppliers sell.
+ */
+export function buyUnitOf(item: Pick<Item, 'units'> & { defaultUnit?: string }): Item['units'][number] {
+  const chosen = item.defaultUnit ? findUnit(item, item.defaultUnit) : undefined;
+  return chosen ?? [...item.units].sort((a, b) => b.perBase - a.perBase)[0]!;
+}
+
+/**
+ * How much to buy of an item that is running low: enough to bring the total in all places back
+ * to twice its level, rounded up to whole buying units, and at least one. Undefined when the
+ * item has no level or is not below it.
+ */
+export function suggestBuyQty(
+  item: Pick<Item, 'units' | 'lowAt' | 'reorderAt'> & { defaultUnit?: string },
+  total: number,
+): { qty: number; unit: string } | undefined {
+  const level = lowBase(item);
+  if (level == null || !(total < level)) return undefined;
+  const u = buyUnitOf(item);
+  return { qty: Math.max(1, Math.ceil(round3((2 * level - total) / u.perBase))), unit: u.code };
+}

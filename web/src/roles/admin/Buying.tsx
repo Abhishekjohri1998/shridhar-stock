@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CHECK_CONDITIONS, formatRate, landedUnitCost, pickName, poBill, poProgress, poStage, receivedQty, splitCharge, type Carrier, type CarrierTrip, type CheckCondition, type DeliveryMode, type Item, type SupplierContact, type ItemSupplierRow, type Location, type PurchaseOrder, type Refill, type Supplier } from '@stock/core';
+import { CHECK_CONDITIONS, describeQty, formatRate, landedUnitCost, pickName, poBill, poProgress, poStage, receivedQty, splitCharge, type Carrier, type CarrierTrip, type CheckCondition, type DeliveryMode, type Item, type SupplierContact, type ItemSupplierRow, type Location, type PurchaseOrder, type Refill, type Supplier } from '@stock/core';
 import { api, http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
@@ -43,6 +43,20 @@ function startCost(rows: ItemSupplierRow[] | undefined, supplierId: string, unit
 }
 
 const NO_USUAL = '';
+
+/** A running-low item from GET /admin/low: have and level in base units, the suggestion in `unit`. */
+interface LowRow {
+  itemId: string;
+  name: string;
+  nameKn: string;
+  have: number;
+  level: number;
+  unit: string;
+  suggestQty: number;
+  supplierIds: string[];
+  units: ItemBrief['units'] & Item['units'];
+  defaultUnit?: string;
+}
 
 const briefName = (it: ItemBrief | undefined, id: string, lang: 'en' | 'kn') => (it ? pickName(it.nameEn, it.nameKn, lang) : id);
 
@@ -573,6 +587,22 @@ function NewOrder({ locs, sups, carriers, fromBuyList, onDone }: { locs: Locatio
     api.itemSuppliers().then(setWho).catch(() => undefined);
   }, []);
   const supName = (id: string) => sups.find((s) => s.id === id)?.name ?? '';
+  // Running low in all places together, this supplier's items first (the server orders them).
+  const [low, setLow] = useState<LowRow[]>([]);
+  useEffect(() => {
+    http.get<LowRow[]>('/admin/low' + (supplierId ? '?supplier=' + encodeURIComponent(supplierId) : '')).then(setLow).catch(() => undefined);
+  }, [supplierId]);
+  const lowShown = low.filter((r) => !lines.some((l) => l.itemId === r.itemId));
+  const lineOf = (r: LowRow): Line => {
+    const u = r.units.find((x) => x.code === r.unit) ?? r.units[0]!;
+    return { itemId: r.itemId, unit: u.code, qty: String(r.suggestQty), cost: startCost(whoSupplies[r.itemId], supplierId, u) };
+  };
+  const addLow = (rows: LowRow[]) => {
+    const k = new Map(known);
+    for (const r of rows) k.set(r.itemId, { id: r.itemId, nameEn: r.name, nameKn: r.nameKn, defaultUnit: r.defaultUnit, units: r.units });
+    setKnown(k);
+    setLines([...lines, ...rows.map(lineOf)]);
+  };
 
   // "Order these" from the buy list: what is low in all places together, in the unit suppliers
   // sell it in, enough to bring the total back to twice its level.
@@ -629,6 +659,38 @@ function NewOrder({ locs, sups, carriers, fromBuyList, onDone }: { locs: Locatio
   return (
     <div className="card">
       {err && <div className="msg err">{err}</div>}
+      {lowShown.length > 0 && (
+        <div className="field" data-tour="purchases-running-low">
+          <div className="bar">
+            <span className="grow">{bi('Running low', 'ಮುಗಿಯುತ್ತಿದೆ')} · {lowShown.length}</span>
+            <button type="button" className="btn small" onClick={() => addLow(lowShown)}>
+              {bi('Add all', 'ಎಲ್ಲಾ ಸೇರಿಸಿ')}
+            </button>
+          </div>
+          {lowShown.map((r, i) => {
+            const mine = !!supplierId && r.supplierIds.includes(supplierId);
+            const firstOther = !mine && i > 0 && !!supplierId && lowShown[i - 1]!.supplierIds.includes(supplierId);
+            const u = r.units.find((x) => x.code === r.unit);
+            return (
+              <div key={r.itemId}>
+                {firstOther && <div className="muted mt-6">{bi('Other running-low items', 'ಇತರ ಮುಗಿಯುತ್ತಿರುವ ಸಾಮಾನು')}</div>}
+                <div className="bar mt-6">
+                  <span className="grow name">{pickName(r.name, r.nameKn, lang)}</span>
+                  <span className="muted">
+                    {describeQty(r, r.have, lang)} · {bi('level', 'ಮಿತಿ')} {describeQty(r, r.level, lang)}
+                  </span>
+                  <b>
+                    {r.suggestQty} {(u && ((lang === 'kn' && u.labelKn) || u.label)) || r.unit}
+                  </b>
+                  <button type="button" className="btn ghost small" onClick={() => addLow([r])}>
+                    + {bi('Add', 'ಸೇರಿಸಿ')}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
       <div className="grid2">
         <label className="field">
           <span>{bi('Supplier', 'ಸರಬರಾಜುದಾರ')}</span>

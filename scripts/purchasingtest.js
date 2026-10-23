@@ -346,6 +346,18 @@ async function main() {
     check('W: gone from the delivery history', !(await call('/admin/suppliers/' + v + '/history')).body.deliveries.some((d) => d.id === cid));
     check('W: and from the carriers\' deliveries', !(await call('/admin/carriers')).body.deliveries.some((d) => d.id === cid));
     eq('W: an unknown checklist is 404', (await call('/admin/purchases/' + w1.body.id + '/checklists/nope', { method: 'DELETE' })).status, 404);
+
+    // ------------------------------------------------ running low, for the new order form
+    const lowA = (await call('/items', { method: 'POST', body: { nameEn: 'Zz Low Soap', nameKn: 'ಸೋಪು', units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 10 }, { code: 'box', label: 'Box', labelKn: '', perBase: 60, price: 580 }], lowAt: { qty: 2, unit: 'box' }, aliases: [], racks: {} } })).body;
+    const lowB = (await call('/items', { method: 'POST', body: { nameEn: 'Aa Low Salt', nameKn: 'ಉಪ್ಪು', units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 20 }], lowAt: { qty: 10, unit: 'pc' }, aliases: [], racks: {} } })).body;
+    const lowSup = (await call('/admin/suppliers', { method: 'POST', body: { name: 'Low Supplier', phone: '', itemIds: [lowA.id] } })).body.id;
+    const lows = (await call('/admin/low?supplier=' + lowSup)).body;
+    const ia = lows.findIndex((x) => x.itemId === lowA.id);
+    const ib = lows.findIndex((x) => x.itemId === lowB.id);
+    check('L: both running-low items listed', ia >= 0 && ib >= 0, JSON.stringify(lows));
+    check('L: the picked supplier item comes first', ia === 0 && ia < ib, JSON.stringify(lows.map((x) => x.name)));
+    check('L: suggested qty reaches twice the level in the buying unit', lows[ia].suggestQty === 4 && lows[ia].unit === 'box' && lows[ia].level === 120 && lows[ia].have === 0 && lows[ia].supplierIds.includes(lowSup), JSON.stringify(lows[ia]));
+    check('L: without a supplier, by name', (await call('/admin/low')).body.findIndex((x) => x.itemId === lowB.id) < (await call('/admin/low')).body.findIndex((x) => x.itemId === lowA.id));
   } catch (err) {
     failed++;
     console.log('FAIL threw: ' + err.stack);

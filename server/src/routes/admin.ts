@@ -21,6 +21,8 @@ import {
   toXlsx,
   totalsByItem,
   itemSuppliers,
+  suggestBuyQty,
+  lowBase,
   stockInfo,
   totalQty,
   type ItemSupplierRow,
@@ -359,6 +361,32 @@ adminRoutes.get(
       const names = rackNames(items, loc);
       if (names.length) out[loc] = names;
     }
+    res.json(out);
+  }),
+);
+
+/**
+ * What is running low in all places together (the Home count's rule), for the new order form:
+ * what each has, its level (both in base units) and what to buy, in the buying unit. With
+ * `?supplier=`, that supplier's own items come first; each group is by name.
+ */
+adminRoutes.get(
+  '/admin/low',
+  admin,
+  handler(async (req, res) => {
+    const repo = getRepo();
+    const sup = typeof req.query.supplier === 'string' ? req.query.supplier : '';
+    const [items, stock] = await Promise.all([repo.listItems(), repo.listStock()]);
+    const totals = totalsByItem(stock);
+    const out = items.flatMap((i) => {
+      const have = totals.get(i.id) ?? 0;
+      const s = i.active && isLow(i, have) ? suggestBuyQty(i, have) : undefined;
+      if (!s) return [];
+      const level = lowBase(i)!;
+      return [{ itemId: i.id, name: i.nameEn, nameKn: i.nameKn, have, level, unit: s.unit, suggestQty: s.qty, supplierIds: i.suppliers ?? [], units: i.units, defaultUnit: i.defaultUnit }];
+    });
+    const mine = (r: { supplierIds: string[] }) => (sup && r.supplierIds.includes(sup) ? 0 : 1);
+    out.sort((a, b) => mine(a) - mine(b) || a.name.localeCompare(b.name));
     res.json(out);
   }),
 );
