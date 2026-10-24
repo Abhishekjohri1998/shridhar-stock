@@ -245,6 +245,17 @@ async function main() {
       eq('GET reads 3 back', (await call('/items?all=1', { token: admin })).body.find((i) => i.id === got.id).aliases.length, 3);
     }
 
+    // ------------------------------------------------ a place's items, now and before
+    const placeItems = async (loc) => (await call('/admin/places/' + loc + '/items', { token: admin })).body;
+    let gItems = await placeItems(godown);
+    check('the godown has Parle now', gItems.now.some((r) => r.itemId === parleId && r.qty === 288) && !gItems.before.some((r) => r.itemId === parleId), JSON.stringify(gItems));
+    eq('emptying the godown is posted', (await adj({ locationId: godown, actual: 0, reason: 'counted', requestId: 'pl1' })).body.posted, 1);
+    gItems = await placeItems(godown);
+    check('then Parle was there before, with a date', !gItems.now.some((r) => r.itemId === parleId) && gItems.before.some((r) => r.itemId === parleId && !Number.isNaN(Date.parse(r.lastAt))), JSON.stringify(gItems));
+    check('the shop still has it now', (await placeItems(shop)).now.some((r) => r.itemId === parleId && r.qty === 90));
+    eq('an unknown place is 404', (await call('/admin/places/nope/items', { token: admin })).status, 404);
+    eq('signed out cannot see a place', (await call('/admin/places/' + godown + '/items')).status, 401);
+
     // ------------------------------------------------ own PIN
     eq('changing my PIN needs the current one', (await call('/auth/pin', { method: 'POST', token: admin, body: { oldPin: '0000', newPin: '5555' } })).status, 400);
     eq('with it, it changes', (await call('/auth/pin', { method: 'POST', token: admin, body: { oldPin: ADMIN_PIN, newPin: '5555' } })).status, 200);

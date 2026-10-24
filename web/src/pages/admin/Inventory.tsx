@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { describeQty, formatRate, sellPriceOf, isLow, itemMatches, lowAtOf, pickName, sortItems, totalsByItem, DEFAULT_SORT_DIR, ITEM_SORTS, type Item, type ItemSort, type Lang, type PriceVolatility, type SortDir } from '@stock/core';
 import { api, http } from '../../lib/api';
@@ -53,6 +53,7 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
     else next.set('sort', v);
     next.delete('dir');
     next.delete('cat');
+    next.delete('place');
     setParams(next, { replace: true });
   };
   const flipDir = () => {
@@ -62,6 +63,27 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
     else next.set('dir', flipped);
     setParams(next, { replace: true });
   };
+
+  // Sort = Storage place: first the places with their item counts; one tapped opens it (?place=).
+  const placeId = sortBy === 'place' ? params.get('place') : null;
+  const [placeData, setPlaceData] = useState<{ id: string; now: { itemId: string; qty: number }[]; before: { itemId: string; lastAt: string }[] } | null>(null);
+  const [placeErr, setPlaceErr] = useState('');
+  useEffect(() => {
+    if (!placeId) return;
+    let gone = false;
+    setPlaceErr('');
+    http
+      .get<{ now: { itemId: string; qty: number }[]; before: { itemId: string; lastAt: string }[] }>('/admin/places/' + encodeURIComponent(placeId) + '/items')
+      .then((r) => {
+        if (!gone) setPlaceData({ id: placeId, ...r });
+      })
+      .catch((e: unknown) => {
+        if (!gone) setPlaceErr(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      gone = true;
+    };
+  }, [placeId, live]);
 
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
@@ -76,6 +98,14 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
   const catOf = (i: Item) => (i.category ?? '').trim();
   const cat = sortBy === 'category' ? params.get('cat') : null;
   const showCats = sortBy === 'category' && cat == null && !q.trim();
+  const showPlaces = sortBy === 'place' && placeId == null && !q.trim();
+  const inPlace = sortBy === 'place' && placeId != null && !q.trim();
+  const openPlace = (id: string | null) => {
+    const next = new URLSearchParams(params);
+    if (id == null) next.delete('place');
+    else next.set('place', id);
+    setParams(next);
+  };
   const openCat = (c: string | null) => {
     const next = new URLSearchParams(params);
     if (c == null) next.delete('cat');
@@ -103,7 +133,24 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
     expiry: ['Expiry', 'ಅವಧಿ'],
     category: ['Category', 'ವರ್ಗ'],
     volatility: ['Price volatility', 'ಬೆಲೆ ಏರಿಳಿತ'],
+    place: ['Storage place', 'ಸಂಗ್ರಹ ಸ್ಥಳ'],
   };
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const placeCounts = new Map<string, number>();
+  for (const s of stock) if (s.qty > 0 && byId.get(s.itemId)?.active) placeCounts.set(s.locationId, (placeCounts.get(s.locationId) ?? 0) + 1);
+  const place = placeId ? locs.find((l) => l.id === placeId) : undefined;
+  const pd = placeData && placeData.id === placeId ? placeData : null;
+  const dirSign = sortDir === 'desc' ? -1 : 1;
+  const keep = (id: string) => byId.has(id) && (showAll || byId.get(id)!.active);
+  const placeNow = pd ? pd.now.filter((r) => keep(r.itemId)).sort((a, b) => dirSign * (a.qty - b.qty)) : [];
+  const placeBefore = pd ? pd.before.filter((r) => keep(r.itemId)) : [];
+  const nameCell = (i: Item) => (
+    <td>
+      <div className="name">{pickName(i.nameEn, i.nameKn, lang)}</div>
+      <div className="muted">{[lang === 'kn' ? i.nameEn : i.nameKn, place && i.racks[place.id]].filter(Boolean).join(' · ')}</div>
+      {!i.active && <span className="pill">{t('items.inactive')}</span>}
+    </td>
+  );
   const lowCount = items.filter((i) => i.active && low(i)).length;
 
   const recount = async () => {
@@ -164,6 +211,98 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
           <b>{cat === NO_CAT ? bi('No category', 'ವರ್ಗ ಇಲ್ಲ') : cat}</b>
         </div>
       )}
+      {placeId != null && sortBy === 'place' && (
+        <div className="bar">
+          <button type="button" className="btn small" onClick={() => openPlace(null)}>
+            ← {bi('All places', 'ಎಲ್ಲಾ ಸ್ಥಳಗಳು')}
+          </button>
+          <b>{place ? pickName(place.name, place.nameKn, lang) : placeId}</b>
+        </div>
+      )}
+      {showPlaces && (
+        <div className="scroll" data-tour="inventory-list">
+          <Table className="list">
+            <thead>
+              <tr>
+                <th>{bi('Storage place', 'ಸಂಗ್ರಹ ಸ್ಥಳ')}</th>
+                <th className="num">{bi('Products', 'ಸಾಮಾನುಗಳು')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {locs.map((l) => (
+                <tr key={l.id} className="link" data-place={l.id} onClick={() => openPlace(l.id)}>
+                  <td>
+                    <div className="name">{pickName(l.name, l.nameKn, lang)}</div>
+                  </td>
+                  <td className="num">
+                    <b>{placeCounts.get(l.id) ?? 0}</b>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </div>
+      )}
+      {inPlace && placeErr && <div className="msg err">{placeErr}</div>}
+      {inPlace && !pd && !placeErr && <Loading />}
+      {inPlace && pd && (
+        <>
+          <h2 className="subtitle">{bi('In stock here', 'ಇಲ್ಲಿ ಸ್ಟಾಕ್ ಇದೆ')}</h2>
+          {placeNow.length === 0 ? (
+            <div className="card">{bi('No items here.', 'ಇಲ್ಲಿ ಸಾಮಾನು ಇಲ್ಲ.')}</div>
+          ) : (
+            <div className="scroll" data-tour="inventory-list">
+              <Table className="list">
+                <thead>
+                  <tr>
+                    <th>{t('stock.item')}</th>
+                    <th className="num">{bi('Here', 'ಇಲ್ಲಿ')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {placeNow.map((r) => {
+                    const i = byId.get(r.itemId)!;
+                    return (
+                      <tr key={r.itemId} className="link" onClick={() => nav(base + '/' + i.id)}>
+                        {nameCell(i)}
+                        <td className="num">
+                          <b>{describeQty(i, r.qty, lang)}</b>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </Table>
+            </div>
+          )}
+          <h2 className="subtitle">{bi('Was here before', 'ಹಿಂದೆ ಇಲ್ಲಿ ಇತ್ತು')}</h2>
+          {placeBefore.length === 0 ? (
+            <div className="card">{bi('Nothing.', 'ಏನೂ ಇಲ್ಲ.')}</div>
+          ) : (
+            <div className="scroll">
+              <Table className="list">
+                <thead>
+                  <tr>
+                    <th>{t('stock.item')}</th>
+                    <th className="num">{bi('Last here', 'ಕೊನೆಯದಾಗಿ ಇಲ್ಲಿ')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {placeBefore.map((r) => {
+                    const i = byId.get(r.itemId)!;
+                    return (
+                      <tr key={r.itemId} className="link" onClick={() => nav(base + '/' + i.id)}>
+                        {nameCell(i)}
+                        <td className="num muted">{new Date(r.lastAt).toLocaleDateString(lang === 'kn' ? 'kn-IN' : 'en-IN')}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </Table>
+            </div>
+          )}
+        </>
+      )}
       {showCats && catRows.length > 0 && (
         <div className="scroll" data-tour="inventory-list">
           <Table className="list">
@@ -188,14 +327,14 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
           </Table>
         </div>
       )}
-      {!showCats && items.length === 0 && <div className="card" data-tour="inventory-list">{t('items.empty')}</div>}
+      {!showCats && !showPlaces && !inPlace && items.length === 0 && <div className="card" data-tour="inventory-list">{t('items.empty')}</div>}
       {showCats && items.length > 0 && catRows.length === 0 && <div className="card">{bi('No items here.', 'ಇಲ್ಲಿ ಸಾಮಾನು ಇಲ್ಲ.')}</div>}
-      {!showCats && items.length > 0 && shown.length === 0 && (
+      {!showCats && !showPlaces && !inPlace && items.length > 0 && shown.length === 0 && (
         <div className="card" data-tour="inventory-list">
           {onlyLow ? bi('Nothing is running low. Good.', 'ಏನೂ ಮುಗಿಯುತ್ತಿಲ್ಲ. ಒಳ್ಳೆಯದು.') : bi('No item matches. Try another name, or add it with “New item”.', 'ಯಾವ ಸಾಮಾನೂ ಹೊಂದುತ್ತಿಲ್ಲ. ಬೇರೆ ಹೆಸರು ನೋಡಿ, ಅಥವಾ “ಹೊಸ ಸಾಮಾನು” ಒತ್ತಿ ಸೇರಿಸಿ.')}
         </div>
       )}
-      {!showCats && shown.length > 0 && (
+      {!showCats && !showPlaces && !inPlace && shown.length > 0 && (
         <div className="scroll" data-tour="inventory-list">
           <Table className="list">
             <thead>

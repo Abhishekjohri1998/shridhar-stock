@@ -108,3 +108,28 @@ export function suggestBuyQty(
   const u = buyUnitOf(item);
   return { qty: Math.max(1, Math.ceil(round3((2 * level - total) / u.perBase))), unit: u.code };
 }
+
+/** What a place holds now, and what it held before but has none of now (with the last move's date). */
+export function placeItems(
+  placeId: string,
+  levels: StockLevel[],
+  moves: { itemId: string; at: string; from?: string; to?: string }[],
+): { now: { itemId: string; qty: number }[]; before: { itemId: string; lastAt: string }[] } {
+  const now: { itemId: string; qty: number }[] = [];
+  const has = new Set<string>();
+  for (const s of levels) {
+    if (s.locationId !== placeId || !(round3(s.qty) > 0)) continue;
+    now.push({ itemId: s.itemId, qty: round3(s.qty) });
+    has.add(s.itemId);
+  }
+  now.sort((a, b) => b.qty - a.qty);
+  const last = new Map<string, string>();
+  for (const m of moves) {
+    if (m.from !== placeId && m.to !== placeId) continue;
+    if (has.has(m.itemId)) continue;
+    const cur = last.get(m.itemId);
+    if (!cur || m.at > cur) last.set(m.itemId, m.at);
+  }
+  const before = [...last].map(([itemId, lastAt]) => ({ itemId, lastAt })).sort((a, b) => (a.lastAt < b.lastAt ? 1 : a.lastAt > b.lastAt ? -1 : 0));
+  return { now, before };
+}

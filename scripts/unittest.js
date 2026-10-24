@@ -848,7 +848,22 @@ async function ledger() {
   check('B: sort by highest selling (30 days)', order('selling') === 'zxy', order('selling'));
   check('B: sort by category, none last', order('category') === 'zxy', order('category'));
   check('B: sort by expiry, soonest first, none last', order('expiry') === 'yxz', order('expiry'));
-  check('B: every sort is offered', C.ITEM_SORTS.join() === 'name,price,stock,selling,expiry,category,volatility', C.ITEM_SORTS.join());
+  {
+    const lv = [{ itemId: 'a', locationId: 'g', qty: 5 }, { itemId: 'b', locationId: 'g', qty: 12 }, { itemId: 'c', locationId: 'g', qty: 0 }, { itemId: 'd', locationId: 's', qty: 3 }];
+    const mv = [
+      { itemId: 'c', at: '2026-01-01T00:00:00Z', to: 'g' },
+      { itemId: 'c', at: '2026-02-01T00:00:00Z', from: 'g' },
+      { itemId: 'e', at: '2026-03-01T00:00:00Z', from: 's', to: 'g' },
+      { itemId: 'e', at: '2026-04-01T00:00:00Z', from: 'g', to: 's' },
+      { itemId: 'a', at: '2026-01-05T00:00:00Z', to: 'g' },
+      { itemId: 'd', at: '2026-01-05T00:00:00Z', to: 's' },
+    ];
+    const r = C.placeItems('g', lv, mv);
+    check('place: now is what is there, most first', r.now.map((x) => x.itemId + x.qty).join() === 'b12,a5', JSON.stringify(r.now));
+    check('place: before is moved-through items now at 0, newest first, with last date', r.before.map((x) => x.itemId + '@' + x.lastAt.slice(0, 7)).join() === 'e@2026-04,c@2026-02', JSON.stringify(r.before));
+    check('place: other places are not mixed in', !r.now.some((x) => x.itemId === 'd') && !r.before.some((x) => x.itemId === 'd'));
+  }
+  check('B: every sort is offered', C.ITEM_SORTS.join() === 'name,price,stock,selling,expiry,category,volatility,place', C.ITEM_SORTS.join());
   const dirOrder = (by, dir) => C.sortItems(list, by, facts, dir).map((i) => i.id).join('');
   check('B: name descending', dirOrder('name', 'desc') === 'xzy', dirOrder('name', 'desc'));
   check('B: price high to low', dirOrder('price', 'desc') === 'yxz', dirOrder('price', 'desc'));

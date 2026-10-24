@@ -107,6 +107,9 @@ const moveSchema = new Schema(
 );
 moveSchema.index({ itemId: 1, at: -1 });
 moveSchema.index({ at: -1 });
+// A place's items, now and before: moves into or out of it, newest first.
+moveSchema.index({ from: 1, at: -1 });
+moveSchema.index({ to: 1, at: -1 });
 
 const stockSchema = new Schema(
   {

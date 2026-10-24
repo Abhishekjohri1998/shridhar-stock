@@ -25,6 +25,7 @@ import {
   lowBase,
   stockInfo,
   totalQty,
+  placeItems,
   type ItemSupplierRow,
   type PurchaseOrder,
   type Cell,
@@ -195,6 +196,19 @@ adminRoutes.post(
     };
     await getRepo().saveLocation(loc);
     res.status(201).json(loc);
+  }),
+);
+
+// What a place holds now, and what it held before (moves in or out of it, none there now).
+adminRoutes.get(
+  '/admin/places/:id/items',
+  admin,
+  handler(async (req, res) => {
+    const repo = getRepo();
+    const loc = (await repo.listLocations()).find((l) => l.id === req.params.id);
+    if (!loc) throw new HttpError(404, 'No such place');
+    const [levels, moves] = await Promise.all([repo.listStock(), repo.listMoves({ locationId: loc.id })]);
+    res.json(placeItems(loc.id, levels, moves));
   }),
 );
 

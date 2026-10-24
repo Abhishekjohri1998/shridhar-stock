@@ -142,7 +142,7 @@ export function soonestExpiry(lots: Lot[]): Map<string, string> {
 
 // ------------------------------------------------------------------ the product list's sorts
 
-export const ITEM_SORTS = ['name', 'price', 'stock', 'selling', 'expiry', 'category', 'volatility'] as const;
+export const ITEM_SORTS = ['name', 'price', 'stock', 'selling', 'expiry', 'category', 'volatility', 'place'] as const;
 export type ItemSort = (typeof ITEM_SORTS)[number];
 export type SortDir = 'asc' | 'desc';
 
@@ -155,6 +155,8 @@ export const DEFAULT_SORT_DIR: Record<ItemSort, SortDir> = {
   expiry: 'asc',
   category: 'asc',
   volatility: 'desc',
+  // Storage place: most at that place first.
+  place: 'desc',
 };
 
 /** How often an item's selling price moved: changes between consecutive sales, and (max − min) / avg. */
@@ -201,6 +203,8 @@ export function sortItems<T extends Item>(items: T[], by: ItemSort, f: SortFacts
     category: (a, b) => text((a.category ?? '').toLowerCase(), (b.category ?? '').toLowerCase()),
     expiry: (a, b) => text(f.expiry.get(a.id), f.expiry.get(b.id)),
     volatility: (a, b) => sign * (vol(a).changes - vol(b).changes || vol(a).spread - vol(b).spread),
+    // Outside a place (a search), by total stock like 'stock'.
+    place: (a, b) => sign * ((f.total.get(a.id) ?? 0) - (f.total.get(b.id) ?? 0)),
   };
   return [...items].sort((a, b) => cmp[by](a, b) || byName(a, b));
 }
