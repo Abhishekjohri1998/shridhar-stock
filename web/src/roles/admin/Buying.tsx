@@ -6,6 +6,7 @@ import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
 import { statusWord } from '../../lib/words';
 import { Empty, Loading, Money, Select, Status, useBi, when, Table } from '../../components/ui';
+import { CarrierLoads } from './Loads';
 import { BillLine, ChecklistList, CONDITION_WORDS, deleteChecklist, deletePurchase, DeliveryText, PaymentForm, PaymentsList, SupplierHistory, useCarriers } from './VendorHistory';
 
 /** An item as the orders page needs it: names and units, never the whole catalogue. */
@@ -148,6 +149,7 @@ export function PurchasesPage() {
                 : bi('No orders yet. Tap “+ New order” to make the first one.', 'ಇನ್ನೂ ಆರ್ಡರ್ ಇಲ್ಲ. ಮೊದಲನೆಯದಕ್ಕೆ “+ ಹೊಸ ಆರ್ಡರ್” ಒತ್ತಿ.')}
             </Empty>
           )}
+          {tab === 'open' && <CarrierLoads orders={value.page.orders} sups={value.sups} items={items} carriers={carriers} lang={lang} onDone={setNote} />}
           {value.page.orders.map((p) => (
             <OrderCard key={p.id + ':' + p.status + ':' + (p.receipts ?? 0)} p={p} carriers={carriers} reload={(m) => { setNote(m); setVersion((v) => v + 1); }} supplier={value.sups.find((s) => s.id === p.supplierId)} items={items} locs={value.locs} lang={lang} act={act} />
           ))}
@@ -198,6 +200,8 @@ function OrderCard({
   const [driverName, setDriverName] = useState(p.delivery?.driverName ?? '');
   const [carrierOk, setCarrierOk] = useState(false);
   const [closeRest, setCloseRest] = useState(false);
+  // Unticked lines on a carrier load: stay on it (default), or back to "not yet assigned".
+  const [leaveNext, setLeaveNext] = useState(false);
   const [paying, setPaying] = useState(false);
   const [details, setDetails] = useState(false);
   const [receiving, setReceiving] = useState(false);
@@ -400,6 +404,13 @@ function OrderCard({
             <input type="checkbox" checked={closeRest} onChange={(e) => setCloseRest(e.target.checked)} />
             {bi('The rest will not come: close the order', 'ಉಳಿದದ್ದು ಬರುವುದಿಲ್ಲ: ಆರ್ಡರ್ ಮುಗಿಸಿ')}
           </label>
+          {!closeRest && (
+            <label className="check">
+              <input type="checkbox" checked={leaveNext} onChange={(e) => setLeaveNext(e.target.checked)} />
+              {bi('Unticked lines on a carrier load: leave for next time (not yet assigned)', 'ಗುರುತಿಸದ ಲೋಡ್ ಸಾಲುಗಳು: ಮುಂದಿನ ಸಲಕ್ಕೆ ಬಿಡಿ (ಇನ್ನೂ ನಿಗದಿಯಾಗಿಲ್ಲ)')}
+            </label>
+          )}
+          <div className="muted">{bi('Only ticked lines go into stock; the rest stay due.', 'ಗುರುತಿಸಿದ ಸಾಲುಗಳು ಮಾತ್ರ ಸ್ಟಾಕಿಗೆ; ಉಳಿದವು ಬರಬೇಕಾದವು.')}</div>
         </div>
       )}
       {receiving && (
@@ -436,15 +447,16 @@ function OrderCard({
           <>
             <button
               className="btn primary"
-              disabled={anySplitBad || (mode === 'carrier' && !carrierId)}
+              disabled={anySplitBad || (!closeRest && !p.lines.some((l) => tick[l.itemId] && (Number(got[l.itemId]?.qty) || 0) > 0))}
               onClick={() =>
                 act(
                   '/admin/purchases/' + p.id + '/checklist',
                   {
                     updateCost,
                     mode,
-                    ...(mode === 'carrier' ? { carrierId, vehicleNo, driverName, carrierConfirmed: carrierOk } : {}),
+                    ...(mode === 'carrier' ? { ...(carrierId ? { carrierId } : {}), vehicleNo, driverName, carrierConfirmed: carrierOk } : {}),
                     close: closeRest,
+                    leaveForNextTime: leaveNext,
                     lines: p.lines.map((l) => {
                       const v = got[l.itemId]!;
                       const k = l.itemId;
@@ -463,7 +475,7 @@ function OrderCard({
                     ...(delivery.trim() !== '' ? { delivery: Number(delivery) || 0 } : {}),
                     expiry: Object.fromEntries(Object.entries(expiry).filter(([, v]) => /^\d{4}-\d{2}-\d{2}$/.test(v))),
                   },
-                  p.lines.map((l) => briefName(items.get(l.itemId), l.itemId, lang) + ' +' + (Number(got[l.itemId]?.qty) || 0) + ' ' + unitWord(l.itemId, l.unit) + (split[l.itemId] ? '' : ' → ' + placeOf(storeIn[l.itemId] ?? ''))).join(', '),
+                  p.lines.filter((l) => tick[l.itemId]).map((l) => briefName(items.get(l.itemId), l.itemId, lang) + ' +' + (Number(got[l.itemId]?.qty) || 0) + ' ' + unitWord(l.itemId, l.unit) + (split[l.itemId] ? '' : ' → ' + placeOf(storeIn[l.itemId] ?? ''))).join(', '),
                 )
               }
             >
@@ -642,12 +654,12 @@ function NewOrder({ locs, sups, carriers, fromBuyList, onDone }: { locs: Locatio
     setQ('');
   };
   const set = (i: number, patch: Partial<Line>) => setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
-  const ok = (mode === 'self' || !!carrierId) && lines.length > 0 && lines.every((l) => Number(l.qty) > 0 && (l.cost.trim() === '' || Number(l.cost) >= 0));
+  const ok = lines.length > 0 && lines.every((l) => Number(l.qty) > 0 && (l.cost.trim() === '' || Number(l.cost) >= 0));
   const save = async () => {
     setErr('');
     setBusy(true);
     try {
-      const delivery = { mode, ...(mode === 'carrier' ? { carrierId, ...(vehicleNo.trim() ? { vehicleNo: vehicleNo.trim() } : {}), ...(driverName.trim() ? { driverName: driverName.trim() } : {}) } : {}), ...(expectedOn ? { expectedOn } : {}) };
+      const delivery = { mode, ...(mode === 'carrier' ? { ...(carrierId ? { carrierId } : {}), ...(vehicleNo.trim() ? { vehicleNo: vehicleNo.trim() } : {}), ...(driverName.trim() ? { driverName: driverName.trim() } : {}) } : {}), ...(expectedOn ? { expectedOn } : {}) };
       await http.post('/admin/pos', { supplierId, delivery, lines: lines.map((l) => ({ itemId: l.itemId, unit: l.unit, qty: Number(l.qty), cost: Number(l.cost) || 0 })) });
       onDone(true);
     } catch (e) {
@@ -720,17 +732,22 @@ function NewOrder({ locs, sups, carriers, fromBuyList, onDone }: { locs: Locatio
                   setVehicleNo(carriers.find((x) => x.id === id)?.vehicleNo ?? '');
                 }}
                 aria-label={bi('Carrier', 'ಸಾಗಣೆದಾರ')}
-                options={[{ value: '', label: bi('Choose', 'ಆರಿಸಿ') }, ...carriers.filter((c) => c.active).map((c) => ({ value: c.id, label: c.name, hint: c.vehicleNo }))]}
+                options={[{ value: '', label: bi('Not yet assigned', 'ಇನ್ನೂ ನಿಗದಿಯಾಗಿಲ್ಲ') }, ...carriers.filter((c) => c.active).map((c) => ({ value: c.id, label: c.name, hint: c.vehicleNo }))]}
               />
             </label>
-            <label className="field">
-              <span>{bi('Vehicle no.', 'ವಾಹನ ಸಂಖ್ಯೆ')}</span>
-              <input value={vehicleNo} onChange={(e) => setVehicleNo(e.target.value)} />
-            </label>
-            <label className="field">
-              <span>{bi('Driver (optional)', 'ಚಾಲಕ (ಬೇಕಿದ್ದರೆ)')}</span>
-              <input value={driverName} onChange={(e) => setDriverName(e.target.value)} />
-            </label>
+            {carrierId && (
+              <>
+                <label className="field">
+                  <span>{bi('Vehicle no. (optional)', 'ವಾಹನ ಸಂಖ್ಯೆ (ಬೇಕಿದ್ದರೆ)')}</span>
+                  <input value={vehicleNo} onChange={(e) => setVehicleNo(e.target.value)} />
+                </label>
+                <label className="field">
+                  <span>{bi('Driver (optional)', 'ಚಾಲಕ (ಬೇಕಿದ್ದರೆ)')}</span>
+                  <input value={driverName} onChange={(e) => setDriverName(e.target.value)} />
+                </label>
+              </>
+            )}
+            {!carrierId && <div className="muted">{bi('Put it on a carrier later: Open → tick the lines → Move to carrier.', 'ನಂತರ ಸಾಗಣೆದಾರರಿಗೆ ಹಾಕಿ: ತೆರೆದವು → ಸಾಲುಗಳನ್ನು ಗುರುತಿಸಿ → ಸಾಗಣೆದಾರರಿಗೆ ಹಾಕಿ.')}</div>}
           </>
         )}
         <label className="field">
@@ -877,6 +894,7 @@ function Suppliers({ sups, onDone }: { sups: Supplier[]; onDone: () => void }) {
                 ))}
               </div>
             )}
+            {s.address && <div className="muted">📍 {s.address}</div>}
             {s.notes && <div className="muted">{s.notes}</div>}
           </div>
           {openId === s.id && <SupplierForm key={s.id} s={s} onDone={done} />}
@@ -895,6 +913,7 @@ function SupplierForm({ s, onDone }: { s: Supplier | null; onDone: () => void })
   const [name, setName] = useState(s?.name ?? '');
   const [phone, setPhone] = useState(s?.phone ?? '');
   const [gst, setGst] = useState(s?.gst ?? '');
+  const [address, setAddress] = useState(s?.address ?? '');
   const [notes, setNotes] = useState(s?.notes ?? '');
   const [contacts, setContacts] = useState<SupplierContact[]>(s?.contacts ?? []);
   // Items supplied: read from the items, saved back onto them, so the item page agrees.
@@ -919,6 +938,7 @@ function SupplierForm({ s, onDone }: { s: Supplier | null; onDone: () => void })
         name,
         phone,
         gst,
+        address,
         notes,
         contacts: contacts.filter((c) => c.name.trim()),
         ...(supplied ? { itemIds: supplied.map((i) => i.id) } : {}),
@@ -946,6 +966,10 @@ function SupplierForm({ s, onDone }: { s: Supplier | null; onDone: () => void })
         <label className="field">
           <span>{bi('GST (optional)', 'ಜಿಎಸ್‌ಟಿ (ಬೇಕಿದ್ದರೆ)')}</span>
           <input value={gst} onChange={(e) => setGst(e.target.value)} placeholder="29ABCDE1234F1Z5" />
+        </label>
+        <label className="field">
+          <span>{bi('Address (optional)', 'ವಿಳಾಸ (ಬೇಕಿದ್ದರೆ)')}</span>
+          <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder={bi('Shop or godown address', 'ಅಂಗಡಿ ಅಥವಾ ಗೋದಾಮಿನ ವಿಳಾಸ')} />
         </label>
         <label className="field">
           <span>{bi('Notes', 'ಟಿಪ್ಪಣಿ')}</span>

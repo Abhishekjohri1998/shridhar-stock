@@ -21,6 +21,7 @@ export function DeliveryText({ d, carriers }: { d?: Pick<PoDelivery, 'mode' | 'c
   if (!d) return null;
   if (d.mode === 'self') return <span>🏪 {bi('Vendor brings it', 'ಮಾರಾಟಗಾರರೇ ತರುತ್ತಾರೆ')}</span>;
   const c = carriers.find((x) => x.id === d.carrierId);
+  if (!d.carrierId) return <span>🚚 {bi('Goods carrier: not yet assigned', 'ಸಾಗಣೆ ವಾಹನ: ಇನ್ನೂ ನಿಗದಿಯಾಗಿಲ್ಲ')}</span>;
   return (
     <span>
       🚚 {c?.name ?? bi('Carrier', 'ಸಾಗಣೆದಾರ')}

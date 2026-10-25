@@ -550,6 +550,36 @@ adminRoutes.post(
   }),
 );
 
+// ---------------------------------------------------------------- learned Kannada spellings
+// {english word: Kannada} the shopkeeper corrected after "A -> ಅ"; the button uses them next time.
+
+async function translitOf(repo: ReturnType<typeof getRepo>): Promise<Record<string, string>> {
+  const doc = await repo.getDoc<{ id: string; words?: Record<string, string> }>('meta', 'translit');
+  return doc?.words ?? {};
+}
+
+adminRoutes.get(
+  '/admin/translit',
+  admin,
+  handler(async (_req, res) => {
+    res.json(await translitOf(getRepo()));
+  }),
+);
+
+adminRoutes.put(
+  '/admin/translit',
+  admin,
+  handler(async (req, res) => {
+    const body = z
+      .record(z.string().trim().toLowerCase().regex(/^[a-z]{1,40}$/), z.string().trim().min(1).max(80))
+      .parse(req.body);
+    const repo = getRepo();
+    const words = { ...(await translitOf(repo)), ...body };
+    await repo.putDoc('meta', { id: 'translit', words });
+    res.json(words);
+  }),
+);
+
 // ---------------------------------------------------------------- settings
 
 adminRoutes.get(

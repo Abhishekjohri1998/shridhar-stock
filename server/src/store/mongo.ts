@@ -142,6 +142,8 @@ export const DOC_INDEXES: Partial<Record<DocCollection, Record<string, 1 | -1>[]
   // place (FEFO on every sale) and by expiry (Home's "expiring soon", the list's expiry sort).
   trips: [{ date: -1 }, { carrierId: 1, date: -1 }, { poId: 1 }],
   lots: [{ itemId: 1, placeId: 1 }, { expiry: 1 }, { placeId: 1 }],
+  // Carrier loads: newest first, by carrier, and the load an order's line is on.
+  loads: [{ date: -1, at: -1 }, { carrierId: 1, date: -1 }, { 'lines.poId': 1 }],
 };
 function docSchemaFor(col: DocCollection): Schema {
   const s = docSchema.clone();

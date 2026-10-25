@@ -17,6 +17,8 @@ import {
   costsFromUnit,
   toEnglish,
   toKannada,
+  kannadaSuggestions,
+  learnedFrom,
   blankUnit,
   defaultUnitOf,
   describeQty,
@@ -156,6 +158,19 @@ function ItemDetails({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item?.id, item?.updatedAt]);
 
+  // Spellings this shop taught the A -> ಅ button, the chips it offered, and what it last filled in
+  // (a saved Kannada name that differs from that is a correction worth remembering).
+  const [learned, setLearned] = useState<Record<string, string>>({});
+  const [chips, setChips] = useState<string[]>([]);
+  const [autoKn, setAutoKn] = useState('');
+  useEffect(() => {
+    if (readOnly) return;
+    let gone = false;
+    api.translit().then((w) => !gone && setLearned(w)).catch(() => undefined);
+    return () => {
+      gone = true;
+    };
+  }, [readOnly]);
   const set = (patch: Partial<ItemForm>) => setForm((f) => ({ ...f, ...patch }));
   // Unit names other items already use, suggested while a unit is typed.
   const [known, setKnown] = useState<UsedUnit[]>([]);
@@ -186,6 +201,12 @@ function ItemDetails({
     setSaved('');
     try {
       const input = formToInput(withPendingAlias(form, pendingAlias), active);
+      if (autoKn && form.nameKn.trim() && form.nameKn.trim() !== autoKn) {
+        const taught = learnedFrom(form.nameEn, form.nameKn, learned);
+        if (Object.keys(taught).length) api.learnTranslit(taught).then(setLearned).catch(() => undefined);
+      }
+      setAutoKn('');
+      setChips([]);
       if (item) {
         await api.saveItem(item.id, input);
         setPendingAlias({ text: '', unit: '' });
@@ -229,11 +250,26 @@ function ItemDetails({
               <div className="bar mb-0">
                 <input value={form.nameKn} onChange={(e) => set({ nameKn: e.target.value })} />
                 {!readOnly && (
-                  <button type="button" className="btn ghost small" disabled={!form.nameEn.trim()} title={bi('Write the English name in Kannada letters', 'ಇಂಗ್ಲಿಷ್ ಹೆಸರನ್ನು ಕನ್ನಡ ಅಕ್ಷರದಲ್ಲಿ ಬರೆಯಿರಿ')} onClick={() => fillName('nameKn', toKannada(form.nameEn))}>
+                  <button type="button" className="btn ghost small" disabled={!form.nameEn.trim()} title={bi('Write the English name in Kannada letters', 'ಇಂಗ್ಲಿಷ್ ಹೆಸರನ್ನು ಕನ್ನಡ ಅಕ್ಷರದಲ್ಲಿ ಬರೆಯಿರಿ')} onClick={() => {
+                    const all = kannadaSuggestions(form.nameEn, learned);
+                    const first = toKannada(form.nameEn, learned);
+                    setChips(all.length > 1 ? all : []);
+                    setAutoKn(first);
+                    fillName('nameKn', first);
+                  }}>
                     A → ಅ
                   </button>
                 )}
               </div>
+              {!readOnly && chips.length > 1 && (
+                <div className="bar mb-0">
+                  {chips.map((c) => (
+                    <button key={c} type="button" className={'btn small ' + (form.nameKn === c ? 'primary' : 'ghost')} onClick={() => set({ nameKn: c })}>
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              )}
             </label>
             <label className="field">
               <span>{t('items.nameEn')}</span>

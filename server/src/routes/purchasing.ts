@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { expiringWithin, findUnit, priceVolatility, soonestExpiry, type BillMirror, type Carrier, type CarrierTrip, type Lot, type PurchaseOrder, type Supplier } from '@stock/core';
-import { requireRole } from '../auth';
+import { expiringWithin, findUnit, landedUnitCost, poStage, priceVolatility, receivedQty, round2, soonestExpiry, unitCostsFrom, type BillMirror, type Carrier, type CarrierLoad, type CarrierTrip, type LoadLine, type Lot, type PurchaseOrder, type Supplier } from '@stock/core';
+import { audit, requireRole } from '../auth';
 import { handler, HttpError } from '../http';
 import { getRepo } from '../store';
 import { newId } from '../store/types';
@@ -284,5 +284,308 @@ purchasingRoutes.get(
     const sold: Record<string, number> = {};
     for (const m of moves) if (m.kind === 'sale') sold[m.itemId] = Math.round(((sold[m.itemId] ?? 0) + m.qty) * 1000) / 1000;
     res.json({ sold, expiry: Object.fromEntries(soonestExpiry(lots.filter((l) => !String(l.placeId).startsWith('transit:')))), volatility: Object.fromEntries(priceVolatility(bills)) });
+  }),
+);
+
+// ---------------------------------------------------------------- carrier loads
+
+/*
+ * Lines of open orders (from any vendors) put on a carrier's load, each with its own delivery
+ * rate per unit. A line is on one load at most while it waits; moving it takes it off the other.
+ * The checklist (actions.ts) posts what came and marks it received on the load.
+ */
+
+const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Give the date as a date');
+const lineRef = z.object({ poId: z.string().min(1), itemId: z.string().min(1), ratePerUnit: z.number().min(0).max(1e6).optional() });
+const lineKey = (poId: string, itemId: string) => poId + '|' + itemId;
+
+async function needCarrier(id: string): Promise<Carrier> {
+  const car = await getRepo().getDoc<Carrier>('carriers', id);
+  if (!car) throw new HttpError(404, 'No such carrier');
+  return car;
+}
+
+async function loadById(id: string): Promise<CarrierLoad> {
+  const ld = await getRepo().getDoc<CarrierLoad>('loads', id);
+  if (!ld) throw new HttpError(404, 'No such carrier load');
+  return ld;
+}
+
+/** Carrier loads, newest first (the last 200). */
+purchasingRoutes.get(
+  '/admin/loads',
+  admin,
+  handler(async (_req, res) => {
+    res.json(await getRepo().listDocs<CarrierLoad>('loads', { sort: { date: -1, at: -1 }, limit: 200 }));
+  }),
+);
+
+purchasingRoutes.get(
+  '/admin/loads/:id',
+  admin,
+  handler(async (req, res) => {
+    res.json(await loadById(String(req.params.id)));
+  }),
+);
+
+/**
+ * Puts open order lines on a carrier's load: an existing one (`loadId`), or a new one for
+ * `carrierId` (vehicle, driver and date optional). Lines already on another load move off it,
+ * keeping their rate unless a new one is given. Each line's qty is what is still due on the order.
+ */
+purchasingRoutes.post(
+  '/admin/loads/move',
+  admin,
+  handler(async (req, res) => {
+    const b = z
+      .object({
+        lines: z.array(lineRef).min(1).max(200),
+        loadId: z.string().min(1).optional(),
+        carrierId: z.string().min(1).optional(),
+        vehicleNo: z.string().trim().max(20).optional(),
+        driverName: z.string().trim().max(80).optional(),
+        date: ymd.optional(),
+      })
+      .parse(req.body);
+    if (!b.loadId && !b.carrierId) throw new HttpError(400, 'Choose the carrier');
+    if (new Set(b.lines.map((l) => lineKey(l.poId, l.itemId))).size !== b.lines.length) throw new HttpError(400, 'A line is chosen twice');
+    const repo = getRepo();
+    const by = audit(req).by;
+    const at = now();
+    let target: CarrierLoad;
+    if (b.loadId) {
+      target = await loadById(b.loadId);
+    } else {
+      const car = await needCarrier(b.carrierId!);
+      const vehicleNo = (b.vehicleNo || car.vehicleNo)?.toUpperCase();
+      target = {
+        id: newId('load'),
+        carrierId: car.id,
+        ...(vehicleNo ? { vehicleNo } : {}),
+        ...(b.driverName ? { driverName: b.driverName } : {}),
+        date: b.date ?? today(),
+        lines: [],
+        history: [{ at, by, action: 'create', carrierId: car.id }],
+        at,
+      };
+    }
+    // The orders, each line still due.
+    const poIds = [...new Set(b.lines.map((l) => l.poId))];
+    const pos = new Map<string, PurchaseOrder>();
+    for (const id of poIds) {
+      const p = await repo.getDoc<PurchaseOrder>('pos', id);
+      if (!p) throw new HttpError(404, 'No such order');
+      if (poStage(p.status) !== 'ordered') throw new HttpError(409, 'Order ' + p.no + ' is already ' + p.status);
+      pos.set(id, p);
+    }
+    // Other loads holding any of these lines, waiting.
+    const others = (await repo.listDocs<CarrierLoad>('loads', { filter: { 'lines.poId': poIds } })).filter((x) => x.id !== target.id);
+    const fresh: LoadLine[] = [];
+    const movedFrom = new Map<string, { ld: CarrierLoad; lines: { poId: string; itemId: string; qty: number }[] }>();
+    for (const l of b.lines) {
+      const p = pos.get(l.poId)!;
+      const pl = p.lines.find((x) => x.itemId === l.itemId);
+      if (!pl) throw new HttpError(400, 'An item is not on order ' + p.no);
+      const due = Math.max(0, Math.round((pl.qty - receivedQty(p, l.itemId)) * 1e6) / 1e6);
+      if (!(due > 0)) throw new HttpError(400, 'Nothing is still due of that item on order ' + p.no);
+      let rate = l.ratePerUnit;
+      let moved = false;
+      for (const o of others) {
+        const i = o.lines.findIndex((x) => x.poId === l.poId && x.itemId === l.itemId && !x.received);
+        if (i < 0) continue;
+        rate ??= o.lines[i]!.ratePerUnit;
+        o.lines.splice(i, 1);
+        const m = movedFrom.get(o.id) ?? { ld: o, lines: [] };
+        m.lines.push({ poId: l.poId, itemId: l.itemId, qty: due });
+        movedFrom.set(o.id, m);
+        moved = true;
+      }
+      const cur = target.lines.find((x) => x.poId === l.poId && x.itemId === l.itemId && !x.received);
+      if (cur) {
+        cur.qty = due;
+        if (l.ratePerUnit != null) cur.ratePerUnit = l.ratePerUnit;
+        continue;
+      }
+      const line: LoadLine = { poId: l.poId, itemId: l.itemId, qty: due, ratePerUnit: rate ?? 0 };
+      target.lines.push(line);
+      if (!moved) fresh.push(line);
+    }
+    for (const { ld, lines } of movedFrom.values()) {
+      ld.history.push({ at, by, action: 'move-out', loadId: target.id, carrierId: target.carrierId, lines });
+      target.history.push({ at, by, action: 'move-in', loadId: ld.id, fromCarrierId: ld.carrierId, lines });
+    }
+    if (fresh.length) target.history.push({ at, by, action: 'add', lines: fresh.map((x) => ({ poId: x.poId, itemId: x.itemId, qty: x.qty })) });
+    await repo.putDocs('loads', [...[...movedFrom.values()].map((m) => m.ld), target]);
+    emit('pos');
+    res.status(b.loadId ? 200 : 201).json(target);
+  }),
+);
+
+/** Edits a load's vehicle, driver or date. */
+purchasingRoutes.put(
+  '/admin/loads/:id',
+  admin,
+  handler(async (req, res) => {
+    const b = z.object({ vehicleNo: z.string().trim().max(20).optional(), driverName: z.string().trim().max(80).optional(), date: ymd.optional() }).parse(req.body);
+    const ld = await loadById(String(req.params.id));
+    if (b.vehicleNo != null) {
+      if (b.vehicleNo) ld.vehicleNo = b.vehicleNo.toUpperCase();
+      else delete ld.vehicleNo;
+    }
+    if (b.driverName != null) {
+      if (b.driverName) ld.driverName = b.driverName;
+      else delete ld.driverName;
+    }
+    if (b.date) ld.date = b.date;
+    ld.history.push({ at: now(), by: audit(req).by, action: 'edit' });
+    await getRepo().putDoc('loads', ld);
+    emit('pos');
+    res.json(ld);
+  }),
+);
+
+/**
+ * The carrier backed out: the load goes to another carrier. Lines already received stay with the
+ * carrier who brought them, so then only the waiting lines move, to a new load.
+ */
+purchasingRoutes.post(
+  '/admin/loads/:id/carrier',
+  admin,
+  handler(async (req, res) => {
+    const b = z.object({ carrierId: z.string().min(1), vehicleNo: z.string().trim().max(20).optional(), driverName: z.string().trim().max(80).optional(), date: ymd.optional() }).parse(req.body);
+    const repo = getRepo();
+    const ld = await loadById(String(req.params.id));
+    const car = await needCarrier(b.carrierId);
+    if (car.id === ld.carrierId) throw new HttpError(400, 'It is already with this carrier');
+    const by = audit(req).by;
+    const at = now();
+    const waiting = ld.lines.filter((x) => !x.received);
+    if (!waiting.length) throw new HttpError(409, 'Everything on this load was received already');
+    const vehicleNo = (b.vehicleNo || car.vehicleNo)?.toUpperCase();
+    if (waiting.length === ld.lines.length) {
+      const from = ld.carrierId;
+      ld.carrierId = car.id;
+      if (vehicleNo) ld.vehicleNo = vehicleNo;
+      else delete ld.vehicleNo;
+      if (b.driverName) ld.driverName = b.driverName;
+      else delete ld.driverName;
+      if (b.date) ld.date = b.date;
+      ld.history.push({ at, by, action: 'carrier', carrierId: car.id, fromCarrierId: from });
+      await repo.putDoc('loads', ld);
+      emit('pos');
+      res.json(ld);
+      return;
+    }
+    const lines = waiting.map((x) => ({ poId: x.poId, itemId: x.itemId, qty: x.qty }));
+    const nl: CarrierLoad = {
+      id: newId('load'),
+      carrierId: car.id,
+      ...(vehicleNo ? { vehicleNo } : {}),
+      ...(b.driverName ? { driverName: b.driverName } : {}),
+      date: b.date ?? ld.date,
+      lines: waiting,
+      history: [{ at, by, action: 'move-in', loadId: ld.id, fromCarrierId: ld.carrierId, lines }],
+      at,
+    };
+    ld.lines = ld.lines.filter((x) => x.received);
+    ld.history.push({ at, by, action: 'move-out', loadId: nl.id, carrierId: car.id, lines });
+    await repo.putDocs('loads', [ld, nl]);
+    emit('pos');
+    res.json(nl);
+  }),
+);
+
+/** "Leave for next time": takes waiting lines off a load, back to "not yet assigned". */
+purchasingRoutes.post(
+  '/admin/loads/:id/unassign',
+  admin,
+  handler(async (req, res) => {
+    const b = z.object({ lines: z.array(lineRef).min(1).max(200) }).parse(req.body);
+    const ld = await loadById(String(req.params.id));
+    const want = new Set(b.lines.map((l) => lineKey(l.poId, l.itemId)));
+    const gone = ld.lines.filter((x) => !x.received && want.has(lineKey(x.poId, x.itemId)));
+    if (!gone.length) throw new HttpError(400, 'None of those lines are waiting on this load');
+    ld.lines = ld.lines.filter((x) => !gone.includes(x));
+    ld.history.push({ at: now(), by: audit(req).by, action: 'unassign', lines: gone.map((x) => ({ poId: x.poId, itemId: x.itemId, qty: x.qty })) });
+    await getRepo().putDoc('loads', ld);
+    emit('pos');
+    res.json(ld);
+  }),
+);
+
+/**
+ * Sets delivery rates per unit. On a line already received, the receipt's delivery share and
+ * landed cost are worked out again, and the item's cost follows when this receipt set it and is
+ * still its latest. Every change is in the load's history.
+ */
+purchasingRoutes.put(
+  '/admin/loads/:id/rates',
+  admin,
+  handler(async (req, res) => {
+    const b = z.object({ lines: z.array(z.object({ poId: z.string().min(1), itemId: z.string().min(1), ratePerUnit: z.number().min(0).max(1e6) })).min(1).max(200) }).parse(req.body);
+    const repo = getRepo();
+    const ld = await loadById(String(req.params.id));
+    const changes: { poId: string; itemId: string; from: number; to: number }[] = [];
+    const pos = new Map<string, PurchaseOrder>();
+    let itemsChanged = false;
+    for (const r of b.lines) {
+      const line = ld.lines.find((x) => x.poId === r.poId && x.itemId === r.itemId);
+      if (!line) throw new HttpError(400, 'That line is not on this load');
+      const from = line.ratePerUnit;
+      if (Math.abs(from - r.ratePerUnit) < 1e-9) continue;
+      line.ratePerUnit = r.ratePerUnit;
+      changes.push({ poId: r.poId, itemId: r.itemId, from, to: r.ratePerUnit });
+      if (!line.received) continue;
+      // The receipt's line, worked out again.
+      const p = pos.get(r.poId) ?? (await repo.getDoc<PurchaseOrder>('pos', r.poId));
+      if (!p) continue;
+      pos.set(p.id, p);
+      const rc = (p.received ?? []).find((x) => x.itemId === r.itemId && x.loadId === ld.id && (x.receipt ?? 1) === line.received!.receipt);
+      if (!rc) continue;
+      const oldLanded = rc.landed ?? rc.cost;
+      const delivery = round2(Math.max(0, (rc.delivery ?? 0) - from * rc.qty + r.ratePerUnit * rc.qty));
+      const landed = landedUnitCost(rc.cost, rc.qty, delivery);
+      rc.ratePerUnit = r.ratePerUnit;
+      if (delivery > 0) {
+        rc.delivery = delivery;
+        rc.landed = landed;
+      } else {
+        delete rc.delivery;
+        delete rc.landed;
+      }
+      // The item's cost follows when this receipt set it and is still the item's latest.
+      const unit = p.lines.find((x) => x.itemId === r.itemId)?.unit;
+      const item = unit ? await repo.getItem(r.itemId) : null;
+      const u = item && unit ? findUnit(item, unit) : undefined;
+      if (!item || !unit || !u || u.cost == null || Math.abs(u.cost - round2(oldLanded)) > 0.005) continue;
+      const all = await repo.listDocs<PurchaseOrder>('pos', { filter: { 'received.itemId': r.itemId }, fields: ['received'] });
+      const latest = all.flatMap((q) => (q.received ?? []).filter((x) => x.itemId === r.itemId && x.qty > 0 && x.at)).reduce((m, x) => (x.at! > m ? x.at! : m), '');
+      if (!rc.at || rc.at < latest) continue;
+      item.units = unitCostsFrom(item.units, unit, landed);
+      item.updatedAt = now();
+      await repo.saveItem(item);
+      itemsChanged = true;
+    }
+    if (changes.length) {
+      ld.history.push({ at: now(), by: audit(req).by, action: 'rate', lines: changes });
+      for (const p of pos.values()) await repo.putDoc('pos', p);
+      await repo.putDoc('loads', ld);
+      emit('pos');
+      if (itemsChanged) emit('items');
+    }
+    res.json(ld);
+  }),
+);
+
+/** Deletes a load with nothing received on it: its lines go back to "not yet assigned". */
+purchasingRoutes.delete(
+  '/admin/loads/:id',
+  admin,
+  handler(async (req, res) => {
+    const ld = await loadById(String(req.params.id));
+    if (ld.lines.some((x) => x.received)) throw new HttpError(409, 'Goods on this load were received: it stays as a record');
+    await getRepo().deleteDoc('loads', ld.id);
+    emit('pos');
+    res.json({ ok: true });
   }),
 );

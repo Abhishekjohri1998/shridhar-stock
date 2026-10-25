@@ -212,7 +212,7 @@ async function main() {
     // ------------------------------------------------ vendor history: delivery, checklists, payments
     const v = (await call('/admin/suppliers', { method: 'POST', body: { name: 'Hubli Oils', phone: '9833333333' } })).body.id;
     const oil = (await call('/items', { method: 'POST', body: { nameEn: 'Oil', nameKn: 'ಎಣ್ಣೆ', units: [{ code: 'ltr', label: 'Ltr', labelKn: '', perBase: 1, price: 150 }, { code: 'tin', label: 'Tin', labelKn: '', perBase: 15, price: 2100 }], aliases: [], racks: {} } })).body;
-    eq('V: a carrier order needs its carrier', (await call('/admin/pos', { method: 'POST', body: { supplierId: v, to: godown, lines: [{ itemId: oil.id, unit: 'tin', qty: 1, cost: 1 }], delivery: { mode: 'carrier' } } })).status, 400);
+    eq('V: an unknown carrier is refused', (await call('/admin/pos', { method: 'POST', body: { supplierId: v, to: godown, lines: [{ itemId: oil.id, unit: 'tin', qty: 1, cost: 1 }], delivery: { mode: 'carrier', carrierId: 'nope' } } })).status, 404);
     // Self delivery: 10 tins at 1800 and 5 kg dal at 100.
     const vs = await call('/admin/pos', { method: 'POST', body: { supplierId: v, to: godown, lines: [{ itemId: oil.id, unit: 'tin', qty: 10, cost: 1800 }, { itemId: dal.id, unit: 'kg', qty: 5, cost: 100 }], delivery: { mode: 'self', expectedOn: '2026-10-25' } } });
     check('V: an order keeps how it comes', vs.status === 201 && vs.body.delivery.mode === 'self' && vs.body.delivery.expectedOn === '2026-10-25', JSON.stringify(vs.body));
@@ -346,6 +346,87 @@ async function main() {
     check('W: gone from the delivery history', !(await call('/admin/suppliers/' + v + '/history')).body.deliveries.some((d) => d.id === cid));
     check('W: and from the carriers\' deliveries', !(await call('/admin/carriers')).body.deliveries.some((d) => d.id === cid));
     eq('W: an unknown checklist is 404', (await call('/admin/purchases/' + w1.body.id + '/checklists/nope', { method: 'DELETE' })).status, 404);
+
+    // ------------------------------------------------ carrier loads: per-item rates, tick to receive, moves
+    {
+      const { loadTotal } = require(path.join(root, 'core'));
+      const vA = (await call('/admin/suppliers', { method: 'POST', body: { name: 'Sugar Mills', phone: '', address: 'APMC Yard, Hubli' } })).body;
+      eq('K: the vendor address is saved', vA.address, 'APMC Yard, Hubli');
+      const vA2 = (await call('/admin/suppliers/' + vA.id, { method: 'PUT', body: { name: 'Sugar Mills', phone: '', address: 'Gate 2, APMC Yard' } })).body;
+      eq('K: and can be changed', (await call('/admin/suppliers')).body.find((s) => s.id === vA.id).address, 'Gate 2, APMC Yard');
+      check('K: the put returns it', vA2.address === 'Gate 2, APMC Yard');
+      const vB = (await call('/admin/suppliers', { method: 'POST', body: { name: 'Poha Traders', phone: '' } })).body.id;
+      const mk = async (nameEn) => (await call('/items', { method: 'POST', body: { nameEn, nameKn: 'ಕ', units: [{ code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price: 50 }, { code: 'bag', label: 'Bag', labelKn: '', perBase: 50, price: 2500 }], aliases: [], racks: {} } })).body;
+      const sugar = await mk('K Sugar');
+      const poha = await mk('K Poha');
+      const salt = await mk('K Salt');
+      const at = async (item) => (await call('/stock')).body.find((s) => s.itemId === item.id && s.locationId === godown)?.qty ?? 0;
+      const kA = await call('/admin/pos', { method: 'POST', body: { supplierId: vA.id, to: godown, lines: [{ itemId: sugar.id, unit: 'bag', qty: 30, cost: 2000 }], delivery: { mode: 'carrier' } } });
+      check('K: a carrier order without a carrier or vehicle', kA.status === 201 && kA.body.delivery.mode === 'carrier' && !kA.body.delivery.carrierId && !kA.body.delivery.vehicleNo, JSON.stringify(kA.body));
+      const kB = (await call('/admin/pos', { method: 'POST', body: { supplierId: vB, to: godown, lines: [{ itemId: poha.id, unit: 'bag', qty: 30, cost: 1000 }, { itemId: salt.id, unit: 'bag', qty: 4, cost: 500 }], delivery: { mode: 'carrier' } } })).body;
+      const carK = (await call('/admin/carriers', { method: 'POST', body: { name: 'Ramu', vehicleNo: 'KA 25 X 1' } })).body;
+      const carK2 = (await call('/admin/carriers', { method: 'POST', body: { name: 'Basu', vehicleNo: 'KA 25 Y 2' } })).body;
+      eq('K: a move needs a carrier', (await call('/admin/loads/move', { method: 'POST', body: { lines: [{ poId: kA.body.id, itemId: sugar.id }] } })).status, 400);
+      const ld = await call('/admin/loads/move', { method: 'POST', body: { carrierId: carK.id, date: '2026-10-25', lines: [{ poId: kA.body.id, itemId: sugar.id, ratePerUnit: 50 }, { poId: kB.id, itemId: poha.id, ratePerUnit: 30 }] } });
+      check('K: two vendors\' lines on one load', ld.status === 201 && ld.body.lines.length === 2 && ld.body.vehicleNo === 'KA 25 X 1' && new Set(ld.body.lines.map((l) => l.poId)).size === 2, JSON.stringify(ld.body));
+      eq('K: per-item rates: 30 x 50 + 30 x 30', loadTotal(ld.body.lines), 2400);
+      // Salt on the second carrier, then to the first: moved, with history on both.
+      const ld2 = (await call('/admin/loads/move', { method: 'POST', body: { carrierId: carK2.id, lines: [{ poId: kB.id, itemId: salt.id, ratePerUnit: 20 }] } })).body;
+      const mv = await call('/admin/loads/move', { method: 'POST', body: { loadId: ld.body.id, lines: [{ poId: kB.id, itemId: salt.id }] } });
+      const ld2After = (await call('/admin/loads/' + ld2.id)).body;
+      check('K: lines move between carriers, keeping their rate', mv.status === 200 && mv.body.lines.length === 3 && mv.body.lines.find((l) => l.itemId === salt.id).ratePerUnit === 20 && ld2After.lines.length === 0, JSON.stringify(mv.body));
+      check('K: the move is in both histories, with who', ld2After.history.some((h) => h.action === 'move-out' && h.loadId === ld.body.id && h.by) && mv.body.history.some((h) => h.action === 'move-in' && h.fromCarrierId === carK2.id), JSON.stringify([ld2After.history, mv.body.history]));
+      // The carrier backs out: the whole load goes to Basu, then back to Ramu.
+      const bo = await call('/admin/loads/' + ld.body.id + '/carrier', { method: 'POST', body: { carrierId: carK2.id } });
+      check('K: a load moves to another carrier', bo.status === 200 && bo.body.id === ld.body.id && bo.body.carrierId === carK2.id && bo.body.vehicleNo === 'KA 25 Y 2' && bo.body.history.some((h) => h.action === 'carrier' && h.fromCarrierId === carK.id), JSON.stringify(bo.body));
+      await call('/admin/loads/' + ld.body.id + '/carrier', { method: 'POST', body: { carrierId: carK.id } });
+      // Sugar's checklist: ticked, 30 bags with ₹50/bag delivery -> landed 2050/bag.
+      const s0 = await at(sugar);
+      const cs = await call('/admin/purchases/' + kA.body.id + '/checklist', { method: 'POST', body: { updateCost: true, lines: [{ itemId: sugar.id, arrived: 30, ok: true }] } });
+      const rs = cs.body.received?.[0];
+      check('K: the load rate goes into the landed cost', cs.status === 200 && rs.delivery === 1500 && rs.landed === 2050 && rs.ratePerUnit === 50 && rs.loadId === ld.body.id, JSON.stringify(cs.body));
+      check('K: the checklist takes the load\'s carrier', cs.body.checklists[0].mode === 'carrier' && cs.body.checklists[0].carrierId === carK.id && cs.body.checklists[0].vehicleNo === 'KA 25 X 1', JSON.stringify(cs.body.checklists[0]));
+      eq('K: sugar posted', (await at(sugar)) - s0, 1500);
+      const sugarCost = async () => (await call('/items')).body.find((i) => i.id === sugar.id).units.find((u) => u.code === 'bag').cost;
+      eq('K: the item cost is the landed cost', await sugarCost(), 2050);
+      // Poha's order: poha ticked, salt not -> salt is not posted, stays due, stays on the load.
+      const cp = await call('/admin/purchases/' + kB.id + '/checklist', { method: 'POST', body: { lines: [{ itemId: poha.id, arrived: 30, ok: true }, { itemId: salt.id, arrived: 4, ok: false }] } });
+      check('K: unticked lines stay due: part received', cp.status === 200 && cp.body.status === 'ordered' && cp.body.progress === 'part' && !cp.body.received.some((r) => r.itemId === salt.id && r.qty > 0), JSON.stringify(cp.body));
+      eq('K: the unticked line is not posted', await at(salt), 0);
+      eq('K: poha landed 1030', cp.body.received.find((r) => r.itemId === poha.id).landed, 1030);
+      let L = (await call('/admin/loads/' + ld.body.id)).body;
+      check('K: on the load, ticked ones received, the unticked one still waiting', L.lines.find((l) => l.itemId === poha.id).received?.qty === 30 && !L.lines.find((l) => l.itemId === salt.id).received, JSON.stringify(L.lines));
+      eq('K: the total of what came', loadTotal(L.lines), 30 * 50 + 30 * 30 + 4 * 20);
+      // Editing a rate after receiving: sugar 50 -> 60 per bag.
+      const re = await call('/admin/loads/' + ld.body.id + '/rates', { method: 'PUT', body: { lines: [{ poId: kA.body.id, itemId: sugar.id, ratePerUnit: 60 }] } });
+      const kA2 = (await call('/admin/suppliers/' + vA.id + '/history')).body;
+      const poA = (kA2.orders ?? kA2.purchases ?? []).find((p) => p.id === kA.body.id);
+      const rs2 = poA?.received?.[0];
+      check('K: a rate edited after receiving recalculates the receipt', re.status === 200 && rs2 && rs2.delivery === 1800 && rs2.landed === 2060 && rs2.ratePerUnit === 60, JSON.stringify(poA ?? kA2));
+      eq('K: and the item cost (still its latest receipt)', await sugarCost(), 2060);
+      check('K: the rate change is in the history', re.body.history.some((h) => h.action === 'rate' && h.lines[0].from === 50 && h.lines[0].to === 60 && h.by), JSON.stringify(re.body.history));
+      // Salt left for next time: off the load, back to unassigned; then put on a load and received.
+      const lf = await call('/admin/purchases/' + kB.id + '/checklist', { method: 'POST', body: { leaveForNextTime: true, lines: [{ itemId: salt.id, arrived: 1, ok: true }] } });
+      eq('K: one bag of salt came', lf.status, 200);
+      L = (await call('/admin/loads/' + ld.body.id)).body;
+      check('K: received salt stays on the load as received', L.lines.find((l) => l.itemId === salt.id).received?.qty === 1, JSON.stringify(L.lines));
+      // 3 bags still due, unassigned: put on Basu's new load, then "Leave for next time".
+      const ld3 = (await call('/admin/loads/move', { method: 'POST', body: { carrierId: carK2.id, lines: [{ poId: kB.id, itemId: salt.id, ratePerUnit: 10 }] } })).body;
+      eq('K: the rest due goes on the load', ld3.lines[0].qty, 3);
+      const un = await call('/admin/loads/' + ld3.id + '/unassign', { method: 'POST', body: { lines: [{ poId: kB.id, itemId: salt.id }] } });
+      check('K: "Leave for next time" unassigns it', un.status === 200 && un.body.lines.length === 0 && un.body.history.some((h) => h.action === 'unassign'), JSON.stringify(un.body));
+      eq('K: a load with nothing received can be deleted', (await call('/admin/loads/' + ld3.id, { method: 'DELETE' })).status, 200);
+      eq('K: one with receipts cannot', (await call('/admin/loads/' + ld.body.id, { method: 'DELETE' })).status, 409);
+      // On a checklist, unticked load lines with leaveForNextTime go back to unassigned.
+      const ld4 = (await call('/admin/loads/move', { method: 'POST', body: { carrierId: carK.id, lines: [{ poId: kB.id, itemId: salt.id, ratePerUnit: 10 }] } })).body;
+      const kC = (await call('/admin/pos', { method: 'POST', body: { supplierId: vB, to: godown, lines: [{ itemId: poha.id, unit: 'bag', qty: 2, cost: 1000 }, { itemId: sugar.id, unit: 'bag', qty: 2, cost: 2000 }] } })).body;
+      await call('/admin/loads/move', { method: 'POST', body: { loadId: ld4.id, lines: [{ poId: kC.id, itemId: poha.id }, { poId: kC.id, itemId: sugar.id }] } });
+      const cc = await call('/admin/purchases/' + kC.id + '/checklist', { method: 'POST', body: { leaveForNextTime: true, lines: [{ itemId: poha.id, arrived: 2, ok: true }, { itemId: sugar.id, arrived: 0, ok: false }] } });
+      const L4 = (await call('/admin/loads/' + ld4.id)).body;
+      check('K: leave for next time on the checklist', cc.status === 200 && cc.body.progress === 'part' && !L4.lines.some((l) => l.poId === kC.id && l.itemId === sugar.id) && L4.lines.some((l) => l.poId === kB.id && l.itemId === salt.id && !l.received), JSON.stringify(L4.lines));
+      eq('K: a move of a received order is refused', (await call('/admin/loads/move', { method: 'POST', body: { carrierId: carK.id, lines: [{ poId: kA.body.id, itemId: sugar.id }] } })).status, 409);
+      check('K: the loads list', (await call('/admin/loads')).body.some((x) => x.id === ld.body.id));
+    }
 
     // ------------------------------------------------ running low, for the new order form
     const lowA = (await call('/items', { method: 'POST', body: { nameEn: 'Zz Low Soap', nameKn: 'ಸೋಪು', units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 10 }, { code: 'box', label: 'Box', labelKn: '', perBase: 60, price: 580 }], lowAt: { qty: 2, unit: 'box' }, aliases: [], racks: {} } })).body;

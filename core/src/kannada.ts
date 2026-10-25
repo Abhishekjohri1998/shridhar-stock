@@ -196,7 +196,9 @@ export function romanise(text: string): string {
  * five suggestions to glance at beats a name that cannot be found at all.
  */
 export function searchKey(text: string): string {
-  return romanise(String(text ?? ''))
+  // English "oo" is the long u (Santoor = ಸಂತೂರ್), so typed Latin folds it before romanising;
+  // Kannada glyphs are untouched by this.
+  return romanise(String(text ?? '').replace(/oo/gi, 'u'))
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '')
     // Aspirates: kha -> ka, sha -> sa, chha -> cha. The + is what makes ಛ and ಚ agree.
@@ -229,16 +231,84 @@ export function hasKannada(text: string): boolean {
 }
 
 /**
- * The item-form "A -> ಅ" button: an English name written the same way in Kannada (not translated).
- * Uses the forward tables above, lower-cased first because a name typed in English is ordinary
- * spelling ("Sakkare"), not the scheme's capitals for retroflex and long sounds.
- *
- * Limits: English spelling does not mark long vowels or retroflex consonants, so "enne" gives ಎನ್ನೆ
- * not ಎಣ್ಣೆ and "haalu"/"halu" differ; English words (Sugar, Parle) come out as sounded letters.
- * The box stays editable to fix a guess.
+ * Kirana and brand words whose Kannada spelling is settled and that the rules below would get
+ * wrong (English spelling does not say how "Tide" or "Maggi" is said). Checked before the rules.
  */
-export function toKannada(english: string): string {
-  return latinToKannada(String(english ?? '').toLowerCase());
+export const KANNADA_WORDS: Record<string, string> = {
+  santoor: 'ಸಂತೂರ್', small: 'ಸ್ಮಾಲ್', vimal: 'ವಿಮಲ್', parle: 'ಪಾರ್ಲೆ', surf: 'ಸರ್ಫ್', rin: 'ರಿನ್',
+  tide: 'ಟೈಡ್', lux: 'ಲಕ್ಸ್', dettol: 'ಡೆಟಾಲ್', colgate: 'ಕೋಲ್ಗೇಟ್', maggi: 'ಮ್ಯಾಗಿ',
+  sunsilk: 'ಸನ್ಸಿಲ್ಕ್', clinic: 'ಕ್ಲಿನಿಕ್', plus: 'ಪ್ಲಸ್', punjabi: 'ಪಂಜಾಬಿ', tadka: 'ತಡ್ಕಾ',
+  sugar: 'ಶುಗರ್', rice: 'ರೈಸ್', excel: 'ಎಕ್ಸೆಲ್', big: 'ಬಿಗ್', pack: 'ಪ್ಯಾಕ್', oil: 'ಆಯಿಲ್',
+  soap: 'ಸೋಪ್', powder: 'ಪೌಡರ್', salt: 'ಸಾಲ್ಟ್', tea: 'ಟೀ', coffee: 'ಕಾಫಿ', biscuit: 'ಬಿಸ್ಕತ್',
+  gold: 'ಗೋಲ್ಡ್', red: 'ರೆಡ್', label: 'ಲೇಬಲ್', tata: 'ಟಾಟಾ', amul: 'ಅಮುಲ್', britannia: 'ಬ್ರಿಟಾನಿಯಾ',
+  good: 'ಗುಡ್', day: 'ಡೇ', dove: 'ಡವ್', lifebuoy: 'ಲೈಫ್ಬಾಯ್', wheel: 'ವ್ಹೀಲ್', ariel: 'ಏರಿಯಲ್',
+  nirma: 'ನಿರ್ಮಾ', horlicks: 'ಹಾರ್ಲಿಕ್ಸ್', boost: 'ಬೂಸ್ಟ್', bournvita: 'ಬೋರ್ನ್ವಿಟಾ', kissan: 'ಕಿಸಾನ್',
+  aashirvaad: 'ಆಶೀರ್ವಾದ್', fortune: 'ಫಾರ್ಚೂನ್', gemini: 'ಜೆಮಿನಿ', medimix: 'ಮೆಡಿಮಿಕ್ಸ್',
+  pears: 'ಪಿಯರ್ಸ್', cinthol: 'ಸಿಂಥಾಲ್', harpic: 'ಹಾರ್ಪಿಕ್', vim: 'ವಿಮ್', bar: 'ಬಾರ್', liquid: 'ಲಿಕ್ವಿಡ್',
+  shampoo: 'ಶಾಂಪೂ', paste: 'ಪೇಸ್ಟ್', brush: 'ಬ್ರಶ್', masala: 'ಮಸಾಲಾ', chilli: 'ಚಿಲ್ಲಿ', mango: 'ಮ್ಯಾಂಗೋ',
+};
+
+/** The spelling rules only: no dictionary, no learned words. One word or several. */
+export function toKannadaRule(english: string): string {
+  return String(english ?? '').replace(/[A-Za-z]+/g, (w) => latinToKannada(ruleSpell(w.toLowerCase())));
+}
+
+/**
+ * Rewrites an English-spelled word into the scheme's spelling before the tables see it:
+ * oo -> uu (ೂ), ee -> ii (ೀ); a doubled final consonant is spelling only (small -> smal);
+ * 'a' closing a syllable before l/r is long (smal -> smaal -> ಸ್ಮಾಲ್, parle -> ಪಾರ್ಲೆ);
+ * n/m before another consonant is the anusvara (santuur -> saMtuur -> ಸಂತೂರ್), never word-final
+ * and never before n/m/y (enne, amma stay doubled).
+ */
+function ruleSpell(w: string): string {
+  return w
+    .replace(/oo/g, 'uu')
+    .replace(/ee/g, 'ii')
+    .replace(/([bcdfghjklmnpqrstvwxyz])\1$/, '$1')
+    .replace(/(^|[^a])a(?=[lr](?:[bcdfghjklmnpqrstvwxyz]|$))/g, '$1aa')
+    .replace(/[nm](?=[bcdfgjklpqrstvwxz])/g, 'M');
+}
+
+/** Learned keys are compared lower-cased; values are the Kannada the shopkeeper saved. */
+function lookup(word: string, learned?: Record<string, string>): string | undefined {
+  const k = word.toLowerCase();
+  return learned?.[k] ?? KANNADA_WORDS[k];
+}
+
+/**
+ * The item-form "A -> ಅ" button: an English name written the same way in Kannada (not translated).
+ * Each word is looked up first in what this shop has taught it (`learned`), then in the seed
+ * dictionary above, and only then spelled out by the rules. The box stays editable to fix a guess.
+ */
+export function toKannada(english: string, learned?: Record<string, string>): string {
+  return String(english ?? '').replace(/[A-Za-z]+/g, (w) => lookup(w, learned) ?? latinToKannada(ruleSpell(w.toLowerCase())));
+}
+
+/**
+ * Up to three spellings to pick from: dictionary/learned, the rules, and a plain letter-by-letter
+ * variant (the old scheme, which keeps short vowels and doubled letters). Duplicates removed.
+ */
+export function kannadaSuggestions(english: string, learned?: Record<string, string>): string[] {
+  const text = String(english ?? '');
+  const plain = text.replace(/[A-Za-z]+/g, (w) => latinToKannada(w.toLowerCase()));
+  return [...new Set([toKannada(text, learned), toKannadaRule(text), plain])].filter((s) => s.trim()).slice(0, 3);
+}
+
+/**
+ * What to remember after the shopkeeper corrected a transliteration and saved: word-by-word
+ * pairs where the saved Kannada differs from what the button gave. Only when both names have the
+ * same number of words, since otherwise which word maps to which is a guess.
+ */
+export function learnedFrom(english: string, savedKannada: string, learned?: Record<string, string>): Record<string, string> {
+  const en = String(english ?? '').trim().split(/\s+/).filter(Boolean);
+  const kn = String(savedKannada ?? '').trim().split(/\s+/).filter(Boolean);
+  const out: Record<string, string> = {};
+  if (!en.length || en.length !== kn.length) return out;
+  en.forEach((w, i) => {
+    if (!/^[A-Za-z]+$/.test(w) || !hasKannada(kn[i] as string)) return;
+    if (toKannada(w, learned) !== kn[i]) out[w.toLowerCase()] = kn[i] as string;
+  });
+  return out;
 }
 
 /**

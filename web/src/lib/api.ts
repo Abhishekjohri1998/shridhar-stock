@@ -164,6 +164,8 @@ export const api = {
   saveItem: (id: string, i: ItemInput) => request<Item>('/items/' + id, send('PUT', i)),
   categories: () => request<string[]>('/categories'),
   racks: () => request<Record<string, string[]>>('/racks'),
+  translit: () => request<Record<string, string>>('/admin/translit'),
+  learnTranslit: (words: Record<string, string>) => request<Record<string, string>>('/admin/translit', send('PUT', words)),
   itemInfo: (id: string) => request<{ info: StockInfo; suppliers: ItemSupplierRow[] }>('/items/' + id + '/info'),
   itemSuppliers: () => request<Record<string, ItemSupplierRow[]>>('/item-suppliers'),
 

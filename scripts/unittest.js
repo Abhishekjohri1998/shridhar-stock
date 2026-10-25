@@ -790,6 +790,18 @@ async function ledger() {
   check('A smallest pack from 1: no extra slab', JSON.stringify(s2.slabs) === JSON.stringify([{ minQty: 24, rate: 4.5833 }]), JSON.stringify(s2.slabs));
   const s3 = C.slabsFromPacks([{ size: 250, price: 14, from: 100 }]);
   check('A smallest pack at its own from', s3.price === 0.056 && JSON.stringify(s3.slabs) === JSON.stringify([{ minQty: 100, rate: 0.056 }]), JSON.stringify(s3));
+  // Transliteration rules + seed dictionary + learned spellings.
+  const tk = [['Santoor', 'ಸಂತೂರ್'], ['Small', 'ಸ್ಮಾಲ್'], ['Vimal', 'ವಿಮಲ್'], ['Parle', 'ಪಾರ್ಲೆ'], ['Surf', 'ಸರ್ಫ್'], ['Rin', 'ರಿನ್'], ['Tide', 'ಟೈಡ್'], ['Lux', 'ಲಕ್ಸ್'], ['Dettol', 'ಡೆಟಾಲ್'], ['Colgate', 'ಕೋಲ್ಗೇಟ್'], ['Maggi', 'ಮ್ಯಾಗಿ'], ['Sunsilk', 'ಸನ್ಸಿಲ್ಕ್'], ['Clinic Plus', 'ಕ್ಲಿನಿಕ್ ಪ್ಲಸ್'], ['Punjabi Tadka', 'ಪಂಜಾಬಿ ತಡ್ಕಾ'], ['Sugar', 'ಶುಗರ್'], ['Rice', 'ರೈಸ್'], ['Vimal Bar 200g', 'ವಿಮಲ್ ಬಾರ್ 200ಗ್']];
+  for (const [en, kn] of tk) check('A toKannada dict: ' + en, C.toKannada(en) === kn, C.toKannada(en));
+  const rk = [['santoor', 'ಸಂತೂರ್'], ['small', 'ಸ್ಮಾಲ್'], ['jeera', 'ಜೀರ'], ['ball', 'ಬಾಲ್'], ['bindu', 'ಬಿಂದು'], ['kumkum', 'ಕುಂಕುಮ್'], ['enne', 'ಎನ್ನೆ'], ['amma', 'ಅಮ್ಮ'], ['dal', 'ದಾಲ್'], ['tomato', 'ತೊಮತೊ']];
+  for (const [en, kn] of rk) check('A toKannadaRule: ' + en, C.toKannadaRule(en) === kn, C.toKannadaRule(en));
+  check('A learned beats dictionary and rules', C.toKannada('Vimal Bindu', { vimal: 'ವಿಮಾಲ್', bindu: 'ಬಿಂದೂ' }) === 'ವಿಮಾಲ್ ಬಿಂದೂ', C.toKannada('Vimal Bindu', { vimal: 'ವಿಮಾಲ್', bindu: 'ಬಿಂದೂ' }));
+  check('A learnedFrom keeps only corrected words', JSON.stringify(C.learnedFrom('Vimal Jeera', 'ವಿಮಲ್ ಜೀರಾ')) === JSON.stringify({ jeera: 'ಜೀರಾ' }), JSON.stringify(C.learnedFrom('Vimal Jeera', 'ವಿಮಲ್ ಜೀರಾ')));
+  check('A learnedFrom: word counts differ -> nothing', Object.keys(C.learnedFrom('Clinic Plus', 'ಕ್ಲಿನಿಕ್ಪ್ಲಸ್')).length === 0);
+  const sg = C.kannadaSuggestions('Small');
+  check('A suggestions: up to 3, dictionary first, unique', sg.length >= 2 && sg.length <= 3 && sg[0] === 'ಸ್ಮಾಲ್' && new Set(sg).size === sg.length, JSON.stringify(sg));
+  check('A toEnglish unchanged: ಸಂತೂರ್ -> Santuur', C.toEnglish('ಸಂತೂರ್') === 'Santuur', C.toEnglish('ಸಂತೂರ್'));
+  check('A round trip: Santoor/ಸಂತೂರ್ same search key', C.searchKey(C.toKannada('Santoor')) === C.searchKey('santoor') && C.searchKey(C.toKannada('Small')) === C.searchKey('small'), C.searchKey(C.toKannada('Santoor')) + ' ' + C.searchKey('santoor'));
 }
 // ================================================================ end item form (agent A)
 

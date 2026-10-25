@@ -7,6 +7,7 @@ import {
   unitCostsFrom,
   type CarrierTrip,
   type Carrier,
+  type CarrierLoad,
   type ChecklistLine,
   type DeliveryChecklist,
   type PoDelivery,
@@ -482,7 +483,15 @@ type ReceiveInput = z.infer<typeof receiveBody>;
  * old Receive); else it stays open, part received, until everything has arrived. The first
  * receipt keeps the move keys it always had; later ones add ":r<n>".
  */
-async function receiveGoods(req: Request, p: PurchaseOrder, body: ReceiveInput, close: boolean, checklist?: Omit<DeliveryChecklist, 'receipt' | 'lines'> & { lines: Omit<ChecklistLine, 'ordered'>[] }): Promise<void> {
+async function receiveGoods(
+  req: Request,
+  p: PurchaseOrder,
+  body: ReceiveInput,
+  close: boolean,
+  checklist?: Omit<DeliveryChecklist, 'receipt' | 'lines'> & { lines: Omit<ChecklistLine, 'ordered'>[] },
+  /** Per item: the carrier load it came on and its delivery rate per unit (added to its share). */
+  rates?: Map<string, { loadId: string; rate: number }>,
+): Promise<number> {
   const repo = getRepo();
   // One read for every item on the order. An item deleted since is received as a record only.
   const want = new Set(p.lines.map((l) => l.itemId));
@@ -533,11 +542,12 @@ async function receiveGoods(req: Request, p: PurchaseOrder, body: ReceiveInput, 
   for (const { l, due, qty, cost, places } of got) {
     // A later receipt only records the lines that came this time.
     if (receipt > 1 && qty === 0) continue;
-    const share = shareOf.get(l.itemId) ?? 0;
+    const lr = qty > 0 ? rates?.get(l.itemId) : undefined;
+    const share = round2((shareOf.get(l.itemId) ?? 0) + (lr ? lr.rate * qty : 0));
     const landed = landedUnitCost(cost, qty, share);
     const expiry = body.expiry?.[l.itemId];
     const isSplit = places.length > 1 || (places.length === 1 && places[0]!.placeId !== to);
-    received.push({ itemId: l.itemId, qty, cost, ...(share ? { delivery: share, landed } : {}), ...(expiry ? { expiry } : {}), ...(isSplit ? { places } : {}), ...(receipt > 1 ? { receipt } : {}) });
+    received.push({ itemId: l.itemId, qty, cost, ...(share ? { delivery: share, landed } : {}), ...(expiry ? { expiry } : {}), ...(isSplit ? { places } : {}), ...(receipt > 1 ? { receipt } : {}), ...(lr ? { loadId: lr.loadId, ratePerUnit: lr.rate } : {}), ...(qty > 0 ? { at: now() } : {}) });
     const item = items.get(l.itemId);
     if (!item || qty === 0) continue;
     // One move (and one lot) per place; the single-place key stays as it always was.
@@ -575,6 +585,7 @@ async function receiveGoods(req: Request, p: PurchaseOrder, body: ReceiveInput, 
   if (trip) await repo.putDoc('trips', { ...trip, poId: p.id });
   emit('pos', {}, p.id);
   if (costChanged.size) emit('items');
+  return receipt;
 }
 
 /** The old Receive: one go, and the order is closed with whatever came. Still accepted as it was. */
@@ -602,14 +613,16 @@ const deliveryBody = z.object({
 async function deliveryFrom(b: z.infer<typeof deliveryBody>, old?: PoDelivery): Promise<PoDelivery> {
   let vehicleNo = b.vehicleNo ? b.vehicleNo.toUpperCase() : undefined;
   if (b.mode === 'carrier') {
-    if (!b.carrierId) throw new HttpError(400, 'Choose the carrier bringing it');
-    const car = await getRepo().getDoc<Carrier>('carriers', b.carrierId);
-    if (!car) throw new HttpError(404, 'No such carrier');
-    vehicleNo ??= car.vehicleNo;
+    // No carrier yet is fine: "not yet assigned", put on a carrier's load later from Open.
+    if (b.carrierId) {
+      const car = await getRepo().getDoc<Carrier>('carriers', b.carrierId);
+      if (!car) throw new HttpError(404, 'No such carrier');
+      vehicleNo ??= car.vehicleNo;
+    }
   }
   return {
     mode: b.mode,
-    ...(b.mode === 'carrier' ? { carrierId: b.carrierId } : {}),
+    ...(b.mode === 'carrier' && b.carrierId ? { carrierId: b.carrierId } : {}),
     ...(vehicleNo ? { vehicleNo } : {}),
     ...(b.driverName ? { driverName: b.driverName } : {}),
     ...(b.expectedOn ? { expectedOn: b.expectedOn } : {}),
@@ -670,6 +683,10 @@ actionRoutes.post(
         close: z.boolean().default(false),
         /** The vendor's invoice total, when it differs from the worked-out one. */
         billTotal: z.number().min(0).max(1e9).optional(),
+        /** The carrier load this delivery came on, when there are several; else found from the order's lines. */
+        loadId: z.string().min(1).optional(),
+        /** Unticked lines on a carrier load go back to "not yet assigned" instead of staying on it. */
+        leaveForNextTime: z.boolean().default(false),
       })
       .parse(req.body);
     const p = await loadPo(String(req.params.id));
@@ -677,16 +694,33 @@ actionRoutes.post(
     const onOrder = new Set(p.lines.map((l) => l.itemId));
     for (const l of b.lines) if (!onOrder.has(l.itemId)) throw new HttpError(400, 'An item on the checklist is not on this order');
     if (new Set(b.lines.map((l) => l.itemId)).size !== b.lines.length) throw new HttpError(400, 'An item is on the checklist twice');
-    const mode = b.mode ?? p.delivery?.mode ?? 'self';
-    const carrierId = mode === 'carrier' ? (b.carrierId ?? p.delivery?.carrierId) : undefined;
-    let vehicleNo = (b.vehicleNo || (mode === 'carrier' ? p.delivery?.vehicleNo : undefined))?.toUpperCase();
+    // Only ticked lines are posted (a line without a tick counts as ticked when something arrived, as before).
+    const ticked = (l: (typeof b.lines)[number]) => (l.ok ?? l.arrived > 0) && l.arrived > 0;
+    // The carrier loads this order's lines are on, and each line's open load line.
+    const repo = getRepo();
+    let loads = await repo.listDocs<CarrierLoad>('loads', { filter: { 'lines.poId': p.id } });
+    if (b.loadId) {
+      loads = loads.filter((x) => x.id === b.loadId);
+      if (!loads.length) throw new HttpError(404, 'No such carrier load for this order');
+    }
+    const onLoad = new Map<string, CarrierLoad>();
+    for (const ld of loads) for (const x of ld.lines) if (x.poId === p.id && !x.received) onLoad.set(x.itemId, ld);
+    const rates = new Map<string, { loadId: string; rate: number }>();
+    for (const l of b.lines) {
+      const ld = ticked(l) ? onLoad.get(l.itemId) : undefined;
+      if (ld) rates.set(l.itemId, { loadId: ld.id, rate: ld.lines.find((x) => x.poId === p.id && x.itemId === l.itemId && !x.received)!.ratePerUnit });
+    }
+    const loadOf = [...rates.values()].map((r) => loads.find((x) => x.id === r.loadId)!)[0] ?? (b.loadId ? loads[0] : undefined);
+    const mode = b.mode ?? (loadOf ? 'carrier' : undefined) ?? p.delivery?.mode ?? 'self';
+    const carrierId = mode === 'carrier' ? (b.carrierId ?? loadOf?.carrierId ?? p.delivery?.carrierId) : undefined;
+    let vehicleNo = (b.vehicleNo || (mode === 'carrier' ? (loadOf?.vehicleNo ?? p.delivery?.vehicleNo) : undefined))?.toUpperCase();
     if (mode === 'carrier') {
       if (!carrierId) throw new HttpError(400, 'Choose the carrier who brought it');
       const car = await getRepo().getDoc<Carrier>('carriers', carrierId);
       if (!car) throw new HttpError(404, 'No such carrier');
       vehicleNo ??= car.vehicleNo;
     }
-    const driverName = b.driverName || (mode === 'carrier' ? p.delivery?.driverName : undefined);
+    const driverName = b.driverName || (mode === 'carrier' ? (loadOf?.driverName ?? p.delivery?.driverName) : undefined);
     const byItem = new Map(b.lines.map((l) => [l.itemId, l]));
     const input: ReceiveInput = {
       ...(b.to ? { to: b.to } : {}),
@@ -697,12 +731,12 @@ actionRoutes.post(
       // A line left off the checklist did not come this time.
       got: Object.fromEntries(p.lines.map((l) => {
         const c = byItem.get(l.itemId);
-        return [l.itemId, { qty: c?.arrived ?? 0, ...(c?.cost != null ? { cost: c.cost } : {}), ...(c?.placeId ? { placeId: c.placeId } : {}), ...(c?.places ? { places: c.places } : {}) }];
+        return [l.itemId, { qty: c && ticked(c) ? c.arrived : 0, ...(c?.cost != null ? { cost: c.cost } : {}), ...(c?.placeId ? { placeId: c.placeId } : {}), ...(c?.places ? { places: c.places } : {}) }];
       })),
     };
     p.delivery ??= { mode, ...(carrierId ? { carrierId } : {}), ...(vehicleNo ? { vehicleNo } : {}), ...(driverName ? { driverName } : {}) };
     if (b.billTotal != null) p.billTotal = round2(b.billTotal);
-    await receiveGoods(req, p, input, b.close, {
+    const receipt = await receiveGoods(req, p, input, b.close, {
       id: newId('chk'),
       at: now(),
       by: audit(req).by,
@@ -711,8 +745,32 @@ actionRoutes.post(
       ...(vehicleNo ? { vehicleNo } : {}),
       ...(driverName ? { driverName } : {}),
       ...(mode === 'carrier' && b.carrierConfirmed != null ? { carrierConfirmed: b.carrierConfirmed } : {}),
-      lines: b.lines.map((l) => ({ itemId: l.itemId, arrived: l.arrived, ok: l.ok ?? l.arrived > 0, condition: l.condition, ...(l.note ? { note: l.note } : {}) })),
-    });
+      lines: b.lines.map((l) => ({ itemId: l.itemId, arrived: l.arrived, ok: ticked(l), condition: l.condition, ...(l.note ? { note: l.note } : {}) })),
+    }, rates);
+    // The loads: ticked lines are received on them; unticked ones stay, or go back to unassigned.
+    const by = audit(req).by;
+    const at = now();
+    for (const ld of loads) {
+      const got: { poId: string; itemId: string; qty: number }[] = [];
+      const left: { poId: string; itemId: string; qty: number }[] = [];
+      ld.lines = ld.lines.flatMap((x) => {
+        if (x.poId !== p.id || x.received) return [x];
+        const c = byItem.get(x.itemId);
+        if (c && rates.get(x.itemId)?.loadId === ld.id) {
+          got.push({ poId: x.poId, itemId: x.itemId, qty: c.arrived });
+          return [{ ...x, received: { qty: c.arrived, receipt, at } }];
+        }
+        if (b.leaveForNextTime || p.status === 'received') {
+          left.push({ poId: x.poId, itemId: x.itemId, qty: x.qty });
+          return [];
+        }
+        return [x];
+      });
+      if (!got.length && !left.length) continue;
+      if (got.length) ld.history.push({ at, by, action: 'received', lines: got });
+      if (left.length) ld.history.push({ at, by, action: 'unassign', lines: left, note: p.status === 'received' ? 'order closed' : 'left for next time' });
+      await repo.putDoc('loads', ld);
+    }
     res.json(withBill(p));
   }),
 );

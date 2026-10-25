@@ -405,6 +405,11 @@ export interface ReceivedLine {
   expiry?: string;
   places?: { placeId: string; qty: number }[];
   receipt?: number;
+  /** Brought on a carrier load: which, and its delivery rate per unit (part of `delivery`). */
+  loadId?: string;
+  ratePerUnit?: number;
+  /** When it was received (newer receipts only). */
+  at?: string;
 }
 
 type PoLike = {
@@ -478,4 +483,55 @@ export function supplierSummary(pos: PoLike[]): { bought: number; paid: number; 
   }
   const last = live.map((p) => p.at).sort().pop() ?? null;
   return { bought: round2(bought), paid: round2(paid), pending: round2(pending), orders: live.length, lastPurchase: last };
+}
+
+// ------------------------------------------------------------------ carrier loads
+
+/**
+ * One ordered line put on a carrier's load: which order and item, how much (in the order's unit),
+ * and the carrier's delivery rate per unit. `received` once a checklist posted it.
+ */
+export interface LoadLine {
+  poId: string;
+  itemId: string;
+  qty: number;
+  /** Delivery charge in rupees per unit of the order's unit. */
+  ratePerUnit: number;
+  /** Posted by a checklist: how much came, in which receipt of the order, when. */
+  received?: { qty: number; receipt: number; at: string };
+}
+
+export interface LoadHistory {
+  at: string;
+  by: string;
+  action: 'create' | 'add' | 'move-in' | 'move-out' | 'carrier' | 'rate' | 'unassign' | 'received' | 'edit';
+  /** The other load, for a move. */
+  loadId?: string;
+  carrierId?: string;
+  fromCarrierId?: string;
+  lines?: { poId: string; itemId: string; qty?: number; from?: number; to?: number }[];
+  note?: string;
+}
+
+/** A carrier's load: lines from any orders (and vendors), with a per-unit delivery rate each. */
+export interface CarrierLoad {
+  id: string;
+  carrierId: string;
+  vehicleNo?: string;
+  driverName?: string;
+  /** YYYY-MM-DD. */
+  date: string;
+  lines: LoadLine[];
+  history: LoadHistory[];
+  at: string;
+}
+
+/** A load's delivery charge: Σ rate × qty (what came, once received), to the paisa. */
+export function loadTotal(lines: Pick<LoadLine, 'qty' | 'ratePerUnit' | 'received'>[]): number {
+  return round2(lines.reduce((s, l) => s + (l.ratePerUnit || 0) * (l.received ? l.received.qty : l.qty), 0));
+}
+
+/** The load lines still waiting for the goods. */
+export function openLoadLines(l: Pick<CarrierLoad, 'lines'>): LoadLine[] {
+  return l.lines.filter((x) => !x.received);
 }
