@@ -16,7 +16,7 @@ import {
   unitsSellFirst,
   unitRate1,
 } from '@stock/core';
-import { issueToken } from '../auth';
+import { issueToken, publicPerson } from '../auth';
 import { verifyPin } from '../pin';
 import { lockedFor, recordFailure, recordSuccess } from '../ratelimit';
 import { env } from '../env';
@@ -189,5 +189,31 @@ billingLinkRoutes.post(
     recordSuccess(ip, phone);
     if (!isActiveRole(p.role)) throw new HttpError(403, retiredRoleMessage(p.role));
     res.json({ role: p.role, name: p.name, token: issueToken(p) });
+  }),
+);
+
+/** Shop-auth hands out an admin session on the key alone, so a burst is capped all the same. */
+const SHOP_AUTH_PER_MIN = 30;
+let shopAuthWindow = { start: 0, n: 0 };
+
+/**
+ * Billing's shop-PIN sign-in: billing has already checked its shop PIN, and asks for a stock
+ * session for the shop's admin so the Stock tab opens signed in. The admin is SHOP_ADMIN_PHONE
+ * when set, else the oldest active admin. 409 when there is none.
+ */
+billingLinkRoutes.post(
+  '/shop-auth',
+  handler(async (_req, res) => {
+    const now = Date.now();
+    if (now - shopAuthWindow.start > 60000) shopAuthWindow = { start: now, n: 0 };
+    if (++shopAuthWindow.n > SHOP_AUTH_PER_MIN) throw new HttpError(429, 'Too many tries. Try again in a minute.');
+    const people = await getRepo().listPeople();
+    const want = env.shopAdminPhone ? normalisePhone(env.shopAdminPhone) : '';
+    const admins = people.filter((p) => p.active && p.role === 'admin' && isActiveRole(p.role));
+    const p = want
+      ? admins.find((a) => normalisePhone(a.phone) === want)
+      : admins.sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+    if (!p) throw new HttpError(409, want ? 'SHOP_ADMIN_PHONE is not an active admin' : 'Stock has no active admin');
+    res.json({ token: issueToken(p), person: publicPerson(p) });
   }),
 );

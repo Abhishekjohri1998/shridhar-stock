@@ -71,7 +71,20 @@ async function main() {
     }
   });
   const off = await start({});
+  // SHOP_ADMIN_PHONE picks a later admin; a stock with no active admin answers 409.
+  const two = await start({ LINK_KEY: KEY, SHOP_ADMIN_PHONE: '+91 90000 00002' }, async (repo, hashPin) => {
+    await repo.createPerson({ id: 'p_a1', name: 'First', phone: '9000000001', role: 'admin', active: true, pinHash: hashPin('4821'), tv: 1, createdAt: '2020-01-01T00:00:00.000Z' });
+    await repo.createPerson({ id: 'p_a2', name: 'Second', phone: '9000000002', role: 'admin', active: true, pinHash: hashPin('4821'), tv: 1, createdAt: '2021-01-01T00:00:00.000Z' });
+  });
+  const none = await start({ LINK_KEY: KEY }, async (repo, hashPin) => {
+    await repo.createPerson({ id: 'p_x', name: 'Gone', phone: '9000000001', role: 'admin', active: false, pinHash: hashPin('4821'), tv: 1, createdAt: '2020-01-01T00:00:00.000Z' });
+    await repo.createPerson({ id: 'p_w', name: 'W', phone: '9111100021', role: 'worker', active: true, pinHash: hashPin('2468'), tv: 1, createdAt: '2020-01-01T00:00:00.000Z' });
+  });
   try {
+    const sk = async (base) => { const r = await fetch(base + '/api/billing-link/shop-auth', { method: 'POST', headers: { 'X-Link-Key': KEY } }); return { status: r.status, body: await r.json().catch(() => null) }; };
+    const s2 = await sk(two.base);
+    check('shop-auth picks SHOP_ADMIN_PHONE', s2.status === 200 && s2.body.person.id === 'p_a2', JSON.stringify(s2));
+    eq('shop-auth with no active admin is 409', (await sk(none.base)).status, 409);
     const login = await fetch(on.base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: '9000000001', pin: '4821' }) });
     const token = (await login.json()).token;
     const call = async (p, body) => {
@@ -179,6 +192,14 @@ async function main() {
     for (let i = 0; i < 5; i++) await auth('9111100022', '0000');
     eq('five wrong PINs lock it, as the login does', (await auth('9111100022', '2468')).status, 429);
 
+    // ---- the shop-PIN sign-in: a session for the shop's admin
+    eq('shop-auth: no key 401', (await link('/shop-auth', {}, null)).status, 401);
+    eq('shop-auth: wrong key 401', (await link('/shop-auth', {}, 'nope')).status, 401);
+    eq('shop-auth: no door when stock has no key', (await link('/shop-auth', {}, KEY, off.base)).status, 404);
+    const sa = await link('/shop-auth', {});
+    check('shop-auth gives the oldest admin', sa.status === 200 && typeof sa.body.token === 'string' && sa.body.person.id === 'p_a', JSON.stringify(sa));
+    eq('whose token opens the admin home', (await fetch(on.base + '/api/admin/home', { headers: { Authorization: 'Bearer ' + sa.body.token } })).status, 200);
+
     // ---- a live draft, ticks both ways
     const lines = [
       { key: 'a', nameEn: 'Parle-G', nameKn: 'ಪಾರ್ಲೆ-ಜಿ', qty: 2, unit: 'pack', rate: 110, stockItemId: parle.id },
@@ -216,7 +237,7 @@ async function main() {
     failed++;
     console.log('FAIL threw: ' + err.stack + '\n' + on.log());
   } finally {
-    await Promise.all([on.stop(), off.stop()]);
+    await Promise.all([on.stop(), off.stop(), two.stop(), none.stop()]);
   }
   console.log('billinglinktest: ' + passed + ' passed, ' + failed + ' failed');
   // Let open sockets close by themselves: process.exit() here trips a libuv assert on Windows.

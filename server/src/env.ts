@@ -40,6 +40,11 @@ export const env = {
    * means that door does not exist. A secret: server/.env only, the same value as billing's.
    */
   linkKey: str('LINK_KEY', ''),
+  /**
+   * Whose stock session the billing shop-PIN sign-in opens (/billing-link/shop-auth). Empty means
+   * the oldest active admin.
+   */
+  shopAdminPhone: str('SHOP_ADMIN_PHONE', ''),
   /** Demo mode: sample data, "log in as" any role, and the walkthrough. File store only. */
   demo: str('DEMO', '') === '1',
   /**
