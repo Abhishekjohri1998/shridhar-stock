@@ -231,6 +231,8 @@ export interface MirrorLine {
   /** The typed name, empty when the line is handwritten only. */
   name: string;
   ink?: Ink;
+  /** Further handwritten rows of the same line on billing's slip, drawn under `ink`. */
+  moreInk?: Ink[];
   qty: number;
   rate: number;
   amount: number;
@@ -254,6 +256,8 @@ export interface BillMirror {
   at: string;
   customer?: { key: string; name: string; phone: string };
   lines: MirrorLine[];
+  /** 2 once every line's further handwriting (moreInk) has been read from billing. */
+  inkV?: number;
   total: number;
   paid: number;
   balance: number;

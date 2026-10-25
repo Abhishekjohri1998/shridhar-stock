@@ -20,6 +20,19 @@ interface Pending {
 const PAGE = 20;
 const INK_BATCH = 5;
 
+/** Handwriting of one line: its first row, and any rows written under it. */
+type LineInk = { ink: Ink; moreInk?: Ink[] };
+
+/** Newest first unless the admin chose otherwise here before. */
+const ORDER_KEY = 'stock.confirm.order';
+function savedNewest(): boolean {
+  try {
+    return localStorage.getItem(ORDER_KEY) !== 'old';
+  } catch {
+    return true;
+  }
+}
+
 const billsIn = (list: Pending[]) => new Set(list.map((p) => p.billNo)).size;
 
 /** One bill's lines waiting for a person, in bill order. */
@@ -58,7 +71,19 @@ export function ConfirmPage() {
   const live = useLive('bills');
   // Bills the list has shown so far: a reload after a change fetches as many again, from the start.
   const want = useRef(PAGE);
-  const { value, error } = useLoad(() => http.get<Pending[]>('/admin/confirm?limit=' + Math.min(100, want.current)), [version, live]);
+  const [newest, setNewestState] = useState(savedNewest);
+  const setNewest = (v: boolean) => {
+    try {
+      localStorage.setItem(ORDER_KEY, v ? 'new' : 'old');
+    } catch {
+      /* remembered only for this visit */
+    }
+    if (v !== newest) want.current = PAGE;
+    setNewestState(v);
+  };
+  const order = newest ? 'new' : 'old';
+  const { value, error } = useLoad(() => http.get<Pending[]>('/admin/confirm?order=' + order + '&limit=' + Math.min(100, want.current)), [version, live, order]);
+  const { value: waiting } = useLoad(() => http.get<{ bills: number; lines: number }>('/admin/confirm/count'), [version, live]);
   // Pages added by "Load more", after the first reply; dropped when the list reloads.
   const [more, setMore] = useState<Pending[]>([]);
   const [moreDone, setMoreDone] = useState(false);
@@ -68,11 +93,10 @@ export function ConfirmPage() {
     setMoreDone(false);
   }, [value]);
   // The handwriting, by bill then line, fetched a few bills at a time once the list is up.
-  const [inks, setInks] = useState<Record<number, Record<number, Ink>>>({});
+  const [inks, setInks] = useState<Record<number, Record<number, LineInk>>>({});
   const asked = useRef(new Set<number>());
   const [note, setNote] = useState('');
   const [q, setQ] = useState('');
-  const [newest, setNewest] = useState(false);
   // The bill just removed, offered back for a few seconds.
   const [removed, setRemoved] = useState<number | null>(null);
   // Bills removed here, hidden at once rather than after the list reloads.
@@ -89,7 +113,7 @@ export function ConfirmPage() {
   for (const p of all) {
     if (gone.has(p.billNo)) continue;
     const ink = inks[p.billNo]?.[p.line.i];
-    const line = ink ? { ...p.line, ink } : p.line;
+    const line = ink ? { ...p.line, ink: ink.ink, ...(ink.moreInk?.length ? { moreInk: ink.moreInk } : {}) } : p.line;
     const g = groups[groups.length - 1];
     if (g && g.billNo === p.billNo) g.lines.push(line);
     else groups.push({ billNo: p.billNo, at: p.at, customer: p.customer, lines: [line] });
@@ -112,7 +136,7 @@ export function ConfirmPage() {
         const nos = needInk.slice(k, k + INK_BATCH);
         nos.forEach((n) => asked.current.add(n));
         try {
-          const got = await http.get<Record<string, Record<string, Ink>>>('/admin/bills/ink?nos=' + nos.join(','));
+          const got = await http.get<Record<string, Record<string, LineInk>>>('/admin/bills/ink?nos=' + nos.join(','));
           setInks((x) => {
             const out = { ...x };
             for (const n of nos) out[n] = Object.fromEntries(Object.entries(got[n] ?? {}).map(([i, ink]) => [Number(i), ink]));
@@ -137,7 +161,7 @@ export function ConfirmPage() {
     const last = all[all.length - 1]?.billNo ?? 0;
     setLoadingMore(true);
     try {
-      const page = await http.get<Pending[]>('/admin/confirm?limit=' + PAGE + '&after=' + last);
+      const page = await http.get<Pending[]>('/admin/confirm?order=' + order + '&limit=' + PAGE + '&after=' + last);
       setMore((m) => [...m, ...page]);
       if (billsIn(page) < PAGE) setMoreDone(true);
       want.current = billsIn(all) + billsIn(page);
@@ -185,6 +209,11 @@ export function ConfirmPage() {
           'ಕೈಬರಹದ ಸಾಲುಗಳು, ಮತ್ತು ಯಾವ ಸಾಮಾನಿಗೂ ಹೊಂದದ ಹೆಸರುಗಳು, ಬಿಲ್ ಪ್ರಕಾರ. ಸಾಮಾನು ಆರಿಸಿ: ಸ್ಟಾಕ್ ಕಡಿಮೆಯಾಗುತ್ತದೆ ಮತ್ತು ಹೆಸರು ಮುಂದಿನ ಸಲಕ್ಕೆ ನೆನಪಿರುತ್ತದೆ.',
         )}
       </p>
+      {waiting && waiting.bills > 0 && (
+        <p className="muted" role="status">
+          <b>{waiting.bills}</b> {waiting.bills === 1 ? bi('bill waiting', 'ಬಿಲ್ ಕಾಯುತ್ತಿದೆ') : bi('bills waiting', 'ಬಿಲ್‌ಗಳು ಕಾಯುತ್ತಿವೆ')}
+        </p>
+      )}
       {groups.length > 0 && (
         <div className="bar">
           <input className="grow" data-tour="confirm-find" placeholder={bi('Customer or bill number: Ningappa, #75', 'ಗ್ರಾಹಕ ಅಥವಾ ಬಿಲ್ ಸಂಖ್ಯೆ: ನಿಂಗಪ್ಪ, #75')} value={q} onChange={(e) => setQ(e.target.value)} />
@@ -405,7 +434,14 @@ function ConfirmLine({
       </div>
       <div className="confirm-ink" data-tour="confirm-written">
         {line.ink ? (
-          <InkView ink={line.ink} height={64} />
+          <div>
+            <InkView ink={line.ink} height={64} />
+            {line.moreInk?.map((m, k) => (
+              <div key={k}>
+                <InkView ink={m} height={64} />
+              </div>
+            ))}
+          </div>
         ) : line.hasInk ? (
           <div className="sk sk-line" style={{ height: 64 }} role="status" aria-busy="true" />
         ) : (

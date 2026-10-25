@@ -85,7 +85,7 @@ onEmit(() => {
 const HOME_TTL_MS = 60_000;
 
 /** What lists leave out: the handwriting, which is most of a bill's size. */
-const NO_INK = ['lines.ink'];
+const NO_INK = ['lines.ink', 'lines.moreInk'];
 /** To digitise also leaves out any extra writing billing may send with a line. */
 const CONFIRM_OMIT = ['lines.ink', 'lines.moreInk'];
 
@@ -226,7 +226,7 @@ roleRoutes.get(
   }),
 );
 
-/** The handwriting of some bills, by number: { [no]: { [line]: ink } }. For the Bills page, after the list. */
+/** The handwriting of some bills, by number: { [no]: { [line]: { ink, moreInk? } } }. For the Bills page, after the list. */
 roleRoutes.get(
   '/admin/bills/ink',
   admin,
@@ -238,24 +238,27 @@ roleRoutes.get(
       .slice(0, 100);
     if (!nos.length) return res.json({});
     const bills = await getRepo().listDocs<BillMirror>('bills', { filter: { no: nos }, fields: ['no', 'lines'] });
-    res.json(Object.fromEntries(bills.filter((b) => b.lines.some((l) => l.ink)).map((b) => [b.no, Object.fromEntries(b.lines.filter((l) => l.ink).map((l) => [l.i, l.ink]))])));
+    res.json(Object.fromEntries(bills.filter((b) => b.lines.some((l) => l.ink)).map((b) => [b.no, Object.fromEntries(b.lines.filter((l) => l.ink).map((l) => [l.i, { ink: l.ink, ...(l.moreInk?.length ? { moreInk: l.moreInk } : {}) }]))])));
   }),
 );
 
 /**
- * Every handwritten or unmatched line waiting for a person, oldest first, a page of bills at a time
- * (`?limit=20&after=<bill no>`). Without the handwriting: each line says `hasInk`, and the page
- * fetches the writing from /admin/bills/ink a few bills at a time, so the list comes back at once.
+ * Every handwritten or unmatched line waiting for a person, newest first (`?order=old` for oldest
+ * first), a page of bills at a time (`?limit=20&after=<bill no>`: the page after that bill in the
+ * order asked for). Without the handwriting: each line says `hasInk`, and the page fetches the
+ * writing from /admin/bills/ink a few bills at a time, so the list comes back at once.
  */
+const CONFIRM_WAITING: DocFilter = { 'lines.state': 'to-confirm', dismissed: { ne: true }, cancelled: { ne: true } };
 roleRoutes.get(
   '/admin/confirm',
   admin,
   handler(async (req, res) => {
     const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 20));
     const after = Number(req.query.after);
-    const filter: DocFilter = { 'lines.state': 'to-confirm', dismissed: { ne: true }, cancelled: { ne: true } };
-    if (Number.isInteger(after) && after > 0) filter.no = { gt: after };
-    const bills = await getRepo().listDocs<BillMirror>('bills', { filter, sort: { no: 1 }, limit, omit: CONFIRM_OMIT });
+    const oldest = req.query.order === 'old';
+    const filter: DocFilter = { ...CONFIRM_WAITING };
+    if (Number.isInteger(after) && after > 0) filter.no = oldest ? { gt: after } : { lt: after };
+    const bills = await getRepo().listDocs<BillMirror>('bills', { filter, sort: { no: oldest ? 1 : -1 }, limit, omit: CONFIRM_OMIT });
     res.json(
       bills.flatMap((b) =>
         b.lines
@@ -263,6 +266,16 @@ roleRoutes.get(
           .map((l) => ({ billNo: b.no, at: b.at, customer: b.customer?.name ?? '', line: { ...l, hasInk: !!l.inked } })),
       ),
     );
+  }),
+);
+
+/** How many bills (and lines) wait in To digitise, for the page's header. */
+roleRoutes.get(
+  '/admin/confirm/count',
+  admin,
+  handler(async (_req, res) => {
+    const bills = await getRepo().listDocs<BillMirror>('bills', { filter: CONFIRM_WAITING, omit: CONFIRM_OMIT });
+    res.json({ bills: bills.length, lines: bills.reduce((n, b) => n + b.lines.filter((l) => l.state === 'to-confirm').length, 0) });
   }),
 );
 

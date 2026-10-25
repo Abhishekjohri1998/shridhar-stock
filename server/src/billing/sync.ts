@@ -130,10 +130,12 @@ function matchLine(items: Item[], raw: BillingBill['lines'][number], i: number, 
   const text = names.join(' / ');
   const inks = [raw.ink, ...(raw.moreInk ?? [])].filter((x): x is Ink => hasInk(x));
   const ink = raw.lastMode === 'text' ? undefined : inks[0];
+  const moreInk = ink ? inks.slice(1) : [];
   const base: MirrorLine = {
     i,
     name: text,
     ...(ink ? { ink, inked: true } : {}),
+    ...(moreInk.length ? { moreInk } : {}),
     qty: raw.qty,
     rate: raw.rate,
     amount: Math.round(raw.qty * raw.rate * 100) / 100,
@@ -286,10 +288,13 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limitOrOpt
     const id = String(listedBill.no);
     const before = await repo.getDoc<BillMirror>('bills', id);
     let b = listedBill;
+    // Read in full (an older server, or fetched below): every ink block is in hand.
+    let whole = !lite;
     // A light bill with handwriting that stock has not read yet: its handwriting, fetched once.
     if (lite && b.hasInk && !before?.hasInk) {
       b = await billing.get<BillingBill>('/api/bills/' + b.no);
       result.fullFetched!++;
+      whole = true;
     }
     if (!before) result.newBills++;
     // A bill saved from a live draft takes the draft's place, with the ticks made on it.
@@ -299,7 +304,7 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limitOrOpt
       before || !draft ? undefined : l.itemId ? draft.lines.find((d) => d.key === l.itemId) : draft.lines[i];
     const lines = b.lines.map((l, i) => {
       // A light line comes without its handwriting: the ink read before stays.
-      const raw = lite && !l.ink && before?.lines[i]?.ink ? { ...l, ink: before.lines[i]!.ink } : l;
+      const raw = lite && !l.ink && before?.lines[i]?.ink ? { ...l, ink: before.lines[i]!.ink, moreInk: before.lines[i]!.moreInk } : l;
       return toMirrorLine(items, raw, i, before?.lines[i], drafted(l, i));
     });
     // A tick made on the draft in the moment before Save may not have reached billing: send it.
@@ -313,6 +318,7 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limitOrOpt
       at: b.at,
       ...(b.customer ? { customer: { key: b.customer.phone || b.customer.id, name: b.customer.name, phone: b.customer.phone } } : {}),
       lines,
+      ...(whole || before?.inkV ? { inkV: 2 } : {}),
       total: b.total,
       paid: b.paid,
       balance: b.balance,
@@ -376,6 +382,39 @@ export async function markInk(repo: InvRepo, batch = 500): Promise<number> {
     await repo.putDocs('bills', old);
     done += old.length;
   }
+}
+
+/**
+ * Bills read before stock kept every ink block (moreInk): each one still waiting in To digitise
+ * with handwriting is read again in full from billing, once, and marked inkV: 2. Safe to run any
+ * number of times; a bill billing cannot give now is tried again on the next run.
+ * Returns how many bills were done, 0 when none are left, -1 when billing could not be read.
+ */
+export async function backfillMoreInk(repo: InvRepo, billing: BillingClient, batch = 50): Promise<number> {
+  const filter = { hasInk: true, 'lines.state': 'to-confirm', cancelled: { ne: true }, inkV: { ne: 2 } };
+  const todo = await repo.listDocs<BillMirror>('bills', { filter, limit: batch });
+  let done = 0;
+  for (const bill of todo) {
+    let full: BillingBill;
+    try {
+      full = await billing.get<BillingBill>('/api/bills/' + bill.no);
+    } catch {
+      return done || -1; // billing away: the rest wait for the next run
+    }
+    bill.lines = bill.lines.map((l) => {
+      const raw = full.lines?.[l.i];
+      if (!raw || !l.ink) return l;
+      const more = (raw.moreInk ?? []).filter((x): x is Ink => hasInk(x));
+      // Billing may keep the first row in moreInk when ink itself is empty: the first stays as stored.
+      const rest = hasInk(raw.ink) ? more : more.slice(1);
+      const { moreInk: _m, ...keep } = l;
+      return rest.length ? { ...keep, moreInk: rest } : keep;
+    });
+    bill.inkV = 2;
+    await repo.putDoc('bills', bill);
+    done++;
+  }
+  return done;
 }
 
 /** The link's health, for the admin's screens. */

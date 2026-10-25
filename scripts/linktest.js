@@ -130,6 +130,7 @@ async function liteSyncTests() {
     check('lite: only the handwritten bill is fetched whole', b.calls.filter((c) => /^\/api\/bills\/\d+$/.test(c)).join() === '/api/bills/2', JSON.stringify(b.calls));
     const m2 = await repo.getDoc('bills', '2');
     check('lite: its handwriting is kept, marked on the bill and the line', m2.hasInk === true && m2.inkLines === 1 && m2.lines[0].inked === true && m2.lines[0].ink.w === 300, JSON.stringify(m2));
+    check('lite: a bill read whole is marked inkV 2', m2.inkV === 2, JSON.stringify(m2.inkV));
     const m1 = await repo.getDoc('bills', '1');
     check('round-off: taken from the bill billing sent', m1.roundOff === 3 && m1.rounded === 95 && m1.hasInk === false, JSON.stringify(m1));
     check('round-off: either spelling is read', m2.roundOff === -0.5 && m2.rounded === 90, JSON.stringify([m2.roundOff, m2.rounded]));
@@ -180,8 +181,57 @@ async function liteSyncTests() {
   }
 }
 
+// ---- every ink block of a line (ink, then moreInk), and the one-time read-again of older bills
+async function moreInkTests() {
+  const { syncOnce, backfillMoreInk } = require(path.join(out, 'billing', 'sync.js'));
+  const { createFileRepo } = require(path.join(out, 'store', 'file.js'));
+  const at = new Date().toISOString();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-moreink-'));
+  try {
+    const repo = await createFileRepo(dir);
+    await repo.saveLocation({ id: 'loc_shop', name: 'Shop', nameKn: '', kind: 'shop', active: true });
+    const row2 = { w: 300, h: 80, strokes: [[5, 5, 40, 40]] };
+    const bills = [{ no: 7, at, total: 90, paid: 0, balance: 90, lines: [{ nameEn: '', ink, moreInk: [row2], inkRows: 1, lastMode: 'ink', qty: 1, rate: 90 }] }];
+    const calls = [];
+    const client = {
+      get: async (p) => {
+        calls.push(p);
+        if (p === '/api/customers') return [];
+        const one = p.match(/^\/api\/bills\/(\d+)$/);
+        if (one) return JSON.parse(JSON.stringify(bills.find((b) => b.no === Number(one[1]))));
+        return JSON.parse(JSON.stringify(bills));
+      },
+    };
+    await syncOnce(repo, client, { mode: 'full', limit: 30 });
+    const m = await repo.getDoc('bills', '7');
+    check('moreInk: sync keeps the second written row', m.lines[0].ink.w === 300 && m.lines[0].moreInk?.length === 1 && m.lines[0].moreInk[0].strokes[0][2] === 40, JSON.stringify(m.lines[0]));
+    eq('moreInk: a bill read whole is marked inkV 2', m.inkV, 2);
+
+    // An older mirror without moreInk or the mark, as stock kept them before.
+    const old = JSON.parse(JSON.stringify(m));
+    delete old.lines[0].moreInk;
+    delete old.inkV;
+    await repo.putDoc('bills', old);
+    calls.length = 0;
+    eq('backfill: one bill read again', await backfillMoreInk(repo, client), 1);
+    const b = await repo.getDoc('bills', '7');
+    check('backfill: its second row is stored and the bill marked', b.inkV === 2 && b.lines[0].moreInk?.length === 1 && b.lines[0].ink.w === 300, JSON.stringify(b));
+    check('backfill: read from billing by number', calls.join() === '/api/bills/7', JSON.stringify(calls));
+    calls.length = 0;
+    eq('backfill: a second run has nothing to do', await backfillMoreInk(repo, client), 0);
+    eq('backfill: and asks billing nothing', calls.length, 0);
+    // Billing away: nothing changes, and the bill is tried again next time.
+    await repo.putDoc('bills', old);
+    eq('backfill: billing away is quiet', await backfillMoreInk(repo, { get: async () => { throw new Error('down'); } }), -1);
+    check('backfill: and the bill is left for next time', !(await repo.getDoc('bills', '7')).inkV);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 async function main() {
   await liteSyncTests();
+  await moreInkTests();
   await new Promise((r) => fake.listen(0, r));
   const billingUrl = 'http://localhost:' + fake.address().port;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-link-'));
@@ -236,16 +286,21 @@ async function main() {
     check('with no machine reading', !b1.lines[1].reading, JSON.stringify(b1.lines[1].reading));
     check('the list leaves the ink out, marking the line', !b1.lines[1].ink && b1.lines[1].inked === true && b1.hasInk === true, JSON.stringify(b1.lines[1]));
     const inks = (await call('/admin/bills/ink?nos=1,2')).body;
-    check('with its ink fetched after', inks['1'] && inks['1']['1'] && inks['1']['1'].strokes.length === 1 && !inks['2'], JSON.stringify(inks));
+    check('with its ink fetched after', inks['1'] && inks['1']['1'] && inks['1']['1'].ink.strokes.length === 1 && !inks['1']['1'].moreInk && !inks['2'], JSON.stringify(inks));
     // To digitise: the list without the writing, a page of bills at a time; the writing comes after.
     const conf = (await call('/admin/confirm')).body;
     const cw = conf.find((p) => p.billNo === 1 && p.line.i === 1);
     check('To digitise sends no ink', conf.length > 0 && conf.every((p) => !p.line.ink && !p.line.moreInk), JSON.stringify(conf).slice(0, 300));
     check('but marks the written line', cw && cw.line.hasInk === true && conf.filter((p) => p.line.i !== 1 || p.billNo !== 1).every((p) => p.line.hasInk === false), JSON.stringify(conf));
-    const p1 = (await call('/admin/confirm?limit=1')).body;
-    check('a page of one bill', p1.length > 0 && p1.every((p) => p.billNo === 1), JSON.stringify(p1));
-    check('the next page starts after it', (await call('/admin/confirm?limit=1&after=1')).body.every((p) => p.billNo > 1));
-    check('and the ink endpoint has the writing of that bill', !!(await call('/admin/bills/ink?nos=' + p1[0].billNo)).body['1']['1'].strokes);
+    check('newest bill first by default', conf.length > 0 && conf[0].billNo === Math.max(...conf.map((p) => p.billNo)), JSON.stringify(conf.map((p) => p.billNo)));
+    const waiting = (await call('/admin/confirm/count')).body;
+    eq('the count says how many bills wait', waiting.bills, new Set(conf.map((p) => p.billNo)).size);
+    const p1 = (await call('/admin/confirm?order=old&limit=1')).body;
+    check('a page of one bill, oldest first when asked', p1.length > 0 && p1.every((p) => p.billNo === 1), JSON.stringify(p1));
+    check('the next page starts after it', (await call('/admin/confirm?order=old&limit=1&after=1')).body.every((p) => p.billNo > 1));
+    const n1 = (await call('/admin/confirm?limit=1')).body;
+    check('newest first: the next page goes back from it', n1.length > 0 && (await call('/admin/confirm?limit=1&after=' + n1[0].billNo)).body.every((p) => p.billNo < n1[0].billNo));
+    check('and the ink endpoint has the writing of that bill', !!(await call('/admin/bills/ink?nos=' + p1[0].billNo)).body['1']['1'].ink.strokes);
     eq('a name no item has waits too', b1.lines[2].state, 'to-confirm');
     eq('a price with nothing written is not stock', b1.lines[3].state, 'not-item');
     eq('the typed sugar line knows its unit', b1.lines[0].unit, 'kg');

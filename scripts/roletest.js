@@ -152,7 +152,7 @@ async function main() {
 
     // ---- confirm all on one bill
     const pending = (await call('/admin/confirm', T.admin)).body;
-    check('lines to confirm come in bill order', pending.every((p, i) => i === 0 || pending[i - 1].billNo <= p.billNo));
+    check('lines to confirm come newest bill first', pending.every((p, i) => i === 0 || pending[i - 1].billNo >= p.billNo));
     const ghee0 = await shopQty('it_ghee');
     const all53 = await call('/admin/confirm/bill', T.admin, { billNo: 53, lines: [{ i: 2, itemId: 'it_ghee', unit: 'pc', qty: 2 }, { i: 0, itemId: 'it_onion', unit: 'kg', qty: 10 }, { i: 9, notItem: true }] });
     eq('a bill confirms in one go', all53.status, 200);

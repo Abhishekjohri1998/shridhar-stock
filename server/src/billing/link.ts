@@ -3,7 +3,7 @@ import { getRepo } from '../store';
 import { billingClient, type BillingClient } from './client';
 import { emit } from '../events';
 import { pushGiven } from './push';
-import { syncCustomers, pollDelay, recordLink, syncOnce, POLL_ACTIVE_WINDOW_MS, type SyncResult } from './sync';
+import { backfillMoreInk, syncCustomers, pollDelay, recordLink, syncOnce, POLL_ACTIVE_WINDOW_MS, type SyncResult } from './sync';
 
 let running: Promise<SyncResult | null> | null = null;
 let last: SyncResult | null = null;
@@ -15,6 +15,8 @@ let lastFullAt = 0;
 export const FULL_EVERY_MS = 2 * 60_000;
 /** Whether billing answers the light list: unknown until the first bills come back. */
 let liteServer: boolean | null = null;
+/** Older bills' further handwriting (moreInk) read again once; set when none are left. */
+let backfilled = false;
 
 export const linkConfigured = () => !!(env.billingUrl && env.billingPin);
 
@@ -57,6 +59,12 @@ export function syncNow(force = false): Promise<SyncResult | null> {
     .then(async (r) => {
       last = r;
       for (const g of r.sendGiven) void pushGiven(g.no, g.i, g.given);
+      // The first good sync after start (and each after, until done) reads older bills' extra ink.
+      if (!backfilled) {
+        const n = await backfillMoreInk(repo, billing()).catch(() => -1);
+        if (n === 0) backfilled = true;
+        else if (n > 0) emit('bills');
+      }
       if (r.newBills || r.posted || r.reversed) {
         lastChangeAt = Date.now();
         emit('bills');

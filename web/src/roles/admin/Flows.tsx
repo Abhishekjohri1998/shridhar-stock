@@ -29,13 +29,13 @@ export function BillsPage() {
   const live = useLive('bills');
   const { value, error } = useLoad(() => http.get<(BillMirror & { rounded: number; roundOff: number })[]>('/admin/bills?limit=100'), [live]);
   // The list comes without handwriting, so it shows at once; the written lines follow.
-  const [inks, setInks] = useState<Record<string, Record<string, Ink>>>({});
+  const [inks, setInks] = useState<Record<string, Record<string, { ink: Ink; moreInk?: Ink[] }>>>({});
   useEffect(() => {
     const nos = (value ?? []).filter((b) => b.hasInk || b.lines.some((l) => l.inked)).map((b) => b.no);
     if (!nos.length) return;
     let gone = false;
     http
-      .get<Record<string, Record<string, Ink>>>('/admin/bills/ink?nos=' + nos.join(','))
+      .get<Record<string, Record<string, { ink: Ink; moreInk?: Ink[] }>>>('/admin/bills/ink?nos=' + nos.join(','))
       .then((r) => !gone && setInks(r))
       .catch(() => undefined);
     return () => {
@@ -80,8 +80,20 @@ export function BillsPage() {
                   </td>
                   <td>
                     {(() => {
-                      const ink = l.ink ?? inks[b.no]?.[l.i];
-                      if (ink) return <InkView ink={ink} height={30} />;
+                      const got = inks[b.no]?.[l.i];
+                      const ink = l.ink ?? got?.ink;
+                      const more = l.moreInk ?? got?.moreInk ?? [];
+                      if (ink)
+                        return (
+                          <div>
+                            <InkView ink={ink} height={30} />
+                            {more.map((m, k) => (
+                              <div key={k}>
+                                <InkView ink={m} height={30} />
+                              </div>
+                            ))}
+                          </div>
+                        );
                       if (l.inked) return <span className="muted">✍ {bi('handwritten', 'ಕೈಬರಹ')}</span>;
                       return l.name;
                     })()}
