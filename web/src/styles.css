@@ -907,3 +907,10 @@ img, svg.ink { max-width: 100%; }
 @media (max-width: 640px) {
   .inv-sort { margin-left: 0; }
 }
+
+/* ---- Allot / Arriving: one square per unit, like the paper sheet ---- */
+.tick-row { padding: var(--gap) 0; border-top: 1px solid var(--line); }
+.tick-grid { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.tick { width: var(--tap); height: var(--tap); border: 2px solid var(--line-strong); border-radius: var(--r-sm); background: var(--paper-1); color: var(--on-brand); font-weight: 700; cursor: pointer; transition: background var(--t-fast) var(--ease); }
+.tick.on { background: var(--brand-600); border-color: var(--brand-700); }
+.tick:focus-visible { outline: none; box-shadow: var(--focus); }

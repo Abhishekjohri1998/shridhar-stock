@@ -48,7 +48,7 @@ export function CarrierLoads({ orders, sups, items, carriers, lang, onDone }: { 
   for (const ld of loads) for (const x of ld.lines) if (!x.received) onLoad.set(keyOf(x.poId, x.itemId), ld);
   const unassigned = open.flatMap((p) => p.lines.filter((l) => due(p, l.itemId) > 0 && !onLoad.has(keyOf(p.id, l.itemId))).map((l) => ({ p, l })));
   const shown = loads.filter((ld) => ld.lines.some((x) => !x.received) || ld.lines.some((x) => x.received && Date.now() - Date.parse(x.received.at) < 14 * 86400_000));
-  const carrierName = (id: string) => carriers.find((c) => c.id === id)?.name ?? id;
+  const carrierName = (id: string) => (id === 'vendor' ? bi('Vendor brings it', 'ಮಾರಾಟಗಾರರೇ ತರುತ್ತಾರೆ') : (carriers.find((c) => c.id === id)?.name ?? id));
   const nameOf = (id: string) => {
     const it = items.get(id);
     return it ? pickName(it.nameEn, it.nameKn, lang) : id;

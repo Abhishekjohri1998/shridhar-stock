@@ -5,8 +5,9 @@ import { api, http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
 import { statusWord } from '../../lib/words';
-import { Empty, Loading, Money, Select, Status, useBi, when, Table } from '../../components/ui';
+import { Empty, Loading, Money, Select, Status, Tabs, useBi, when, Table } from '../../components/ui';
 import { CarrierLoads } from './Loads';
+import { AllotTab, ArrivingTab } from './Arrivals';
 import { BillLine, ChecklistList, CONDITION_WORDS, deleteChecklist, deletePurchase, DeliveryText, PaymentForm, PaymentsList, SupplierHistory, useCarriers } from './VendorHistory';
 
 /** An item as the orders page needs it: names and units, never the whole catalogue. */
@@ -73,6 +74,7 @@ export function PurchasesPage() {
   const [version, setVersion] = useState(0);
   const live = useLive('pos');
   const [tab, setTab] = useState<'open' | 'all' | 'suppliers'>('open');
+  const [step, setStep] = useState<'order' | 'allot' | 'arriving'>('order');
   const [shown, setShown] = useState(30);
   const { value, error } = useLoad(async () => {
     const [page, sups, locs] = await Promise.all([
@@ -103,6 +105,26 @@ export function PurchasesPage() {
   return (
     <>
       <h1 className="title">{bi('Purchases', 'ಖರೀದಿ')}</h1>
+      <div data-tour="purchases-steps">
+        <Tabs
+          tabs={[
+            { key: 'order', label: bi('Order', 'ಆರ್ಡರ್') },
+            { key: 'allot', label: bi('Allot', 'ಹಂಚಿಕೆ') },
+            { key: 'arriving', label: bi('Arriving', 'ಬರುತ್ತಿರುವುದು') },
+          ]}
+          value={step}
+          onChange={(k) => {
+            setStep(k);
+            setNote('');
+            setErr('');
+          }}
+        />
+      </div>
+      {step !== 'order' && note && <div className="msg ok">{note}</div>}
+      {step === 'allot' && <AllotTab onDone={setNote} />}
+      {step === 'arriving' && <ArrivingTab onDone={setNote} />}
+      {step === 'order' && (
+      <>
       <div className="bar">
         <button className="btn primary" data-tour="purchases-new" onClick={() => setMaking(!making)}>
           + {bi('New order', 'ಹೊಸ ಆರ್ಡರ್')}
@@ -159,6 +181,8 @@ export function PurchasesPage() {
             </button>
           )}
         </>
+      )}
+      </>
       )}
     </>
   );

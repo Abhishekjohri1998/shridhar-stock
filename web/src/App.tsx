@@ -32,6 +32,7 @@ const named = <K extends string>(load: () => Promise<Record<K, ComponentType>>, 
 const HelpPage = named(() => import('./pages/Help'), 'HelpPage');
 const ReportsPage = named(() => import('./roles/Reports'), 'ReportsPage');
 const PurchasesPage = named(() => import('./roles/admin/Buying'), 'PurchasesPage');
+const ArrivingPage = named(() => import('./roles/admin/Arrivals'), 'ArrivingPage');
 const CarriersPage = named(() => import('./roles/admin/Carriers'), 'CarriersPage');
 const PlacesPage = named(() => import('./pages/admin/Places'), 'PlacesPage');
 const PeoplePage = named(() => import('./pages/admin/People'), 'PeoplePage');
@@ -52,7 +53,7 @@ type Place = { to: string; en: string; kn: string; icon: IconName; tour: string;
 const tab = (to: string, en: string, kn: string): Tab => ({ to, en, kn });
 
 /** The worker's three views, as tabs. The godown job is the middle one. */
-const WORKER_TABS: Tab[] = [tab('/worker', 'Pick list', 'ಪಟ್ಟಿ'), tab('/worker/godown', 'Godown', 'ಗೋದಾಮು'), tab('/worker/deliveries', 'Deliveries', 'ಡೆಲಿವರಿ'), tab('/worker/screen', 'TV screen', 'ಟಿವಿ ಪರದೆ')];
+const WORKER_TABS: Tab[] = [tab('/worker', 'Pick list', 'ಪಟ್ಟಿ'), tab('/worker/godown', 'Godown', 'ಗೋದಾಮು'), tab('/worker/deliveries', 'Deliveries', 'ಡೆಲಿವರಿ'), tab('/worker/arriving', 'Arriving', 'ಬರುತ್ತಿರುವ ಸಾಮಾನು'), tab('/worker/screen', 'TV screen', 'ಟಿವಿ ಪರದೆ')];
 
 /**
  * The admin's menu: five places instead of sixteen. Each place is one screen with tabs; the tabs
@@ -563,6 +564,7 @@ function Shell() {
                 <Route path="/worker" element={<WorkerHome />} />
                 <Route path="/worker/godown" element={<GodownHome />} />
                 <Route path="/worker/deliveries" element={<DeliveriesHome />} />
+                <Route path="/worker/arriving" element={<ArrivingPage />} />
                 <Route path="/worker/screen" element={<WorkerHome screen />} />
                 <Route path="/godown" element={<Navigate to="/worker/godown" replace />} />
               </>

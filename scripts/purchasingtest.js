@@ -428,6 +428,79 @@ async function main() {
       check('K: the loads list', (await call('/admin/loads')).body.some((x) => x.id === ld.body.id));
     }
 
+    // ------------------------------------------------ the paper flow: Allot (partial, per carrier) and Arriving
+    {
+      const { unallottedQty } = require(path.join(root, 'core'));
+      const vY = (await call('/admin/suppliers', { method: 'POST', body: { name: 'Yuva Distributors', phone: '' } })).body.id;
+      const mkB = async (nameEn) => (await call('/items', { method: 'POST', body: { nameEn, nameKn: 'ಕ', units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 10 }, { code: 'box', label: 'Box', labelKn: '', perBase: 10, price: 100 }], aliases: [], racks: {} } })).body;
+      const parle = await mkB('A Parle');
+      const twenty = await mkB('A 20-20');
+      const at = async (item) => (await call('/stock')).body.find((s) => s.itemId === item.id && s.locationId === godown)?.qty ?? 0;
+      const po = (await call('/admin/pos', { method: 'POST', body: { supplierId: vY, to: godown, lines: [{ itemId: parle.id, unit: 'box', qty: 6, cost: 100 }, { itemId: twenty.id, unit: 'box', qty: 10, cost: 50 }] } })).body;
+      const raju = (await call('/admin/carriers', { method: 'POST', body: { name: 'Raju', vehicleNo: 'KA 25 R 4' } })).body;
+      const shanti = (await call('/admin/carriers', { method: 'POST', body: { name: 'Shantinath' } })).body;
+      const allotLine = async (itemId) => (await call('/admin/allot')).body.vendors.find((v) => v.supplierId === vY).lines.find((l) => l.poId === po.id && l.itemId === itemId);
+      eq('A: nothing allotted yet', (await allotLine(parle.id)).unallotted, 6);
+      check('A: carriers in the allot view', (await call('/admin/allot')).body.carriers.some((c) => c.id === raju.id));
+      const a1 = await call('/admin/loads/allot', { method: 'POST', body: { carrierId: raju.id, lines: [{ poId: po.id, itemId: parle.id, qty: 4 }] } });
+      check('A: Parle 4 of 6 on Raju', a1.status === 201 && a1.body.load.lines[0].qty === 4 && a1.body.load.vehicleNo === 'KA 25 R 4', JSON.stringify(a1.body));
+      const l1 = await allotLine(parle.id);
+      check('A: 2 left unallotted, "on Raju 4"', l1.unallotted === 2 && l1.on.length === 1 && l1.on[0].carrierName === 'Raju' && l1.on[0].qty === 4, JSON.stringify(l1));
+      const a2 = await call('/admin/loads/allot', { method: 'POST', body: { carrierId: shanti.id, lines: [{ poId: po.id, itemId: parle.id, qty: 5 }] } });
+      check('A: the rest to Shantinath, capped at the 2 unallotted', a2.status === 201 && a2.body.added[0].qty === 2 && a2.body.capped === true, JSON.stringify(a2.body));
+      eq('A: nothing left of Parle', (await allotLine(parle.id)).unallotted, 0);
+      eq('A: allotting more is refused', (await call('/admin/loads/allot', { method: 'POST', body: { carrierId: raju.id, lines: [{ poId: po.id, itemId: parle.id, qty: 1 }] } })).status, 400);
+      const a3 = await call('/admin/loads/allot', { method: 'POST', body: { carrierId: raju.id, lines: [{ poId: po.id, itemId: twenty.id, qty: 3 }] } });
+      check('A: a second allot to Raju adds to his waiting load', a3.status === 200 && a3.body.load.id === a1.body.load.id && a3.body.load.lines.length === 2, JSON.stringify(a3.body));
+      const av = await call('/admin/loads/allot', { method: 'POST', body: { carrierId: 'vendor', lines: [{ poId: po.id, itemId: twenty.id, qty: 7 }] } });
+      check('A: "Vendor brings it" is a load', av.status === 201 && av.body.load.carrierId === 'vendor' && av.body.load.lines[0].qty === 7, JSON.stringify(av.body));
+      eq('A: unallotted maths (core)', unallottedQty(10, [a3.body.load, av.body.load], po.id, twenty.id), 0);
+      eq('A: an unknown carrier is 404', (await call('/admin/loads/allot', { method: 'POST', body: { carrierId: 'nope', lines: [{ poId: po.id, itemId: twenty.id, qty: 1 }] } })).status, 404);
+
+      // Arriving: grouped carrier -> vendor -> item, with rates for the admin.
+      const arr = (await call('/arriving')).body;
+      const rj = arr.loads.find((l) => l.id === a1.body.load.id);
+      check('A: arriving groups by carrier then vendor', rj && rj.carrierName === 'Raju' && rj.vendors[0].supplierId === vY && rj.vendors[0].lines.length === 2 && rj.vendors[0].lines.every((l) => 'ratePerUnit' in l) && arr.canRate === true, JSON.stringify(rj));
+      check('A: the vendor load is shown as "Vendor brings it"', arr.loads.some((l) => l.carrierId === 'vendor' && l.carrierName === 'Vendor brings it'));
+      // Raju: 3 of 4 Parle arrive at ₹5/box delivery; 20-20 removed (Del); notes.
+      const p0 = await at(parle);
+      const sv = await call('/arriving/' + a1.body.load.id + '/save', { method: 'POST', body: { notes: 'Two boxes wet', lines: [{ poId: po.id, itemId: parle.id, arrived: 3, ratePerUnit: 5 }, { poId: po.id, itemId: twenty.id, arrived: 0, remove: true }] } });
+      check('A: arriving save', sv.status === 200 && sv.body.posted === 3 && sv.body.waiting === 1 && sv.body.removed === 1, JSON.stringify(sv.body));
+      eq('A: only the 3 ticked boxes are in stock', (await at(parle)) - p0, 30);
+      const L = (await call('/admin/loads/' + a1.body.load.id)).body;
+      check('A: 3 received, 1 still waiting on the load', L.lines.some((l) => l.itemId === parle.id && l.received?.qty === 3) && L.lines.some((l) => l.itemId === parle.id && !l.received && l.qty === 1 && l.ratePerUnit === 5), JSON.stringify(L.lines));
+      check('A: notes saved, in the history', L.notes === 'Two boxes wet' && L.history.some((h) => h.action === 'notes'), JSON.stringify(L));
+      eq('A: Del sends 20-20 back to unallotted', (await allotLine(twenty.id)).unallotted, 3);
+      const hist = (await call('/admin/suppliers/' + vY + '/history')).body.purchases.find((p) => p.id === po.id);
+      const rc = hist.received.find((r) => r.itemId === parle.id && r.qty === 3);
+      check('A: delivery ₹/unit x arrived in the landed cost', rc && rc.delivery === 15 && rc.landed === 105 && rc.loadId === a1.body.load.id, JSON.stringify(hist.received));
+      eq('A: more than on the load is refused', (await call('/arriving/' + a1.body.load.id + '/save', { method: 'POST', body: { lines: [{ poId: po.id, itemId: parle.id, arrived: 2 }] } })).status, 400);
+
+      // A worker: opens Arriving and saves, without rates; 403 on Allot.
+      const adminTok = token;
+      token = (await call('/auth/login', { method: 'POST', body: { phone: '9000000099', pin: '2580' } })).body.token;
+      const wa = await call('/arriving');
+      check('A: a worker opens Arriving, with no rates', wa.status === 200 && wa.body.canRate === false && wa.body.loads.length > 0 && wa.body.loads.every((l) => l.vendors.every((v) => v.lines.every((x) => !('ratePerUnit' in x)))), JSON.stringify(wa.body));
+      eq('A: a worker cannot see Allot', (await call('/admin/allot')).status, 403);
+      eq('A: nor allot', (await call('/admin/loads/allot', { method: 'POST', body: { carrierId: raju.id, lines: [{ poId: po.id, itemId: twenty.id, qty: 1 }] } })).status, 403);
+      const ws = await call('/arriving/' + a1.body.load.id + '/save', { method: 'POST', body: { lines: [{ poId: po.id, itemId: parle.id, arrived: 1, ratePerUnit: 99 }] } });
+      eq('A: a worker saves arriving', ws.status, 200);
+      token = adminTok;
+      const L2 = (await call('/admin/loads/' + a1.body.load.id)).body;
+      check('A: the worker\'s rate is ignored: the existing rate is kept', L2.lines.filter((l) => l.itemId === parle.id).every((l) => l.ratePerUnit === 5), JSON.stringify(L2.lines));
+      // The vendor brings the 7 boxes of 20-20: a "self" delivery on the order.
+      const vs = await call('/arriving/' + av.body.load.id + '/save', { method: 'POST', body: { lines: [{ poId: po.id, itemId: twenty.id, arrived: 7 }] } });
+      eq('A: the vendor-brings load is received', vs.status, 200);
+      const hist2 = (await call('/admin/suppliers/' + vY + '/history')).body.purchases.find((p) => p.id === po.id);
+      check('A: as a vendor (self) delivery', hist2.checklists.some((c) => c.mode === 'self' && !c.carrierId), JSON.stringify(hist2.checklists));
+      // The old routes still work alongside: move the 20-20 still due onto Shantinath, checklist it.
+      const om = await call('/admin/loads/move', { method: 'POST', body: { loadId: a2.body.load.id, lines: [{ poId: po.id, itemId: twenty.id, ratePerUnit: 2 }] } });
+      check('A: the old move still works', om.status === 200 && om.body.lines.some((l) => l.itemId === twenty.id && l.qty === 3), JSON.stringify(om.body));
+      const oc = await call('/admin/purchases/' + po.id + '/checklist', { method: 'POST', body: { loadId: a2.body.load.id, lines: [{ itemId: twenty.id, arrived: 3, ok: true }, { itemId: parle.id, arrived: 2, ok: true }] } });
+      check('A: the old checklist still works, and closes the order', oc.status === 200 && oc.body.status === 'received', JSON.stringify(oc.body));
+      check('A: a received order leaves Arriving', !(await call('/arriving')).body.loads.some((l) => l.vendors.some((v) => v.lines.some((x) => x.poId === po.id))));
+    }
+
     // ------------------------------------------------ running low, for the new order form
     const lowA = (await call('/items', { method: 'POST', body: { nameEn: 'Zz Low Soap', nameKn: 'ಸೋಪು', units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 10 }, { code: 'box', label: 'Box', labelKn: '', perBase: 60, price: 580 }], lowAt: { qty: 2, unit: 'box' }, aliases: [], racks: {} } })).body;
     const lowB = (await call('/items', { method: 'POST', body: { nameEn: 'Aa Low Salt', nameKn: 'ಉಪ್ಪು', units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 20 }], lowAt: { qty: 10, unit: 'pc' }, aliases: [], racks: {} } })).body;

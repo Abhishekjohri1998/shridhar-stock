@@ -475,7 +475,7 @@ const receiveBody = z.object({
   /** Per item, an optional expiry date: the goods become a lot, sold first-expiring-first. */
   expiry: z.record(z.string(), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expiry as a date')).optional(),
 });
-type ReceiveInput = z.infer<typeof receiveBody>;
+export type ReceiveInput = z.infer<typeof receiveBody>;
 
 /**
  * Posts one receipt of an order: the stock moves (split places, lots, landed cost as before) and
@@ -483,7 +483,7 @@ type ReceiveInput = z.infer<typeof receiveBody>;
  * old Receive); else it stays open, part received, until everything has arrived. The first
  * receipt keeps the move keys it always had; later ones add ":r<n>".
  */
-async function receiveGoods(
+export async function receiveGoods(
   req: Request,
   p: PurchaseOrder,
   body: ReceiveInput,
@@ -711,8 +711,9 @@ actionRoutes.post(
       if (ld) rates.set(l.itemId, { loadId: ld.id, rate: ld.lines.find((x) => x.poId === p.id && x.itemId === l.itemId && !x.received)!.ratePerUnit });
     }
     const loadOf = [...rates.values()].map((r) => loads.find((x) => x.id === r.loadId)!)[0] ?? (b.loadId ? loads[0] : undefined);
-    const mode = b.mode ?? (loadOf ? 'carrier' : undefined) ?? p.delivery?.mode ?? 'self';
-    const carrierId = mode === 'carrier' ? (b.carrierId ?? loadOf?.carrierId ?? p.delivery?.carrierId) : undefined;
+    const vendorLoad = loadOf?.carrierId === 'vendor';
+    const mode = b.mode ?? (loadOf ? (vendorLoad ? 'self' : 'carrier') : undefined) ?? p.delivery?.mode ?? 'self';
+    const carrierId = mode === 'carrier' ? (b.carrierId ?? (vendorLoad ? undefined : loadOf?.carrierId) ?? p.delivery?.carrierId) : undefined;
     let vehicleNo = (b.vehicleNo || (mode === 'carrier' ? (loadOf?.vehicleNo ?? p.delivery?.vehicleNo) : undefined))?.toUpperCase();
     if (mode === 'carrier') {
       if (!carrierId) throw new HttpError(400, 'Choose the carrier who brought it');

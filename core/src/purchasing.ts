@@ -504,7 +504,7 @@ export interface LoadLine {
 export interface LoadHistory {
   at: string;
   by: string;
-  action: 'create' | 'add' | 'move-in' | 'move-out' | 'carrier' | 'rate' | 'unassign' | 'received' | 'edit';
+  action: 'create' | 'add' | 'move-in' | 'move-out' | 'carrier' | 'rate' | 'unassign' | 'received' | 'edit' | 'allot' | 'notes';
   /** The other load, for a move. */
   loadId?: string;
   carrierId?: string;
@@ -523,7 +523,24 @@ export interface CarrierLoad {
   date: string;
   lines: LoadLine[];
   history: LoadHistory[];
+  /** Notes typed on Arriving (the latest; every change is in the history too). */
+  notes?: string;
   at: string;
+}
+
+/** The carrier id of a load the vendor brings themselves ("Vendor brings it"). */
+export const VENDOR_CARRIER = 'vendor';
+
+/** How much of one order line is on loads still waiting (any carrier). */
+export function allottedQty(loads: Pick<CarrierLoad, 'lines'>[], poId: string, itemId: string): number {
+  let n = 0;
+  for (const l of loads) for (const x of l.lines) if (!x.received && x.poId === poId && x.itemId === itemId) n += x.qty;
+  return Math.round(n * 1e6) / 1e6;
+}
+
+/** What of an order line is still due and not on any waiting load: what Allot can still give out. */
+export function unallottedQty(due: number, loads: Pick<CarrierLoad, 'lines'>[], poId: string, itemId: string): number {
+  return Math.max(0, Math.round((due - allottedQty(loads, poId, itemId)) * 1e6) / 1e6);
 }
 
 /** A load's delivery charge: Σ rate × qty (what came, once received), to the paisa. */

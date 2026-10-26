@@ -22,7 +22,7 @@ export function tourForPath(path: string): string | null {
   if (p === '/admin/purchases') return 'purchases';
   if (p === '/admin/transfers' || p === '/admin/deliveries') return 'transfers';
   if (['/admin/places', '/admin/people', '/admin/vehicles', '/admin/files', '/admin/settings'].includes(p)) return 'setup';
-  if (p === '/worker' || p === '/worker/deliveries') return 'worker';
+  if (p === '/worker' || p === '/worker/deliveries' || p === '/worker/arriving') return 'worker';
   if (p === '/worker/screen') return 'tv';
   if (p === '/worker/godown' || p === '/godown') return 'godown';
   return null;
