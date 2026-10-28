@@ -18,6 +18,7 @@ import { roleRoutes } from './routes/roles';
 import { purchasingRoutes } from './routes/purchasing';
 import { startLink } from './billing/link';
 import { markInk } from './billing/sync';
+import { cleanStaleLoadLines } from './orderLoads';
 import { seedDemo } from './demo/seed';
 import { ensureShop, seedAdmin } from './setup';
 import { getRepo, initRepo } from './store';
@@ -102,6 +103,9 @@ async function main(): Promise<void> {
   await markInk(repo)
     .then((n) => n && console.log('[store] marked handwriting on ' + n + ' older bills'))
     .catch((err: Error) => console.error('[store] marking handwriting failed:', err.message));
+  await cleanStaleLoadLines(repo)
+    .then((n) => n && console.log('[store] took ' + n + ' cancelled-order lines off carrier loads'))
+    .catch((err: Error) => console.error('[store] load cleanup failed:', err.message));
   startLink();
 
   app.listen(env.port, () => {

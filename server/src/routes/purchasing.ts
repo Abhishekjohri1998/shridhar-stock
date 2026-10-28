@@ -312,12 +312,41 @@ async function loadById(id: string): Promise<CarrierLoad> {
   return ld;
 }
 
-/** Carrier loads, newest first (the last 200). */
+/**
+ * Carrier loads, newest first (the last 200), in one request. Each line carries its item's name,
+ * unit label, order number and vendor, so the list never shows raw ids. `waiting=1`: only loads
+ * with something still waiting (the main list); the rest stay as history.
+ */
 purchasingRoutes.get(
   '/admin/loads',
   admin,
-  handler(async (_req, res) => {
-    res.json(await getRepo().listDocs<CarrierLoad>('loads', { sort: { date: -1, at: -1 }, limit: 200 }));
+  handler(async (req, res) => {
+    const repo = getRepo();
+    const [all, items, pos, sups] = await Promise.all([repo.listDocs<CarrierLoad>('loads', { sort: { date: -1, at: -1 }, limit: 200 }), repo.listItems(), repo.listDocs<PurchaseOrder>('pos'), repo.listDocs<Supplier>('suppliers')]);
+    const loads = req.query.waiting === '1' ? all.filter((l) => l.lines.some((x) => !x.received)) : all;
+    const itemOf = new Map(items.map((i) => [i.id, i]));
+    const poOf = new Map(pos.map((p) => [p.id, p]));
+    const supOf = new Map(sups.map((x) => [x.id, x.name]));
+    res.json(
+      loads.map((ld) => ({
+        ...ld,
+        lines: ld.lines.map((x) => {
+          const it = itemOf.get(x.itemId);
+          const p = poOf.get(x.poId);
+          const code = p?.lines.find((l) => l.itemId === x.itemId)?.unit ?? '';
+          const u = it ? findUnit(it, code) : undefined;
+          return {
+            ...x,
+            nameEn: it?.nameEn ?? 'Removed item',
+            nameKn: it?.nameKn ?? '',
+            unitLabel: u?.label || code,
+            unitLabelKn: u?.labelKn ?? '',
+            poNo: p?.no ?? (Number(x.poId.replace(/^po_/, '')) || 0),
+            supplierName: p ? (supOf.get(p.supplierId) ?? '') : '',
+          };
+        }),
+      })),
+    );
   }),
 );
 

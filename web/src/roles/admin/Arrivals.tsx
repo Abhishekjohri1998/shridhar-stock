@@ -17,6 +17,9 @@ const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const clamp = (n: number, max: number) => Math.max(0, Math.min(max, r3(n)));
 
 /** One square per unit, ticked up to `count`. Tapping a ticked square unticks it and the ones after. */
+/** Long lists render a page at a time. */
+const PAGE = 30;
+
 function TickBoxes({ max, count, onChange, label }: { max: number; count: number; onChange: (n: number) => void; label: string }) {
   const n = Math.floor(max);
   if (n > MAX_TICKS || n < 1) return null;
@@ -74,6 +77,7 @@ interface AllotView {
 }
 
 export function AllotTab({ onDone }: { onDone: (msg: string) => void }) {
+  const [lim, setLim] = useState(PAGE);
   const bi = useBi();
   const { lang } = useSession();
   const live = useLive('pos');
@@ -155,7 +159,7 @@ export function AllotTab({ onDone }: { onDone: (msg: string) => void }) {
       </div>
       {err && <div className="msg err">{err}</div>}
       {view.vendors.length === 0 && <Empty tour="allot-vendors">{bi('Nothing on order is waiting to be allotted.', 'ಹಾಕಲು ಯಾವ ಆರ್ಡರ್ ಸಾಮಾನೂ ಬಾಕಿ ಇಲ್ಲ.')}</Empty>}
-      {view.vendors.map((v) => {
+      {view.vendors.slice(0, lim).map((v) => {
         const free = v.lines.filter((l) => l.unallotted > 0);
         const all = free.length > 0 && free.every((l) => (count[keyOf(l.poId, l.itemId)] ?? 0) >= l.unallotted);
         return (
@@ -208,6 +212,11 @@ export function AllotTab({ onDone }: { onDone: (msg: string) => void }) {
           </div>
         );
       })}
+      {view.vendors.length > lim && (
+        <button className="btn small mt-8" onClick={() => setLim((n) => n + PAGE)}>
+          {bi('Show more', 'ಇನ್ನಷ್ಟು ತೋರಿಸಿ')} ({view.vendors.length - lim})
+        </button>
+      )}
       {view.vendors.length > 0 && (
         <div className="bar">
           <button type="button" className="btn primary" disabled={busy || !lines.length} onClick={allot} data-tour="allot-save">
@@ -252,6 +261,7 @@ interface ArrView {
 
 /** Arriving: for the admin (with delivery ₹/unit) and the worker screens (without). */
 export function ArrivingTab({ onDone }: { onDone?: (msg: string) => void }) {
+  const [lim, setLim] = useState(PAGE);
   const bi = useBi();
   const live = useLive('pos');
   const [version, setVersion] = useState(0);
@@ -275,9 +285,14 @@ export function ArrivingTab({ onDone }: { onDone?: (msg: string) => void }) {
       {err && <div className="msg err">{err}</div>}
       {note && <div className="msg ok">{note}</div>}
       {view.loads.length === 0 && <Empty tour="arriving-carrier">{bi('Nothing is on the way. Allot goods to a carrier first.', 'ಯಾವುದೂ ದಾರಿಯಲ್ಲಿಲ್ಲ. ಮೊದಲು ಸಾಮಾನನ್ನು ಸಾಗಣೆದಾರರಿಗೆ ಹಾಕಿ.')}</Empty>}
-      {view.loads.map((ld) => (
+      {view.loads.slice(0, lim).map((ld) => (
         <ArrivingLoad key={ld.id + ':' + version} ld={ld} places={view.places} canRate={view.canRate} onDone={done} />
       ))}
+      {view.loads.length > lim && (
+        <button className="btn small mt-8" onClick={() => setLim((n) => n + PAGE)}>
+          {bi('Show more', 'ಇನ್ನಷ್ಟು ತೋರಿಸಿ')} ({view.loads.length - lim})
+        </button>
+      )}
     </>
   );
 }

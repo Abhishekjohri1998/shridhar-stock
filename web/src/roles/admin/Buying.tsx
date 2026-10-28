@@ -522,7 +522,7 @@ function OrderCard({
                   </button>
                 )}
                 {progress !== 'part' && (
-                  <button className="btn" onClick={() => act('/admin/pos/' + p.id + '/cancel', {}, bi('Order cancelled.', 'ಆರ್ಡರ್ ರದ್ದಾಗಿದೆ.'))}>
+                  <button className="btn" onClick={() => window.confirm(bi('Cancel and remove this order? It comes off every carrier load.', 'ಈ ಆರ್ಡರ್ ರದ್ದು ಮಾಡಿ ತೆಗೆಯಬೇಕೆ? ಎಲ್ಲಾ ಸಾಗಣೆ ಲೋಡ್‌ಗಳಿಂದಲೂ ತೆಗೆಯಲಾಗುತ್ತದೆ.')) && act('/admin/pos/' + p.id + '/cancel', {}, bi('Order cancelled and removed.', 'ಆರ್ಡರ್ ರದ್ದಾಗಿ ತೆಗೆಯಲಾಗಿದೆ.'))}>
                     {bi('Cancel order', 'ಆರ್ಡರ್ ರದ್ದು')}
                   </button>
                 )}

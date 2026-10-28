@@ -504,7 +504,7 @@ export interface LoadLine {
 export interface LoadHistory {
   at: string;
   by: string;
-  action: 'create' | 'add' | 'move-in' | 'move-out' | 'carrier' | 'rate' | 'unassign' | 'received' | 'edit' | 'allot' | 'notes';
+  action: 'create' | 'add' | 'move-in' | 'move-out' | 'carrier' | 'rate' | 'unassign' | 'received' | 'edit' | 'allot' | 'notes' | 'cancel';
   /** The other load, for a move. */
   loadId?: string;
   carrierId?: string;

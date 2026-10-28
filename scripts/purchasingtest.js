@@ -428,6 +428,62 @@ async function main() {
       check('K: the loads list', (await call('/admin/loads')).body.some((x) => x.id === ld.body.id));
     }
 
+    // ------------------------------------------------ cancelling an order takes it off the carrier loads
+    {
+      const vX = (await call('/admin/suppliers', { method: 'POST', body: { name: 'Xavier Traders', phone: '' } })).body.id;
+      const mkX = async (nameEn) => (await call('/items', { method: 'POST', body: { nameEn, nameKn: 'ಕ', units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 10 }, { code: 'bag', label: 'Bag', labelKn: 'ಚೀಲ', perBase: 10, price: 100 }], aliases: [], racks: {} } })).body;
+      const rice = await mkX('X Rice');
+      const jag = await mkX('X Jaggery');
+      const carX = (await call('/admin/carriers', { method: 'POST', body: { name: 'Xcarrier', vehicleNo: 'KA 1 X 1' } })).body;
+      // Nothing received: two orders on one load; cancelling one deletes it and its lines only.
+      const o1 = (await call('/admin/pos', { method: 'POST', body: { supplierId: vX, to: godown, lines: [{ itemId: rice.id, unit: 'bag', qty: 2, cost: 100 }] } })).body;
+      const o2 = (await call('/admin/pos', { method: 'POST', body: { supplierId: vX, to: godown, lines: [{ itemId: jag.id, unit: 'bag', qty: 3, cost: 100 }] } })).body;
+      const lx = (await call('/admin/loads/move', { method: 'POST', body: { carrierId: carX.id, lines: [{ poId: o1.id, itemId: rice.id, ratePerUnit: 5 }, { poId: o2.id, itemId: jag.id, ratePerUnit: 5 }] } })).body;
+      const named = (await call('/admin/loads?waiting=1')).body.find((x) => x.id === lx.id);
+      check('C: the loads list gives item names, unit and vendor', named && named.lines.some((l) => l.itemId === rice.id && l.nameEn === 'X Rice' && l.unitLabel === 'Bag' && l.supplierName === 'Xavier Traders' && l.poNo === o1.no), JSON.stringify(named));
+      const c1 = await call('/admin/pos/' + o1.id + '/cancel', { method: 'POST', body: {} });
+      check('C: cancel with nothing received deletes the order', c1.status === 200 && c1.body.deleted === true && (await call('/admin/purchases/' + o1.id + '/checklist', { method: 'POST', body: { lines: [{ itemId: rice.id, arrived: 1 }] } })).status === 404, JSON.stringify(c1.body));
+      const lx1 = (await call('/admin/loads/' + lx.id)).body;
+      check('C: and its lines leave the load, with a history note', !lx1.lines.some((l) => l.poId === o1.id) && lx1.lines.some((l) => l.poId === o2.id) && lx1.history.some((h) => h.action === 'cancel'), JSON.stringify(lx1));
+      check('C: it is gone from Allot and Arriving', !JSON.stringify((await call('/admin/allot')).body).includes(o1.id) && !JSON.stringify((await call('/arriving')).body).includes(o1.id));
+      await call('/admin/pos/' + o2.id + '/cancel', { method: 'POST', body: {} });
+      eq('C: a load left empty is deleted', (await call('/admin/loads/' + lx.id)).status, 404);
+      // Part received: kept as cancelled with the receipt; only the waiting line leaves the load.
+      const o3 = (await call('/admin/pos', { method: 'POST', body: { supplierId: vX, to: godown, lines: [{ itemId: rice.id, unit: 'bag', qty: 2, cost: 100 }, { itemId: jag.id, unit: 'bag', qty: 2, cost: 100 }] } })).body;
+      const l3 = (await call('/admin/loads/move', { method: 'POST', body: { carrierId: carX.id, lines: [{ poId: o3.id, itemId: rice.id, ratePerUnit: 5 }, { poId: o3.id, itemId: jag.id, ratePerUnit: 5 }] } })).body;
+      await call('/admin/purchases/' + o3.id + '/checklist', { method: 'POST', body: { lines: [{ itemId: rice.id, arrived: 2, ok: true }, { itemId: jag.id, arrived: 0, ok: false }] } });
+      const c3 = await call('/admin/pos/' + o3.id + '/cancel', { method: 'POST', body: {} });
+      const L3 = (await call('/admin/loads/' + l3.id)).body;
+      check('C: cancel after a part receipt keeps the order', c3.status === 200 && c3.body.deleted === false, JSON.stringify(c3.body));
+      check('C: the received line stays, the waiting one goes', L3.lines.length === 1 && L3.lines[0].itemId === rice.id && L3.lines[0].received, JSON.stringify(L3.lines));
+      check('C: a load with nothing waiting is off the main list', !(await call('/admin/loads?waiting=1')).body.some((x) => x.id === l3.id) && (await call('/admin/loads')).body.some((x) => x.id === l3.id));
+      check('C: and it is not in Allot', !JSON.stringify((await call('/admin/allot')).body).includes(o3.id));
+      // The one-time cleanup, on an in-memory store: stale lines of cancelled or deleted orders go, once.
+      const { cleanStaleLoadLines } = require(path.join(out, 'orderLoads.js'));
+      const docs = {
+        pos: { po_1: { id: 'po_1', status: 'cancelled' }, po_2: { id: 'po_2', status: 'ordered' } },
+        loads: {
+          a: { id: 'a', lines: [{ poId: 'po_1', itemId: 'i', qty: 1 }, { poId: 'po_2', itemId: 'i', qty: 1 }], history: [] },
+          b: { id: 'b', lines: [{ poId: 'po_gone', itemId: 'i', qty: 1 }], history: [] },
+          c: { id: 'c', lines: [{ poId: 'po_1', itemId: 'j', qty: 1, received: { qty: 1, receipt: 1, at: 'x' } }], history: [] },
+        },
+        meta: {},
+      };
+      const fake = {
+        getDoc: async (c, id) => docs[c][id] ?? null,
+        putDoc: async (c, d) => void (docs[c][d.id] = d),
+        deleteDoc: async (c, id) => void delete docs[c][id],
+        listDocs: async (c, q) => {
+          const ids = q?.filter?.['lines.poId'];
+          return Object.values(docs[c]).filter((d) => !ids || d.lines.some((l) => ids.includes(l.poId))).map((d) => JSON.parse(JSON.stringify(d)));
+        },
+      };
+      const n1 = await cleanStaleLoadLines(fake);
+      check('C: cleanup removes stale lines and empty loads', n1 === 2 && docs.loads.a.lines.length === 1 && docs.loads.a.lines[0].poId === 'po_2' && !docs.loads.b && docs.loads.c.lines.length === 1 && docs.meta.loadsCancelCleanup, JSON.stringify(docs));
+      docs.loads.d = { id: 'd', lines: [{ poId: 'po_1', itemId: 'k', qty: 1 }], history: [] };
+      eq('C: cleanup runs once', await cleanStaleLoadLines(fake), 0);
+    }
+
     // ------------------------------------------------ the paper flow: Allot (partial, per carrier) and Arriving
     {
       const { unallottedQty } = require(path.join(root, 'core'));

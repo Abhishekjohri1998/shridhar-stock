@@ -38,6 +38,7 @@ import {
 import { requireRole, audit } from '../auth';
 import { handler, HttpError } from '../http';
 import { post } from '../posting';
+import { dropOrderFromLoads } from '../orderLoads';
 import { getRepo } from '../store';
 import { newId } from '../store/types';
 import { emit } from '../events';
@@ -430,6 +431,15 @@ actionRoutes.post(
   }),
 );
 
+/** Trips that named this order keep their record, without the order. */
+async function unlinkTrips(poId: string): Promise<void> {
+  const repo = getRepo();
+  for (const t of await repo.listDocs<CarrierTrip>('trips', { filter: { poId } })) {
+    const { poId: _drop, ...rest } = t;
+    await repo.putDoc('trips', rest as CarrierTrip);
+  }
+}
+
 async function loadPo(id: string): Promise<PurchaseOrder> {
   const p = await getRepo().getDoc<PurchaseOrder>('pos', id);
   if (!p) throw new HttpError(404, 'No such order');
@@ -442,11 +452,25 @@ actionRoutes.post(
   handler(async (req, res) => {
     const p = await loadPo(String(req.params.id));
     if (poStage(p.status) !== 'ordered') throw new HttpError(409, 'Already ' + p.status);
+    const repo = getRepo();
+    const by = audit(req).by;
+    const got = (p.received ?? []).some((r) => r.qty > 0);
+    if (!got) {
+      // Nothing came: the order goes completely, and its lines come off every carrier load.
+      await dropOrderFromLoads(repo, [p.id], by, 'order #' + p.no + ' cancelled');
+      await unlinkTrips(p.id);
+      await repo.deleteDoc('pos', p.id);
+      emit('pos', {}, p.id);
+      res.json({ ok: true, deleted: true });
+      return;
+    }
+    // Part received: kept as cancelled with what came; only the waiting lines leave the loads.
     p.status = 'cancelled';
     p.times.cancelled = now();
-    await getRepo().putDoc('pos', p);
+    await dropOrderFromLoads(repo, [p.id], by, 'order #' + p.no + ' cancelled');
+    await repo.putDoc('pos', p);
     emit('pos', {}, p.id);
-    res.json({ ok: true });
+    res.json({ ok: true, deleted: false });
   }),
 );
 
@@ -790,11 +814,8 @@ actionRoutes.delete(
     const recordOnly = req.query.recordOnly === '1' || req.query.recordOnly === 'true' || req.body?.recordOnly === true;
     if (got && !recordOnly) throw new HttpError(409, 'Goods on this order were received. Delete the record only (stock stays as it is)?');
     const repo = getRepo();
-    const trips = await repo.listDocs<CarrierTrip>('trips', { filter: { poId: p.id } });
-    for (const t of trips) {
-      const { poId: _drop, ...rest } = t;
-      await repo.putDoc('trips', rest as CarrierTrip);
-    }
+    await unlinkTrips(p.id);
+    await dropOrderFromLoads(repo, [p.id], audit(req).by, 'order #' + p.no + ' deleted');
     await repo.deleteDoc('pos', p.id);
     emit('pos', {}, p.id);
     res.json({ ok: true, recordOnly: got });

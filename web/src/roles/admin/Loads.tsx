@@ -4,6 +4,10 @@ import { http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { Money, Select, Table, useBi } from '../../components/ui';
 
+type NamedLine = CarrierLoad['lines'][number] & { nameEn?: string; nameKn?: string; unitLabel?: string; unitLabelKn?: string; poNo?: number; supplierName?: string };
+type NamedLoad = Omit<CarrierLoad, 'lines'> & { lines: NamedLine[] };
+const PAGE = 30;
+
 type Brief = { nameEn: string; nameKn: string; units: { code: string; label: string; labelKn: string }[] };
 
 const keyOf = (poId: string, itemId: string) => poId + '|' + itemId;
@@ -19,7 +23,8 @@ export function CarrierLoads({ orders, sups, items, carriers, lang, onDone }: { 
   const bi = useBi();
   const live = useLive('pos');
   const [version, setVersion] = useState(0);
-  const [loads, setLoads] = useState<CarrierLoad[]>([]);
+  const [loads, setLoads] = useState<NamedLoad[]>([]);
+  const [shownCount, setShownCount] = useState(PAGE);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [target, setTarget] = useState('');
   const [carrierId, setCarrierId] = useState('');
@@ -31,7 +36,7 @@ export function CarrierLoads({ orders, sups, items, carriers, lang, onDone }: { 
   const [err, setErr] = useState('');
   useEffect(() => {
     http
-      .get<CarrierLoad[]>('/admin/loads')
+      .get<NamedLoad[]>('/admin/loads?waiting=1')
       .then((l) => {
         setLoads(l);
         setRates({});
@@ -47,7 +52,9 @@ export function CarrierLoads({ orders, sups, items, carriers, lang, onDone }: { 
   const onLoad = new Map<string, CarrierLoad>();
   for (const ld of loads) for (const x of ld.lines) if (!x.received) onLoad.set(keyOf(x.poId, x.itemId), ld);
   const unassigned = open.flatMap((p) => p.lines.filter((l) => due(p, l.itemId) > 0 && !onLoad.has(keyOf(p.id, l.itemId))).map((l) => ({ p, l })));
-  const shown = loads.filter((ld) => ld.lines.some((x) => !x.received) || ld.lines.some((x) => x.received && Date.now() - Date.parse(x.received.at) < 14 * 86400_000));
+  // Only loads with something still waiting; fully received ones stay in history.
+  const waitingLoads = loads.filter((ld) => ld.lines.some((x) => !x.received));
+  const shown = waitingLoads.slice(0, shownCount);
   const carrierName = (id: string) => (id === 'vendor' ? bi('Vendor brings it', 'ಮಾರಾಟಗಾರರೇ ತರುತ್ತಾರೆ') : (carriers.find((c) => c.id === id)?.name ?? id));
   const nameOf = (id: string) => {
     const it = items.get(id);
@@ -80,12 +87,11 @@ export function CarrierLoads({ orders, sups, items, carriers, lang, onDone }: { 
     const [poId, itemId] = k.split('|') as [string, string];
     return { poId, itemId };
   });
-  const rateOf = (ld: CarrierLoad, poId: string, itemId: string) => {
+  const rateOf = (ld: NamedLoad, poId: string, itemId: string) => {
     const t = rates[ld.id + '|' + keyOf(poId, itemId)];
     if (t != null) return Number(t) || 0;
     return ld.lines.find((x) => x.poId === poId && x.itemId === itemId)?.ratePerUnit ?? 0;
   };
-  const waitingLoads = loads.filter((ld) => ld.lines.some((x) => !x.received));
   const move = () =>
     run(
       () =>
@@ -95,7 +101,7 @@ export function CarrierLoads({ orders, sups, items, carriers, lang, onDone }: { 
         }),
       bi('Moved to the carrier.', 'ಸಾಗಣೆದಾರರಿಗೆ ಹಾಕಲಾಗಿದೆ.'),
     );
-  if (!open.length && !shown.length) return null;
+  if (!open.length && !waitingLoads.length) return null;
   return (
     <div className="card" data-tour="purchases-loads">
       <b>{bi('Goods carriers', 'ಸಾಗಣೆ ವಾಹನಗಳು')}</b>
@@ -148,14 +154,14 @@ export function CarrierLoads({ orders, sups, items, carriers, lang, onDone }: { 
                     <tr key={k + (x.received ? ':r' + x.received.receipt : '')}>
                       <td>{x.received ? '✓' : <input type="checkbox" checked={sel.has(k)} onChange={(e) => toggle(k, e.target.checked)} aria-label={bi('Choose', 'ಆರಿಸಿ')} />}</td>
                       <td>
-                        {nameOf(x.itemId)}
+                        {x.nameEn ? pickName(x.nameEn, x.nameKn ?? '', lang) : nameOf(x.itemId)}
                         <div className="muted">
-                          #{p?.no ?? x.poId.replace(/^po_/, '')} {supName(p)}
+                          {(p?.no ?? x.poNo) ? '#' + (p?.no ?? x.poNo) : ''} {x.supplierName || supName(p)}
                           {x.received && ' · ' + bi('received', 'ಬಂದಿದೆ')}
                         </div>
                       </td>
                       <td className="num">
-                        {qty} {unitOf(p, x.itemId)}
+                        {qty} {(lang === 'kn' && x.unitLabelKn) || x.unitLabel || unitOf(p, x.itemId)}
                       </td>
                       <td className="num">
                         <input inputMode="decimal" className="in-price" value={rates[ld.id + '|' + k] ?? String(x.ratePerUnit)} onChange={(e) => setRates({ ...rates, [ld.id + '|' + k]: e.target.value })} aria-label={bi('Delivery ₹ / unit', 'ಸಾಗಣೆ ₹ / ಘಟಕ')} />
@@ -203,6 +209,11 @@ export function CarrierLoads({ orders, sups, items, carriers, lang, onDone }: { 
           </div>
         );
       })}
+      {waitingLoads.length > shown.length && (
+        <button className="btn small mt-8" onClick={() => setShownCount((n) => n + PAGE)}>
+          {bi('Show more', 'ಇನ್ನಷ್ಟು ತೋರಿಸಿ')} ({waitingLoads.length - shown.length})
+        </button>
+      )}
       {sel.size > 0 && (
         <div className="card mt-8">
           <b>

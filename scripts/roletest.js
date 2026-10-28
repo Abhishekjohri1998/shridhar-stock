@@ -268,7 +268,7 @@ async function main() {
     eq('and the short tin in the ledger', oilMove && oilMove.note, '1 tin short');
     const po2 = await call('/admin/pos', T.admin, { supplierId: sup.body.id, to: 'loc_g1', lines: [{ itemId: 'it_goil', unit: 'tin', qty: 1, cost: 2500 }] });
     eq('an order can be cancelled', (await call('/admin/pos/' + po2.body.id + '/cancel', T.admin, {})).status, 200);
-    eq('but not received after', (await call('/admin/pos/' + po2.body.id + '/receive', T.admin, {})).status, 409);
+    eq('and, nothing received, it is gone (so it cannot be received)', (await call('/admin/pos/' + po2.body.id + '/receive', T.admin, {})).status, 404);
     const mus0 = await gq('it_mustard', 'loc_shop');
     eq('an old dispatched order is received, into another place', (await call('/admin/pos/po_2/receive', T.admin, { to: 'loc_shop' })).status, 200);
     eq('and its goods arrive there', await gq('it_mustard', 'loc_shop'), mus0 + 60);
