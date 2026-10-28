@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { expiringWithin, findUnit, openLoadLines, unallottedQty, VENDOR_CARRIER, landedUnitCost, poStage, priceVolatility, receivedQty, round2, soonestExpiry, unitCostsFrom, type BillMirror, type Carrier, type CarrierLoad, type CarrierTrip, type LoadLine, type Lot, type PurchaseOrder, type Supplier } from '@stock/core';
+import { expiringWithin, findUnit, loadCharge, loadTotal, openLoadLines, unallottedQty, VENDOR_CARRIER, landedUnitCost, poStage, priceVolatility, receivedQty, round2, soonestExpiry, unitCostsFrom, type BillMirror, type Carrier, type CarrierLoad, type CarrierTrip, type LoadLine, type Lot, type PurchaseOrder, type Supplier } from '@stock/core';
 import { audit, requireRole, who } from '../auth';
 import { receiveGoods, type ReceiveInput } from './actions';
 import { handler, HttpError } from '../http';
@@ -323,7 +323,7 @@ purchasingRoutes.get(
   handler(async (req, res) => {
     const repo = getRepo();
     const [all, items, pos, sups] = await Promise.all([repo.listDocs<CarrierLoad>('loads', { sort: { date: -1, at: -1 }, limit: 200 }), repo.listItems(), repo.listDocs<PurchaseOrder>('pos'), repo.listDocs<Supplier>('suppliers')]);
-    const loads = req.query.waiting === '1' ? all.filter((l) => l.lines.some((x) => !x.received)) : all;
+    const loads = req.query.waiting === '1' ? all.filter((l) => !l.done && l.lines.some((x) => !x.received)) : all;
     const itemOf = new Map(items.map((i) => [i.id, i]));
     const poOf = new Map(pos.map((p) => [p.id, p]));
     const supOf = new Map(sups.map((x) => [x.id, x.name]));
@@ -544,6 +544,71 @@ purchasingRoutes.post(
 );
 
 /**
+ * Sets one load line's delivery rate per unit. On a line already received, the receipt's delivery
+ * share and landed cost are worked out again, and the item's cost follows when this receipt set it
+ * and is still its latest. The orders touched are kept in `pos` (the caller saves them). True when
+ * an item's cost changed.
+ */
+async function setLineRate(ld: CarrierLoad, line: LoadLine, rate: number, pos: Map<string, PurchaseOrder>): Promise<boolean> {
+  const repo = getRepo();
+  const from = line.ratePerUnit || 0;
+  line.ratePerUnit = rate;
+  if (!line.received) return false;
+  const p = pos.get(line.poId) ?? (await repo.getDoc<PurchaseOrder>('pos', line.poId));
+  if (!p) return false;
+  pos.set(p.id, p);
+  const rc = (p.received ?? []).find((x) => x.itemId === line.itemId && x.loadId === ld.id && (x.receipt ?? 1) === line.received!.receipt);
+  if (!rc) return false;
+  const oldLanded = rc.landed ?? rc.cost;
+  const delivery = round2(Math.max(0, (rc.delivery ?? 0) - from * rc.qty + rate * rc.qty));
+  const landed = landedUnitCost(rc.cost, rc.qty, delivery);
+  rc.ratePerUnit = rate;
+  if (delivery > 0) {
+    rc.delivery = delivery;
+    rc.landed = landed;
+  } else {
+    delete rc.delivery;
+    delete rc.landed;
+  }
+  // The item's cost follows when this receipt set it and is still the item's latest.
+  const unit = p.lines.find((x) => x.itemId === line.itemId)?.unit;
+  const item = unit ? await repo.getItem(line.itemId) : null;
+  const u = item && unit ? findUnit(item, unit) : undefined;
+  if (!item || !unit || !u || u.cost == null || Math.abs(u.cost - round2(oldLanded)) > 0.005) return false;
+  const all = await repo.listDocs<PurchaseOrder>('pos', { filter: { 'received.itemId': line.itemId }, fields: ['received'] });
+  const latest = all.flatMap((q) => (q.received ?? []).filter((x) => x.itemId === line.itemId && x.qty > 0 && x.at)).reduce((m, x) => (x.at! > m ? x.at! : m), '');
+  if (!rc.at || rc.at < latest) return false;
+  item.units = unitCostsFrom(item.units, unit, landed);
+  item.updatedAt = now();
+  await repo.saveItem(item);
+  return true;
+}
+
+/**
+ * Shares a load's one trip charge by quantity over every unit that arrived on it: each received
+ * line's rate becomes charge / units, so its receipt's landed cost (and the item's cost, as with
+ * rates) includes its share; the change goes in the load's history. Saves the orders; the caller
+ * saves the load. True when an item's cost changed.
+ */
+async function applyTripCharge(ld: CarrierLoad, by: string): Promise<boolean> {
+  if (ld.tripCharge == null) return false;
+  const got = ld.lines.filter((x) => x.received && x.received.qty > 0);
+  const units = got.reduce((n, x) => n + x.received!.qty, 0);
+  const rate = units > 0 ? ld.tripCharge / units : 0;
+  const pos = new Map<string, PurchaseOrder>();
+  const changes: { poId: string; itemId: string; from: number; to: number }[] = [];
+  let itemsChanged = false;
+  for (const x of got) {
+    if (Math.abs((x.ratePerUnit || 0) - rate) < 1e-9) continue;
+    changes.push({ poId: x.poId, itemId: x.itemId, from: x.ratePerUnit || 0, to: rate });
+    if (await setLineRate(ld, x, rate, pos)) itemsChanged = true;
+  }
+  if (changes.length) ld.history.push({ at: now(), by, action: 'rate', lines: changes, note: 'trip charge ' + round2(ld.tripCharge) + ' over ' + Math.round(units * 1e6) / 1e6 + ' units' });
+  for (const p of pos.values()) await getRepo().putDoc('pos', p);
+  return itemsChanged;
+}
+
+/**
  * Sets delivery rates per unit. On a line already received, the receipt's delivery share and
  * landed cost are worked out again, and the item's cost follows when this receipt set it and is
  * still its latest. Every change is in the load's history.
@@ -563,38 +628,8 @@ purchasingRoutes.put(
       if (!line) throw new HttpError(400, 'That line is not on this load');
       const from = line.ratePerUnit;
       if (Math.abs(from - r.ratePerUnit) < 1e-9) continue;
-      line.ratePerUnit = r.ratePerUnit;
       changes.push({ poId: r.poId, itemId: r.itemId, from, to: r.ratePerUnit });
-      if (!line.received) continue;
-      // The receipt's line, worked out again.
-      const p = pos.get(r.poId) ?? (await repo.getDoc<PurchaseOrder>('pos', r.poId));
-      if (!p) continue;
-      pos.set(p.id, p);
-      const rc = (p.received ?? []).find((x) => x.itemId === r.itemId && x.loadId === ld.id && (x.receipt ?? 1) === line.received!.receipt);
-      if (!rc) continue;
-      const oldLanded = rc.landed ?? rc.cost;
-      const delivery = round2(Math.max(0, (rc.delivery ?? 0) - from * rc.qty + r.ratePerUnit * rc.qty));
-      const landed = landedUnitCost(rc.cost, rc.qty, delivery);
-      rc.ratePerUnit = r.ratePerUnit;
-      if (delivery > 0) {
-        rc.delivery = delivery;
-        rc.landed = landed;
-      } else {
-        delete rc.delivery;
-        delete rc.landed;
-      }
-      // The item's cost follows when this receipt set it and is still the item's latest.
-      const unit = p.lines.find((x) => x.itemId === r.itemId)?.unit;
-      const item = unit ? await repo.getItem(r.itemId) : null;
-      const u = item && unit ? findUnit(item, unit) : undefined;
-      if (!item || !unit || !u || u.cost == null || Math.abs(u.cost - round2(oldLanded)) > 0.005) continue;
-      const all = await repo.listDocs<PurchaseOrder>('pos', { filter: { 'received.itemId': r.itemId }, fields: ['received'] });
-      const latest = all.flatMap((q) => (q.received ?? []).filter((x) => x.itemId === r.itemId && x.qty > 0 && x.at)).reduce((m, x) => (x.at! > m ? x.at! : m), '');
-      if (!rc.at || rc.at < latest) continue;
-      item.units = unitCostsFrom(item.units, unit, landed);
-      item.updatedAt = now();
-      await repo.saveItem(item);
-      itemsChanged = true;
+      if (await setLineRate(ld, line, r.ratePerUnit, pos)) itemsChanged = true;
     }
     if (changes.length) {
       ld.history.push({ at: now(), by: audit(req).by, action: 'rate', lines: changes });
@@ -641,8 +676,11 @@ async function openOrders(): Promise<PurchaseOrder[]> {
   return (await getRepo().listDocs<PurchaseOrder>('pos')).filter((p) => poStage(p.status) === 'ordered');
 }
 
+/** A load something was stored from on Arriving (Update) and not yet Finished: it stays on Arriving. */
+const stillOpen = (l: CarrierLoad) => !l.done && l.history.some((h) => h.action === 'stored');
+
 async function waitingLoads(): Promise<CarrierLoad[]> {
-  return (await getRepo().listDocs<CarrierLoad>('loads', { sort: { date: -1, at: -1 }, limit: 1000 })).filter((l) => openLoadLines(l).length > 0 || l.lines.length === 0);
+  return (await getRepo().listDocs<CarrierLoad>('loads', { sort: { date: -1, at: -1 }, limit: 1000 })).filter((l) => !l.done && (openLoadLines(l).length > 0 || l.lines.length === 0 || stillOpen(l)));
 }
 
 /** Per vendor, the open order lines with what is still unallotted, and which loads hold the rest. */
@@ -744,7 +782,7 @@ purchasingRoutes.get(
     const repo = getRepo();
     const canRate = who(req).role === 'admin';
     const [loads, carriers, suppliers, items, locs] = await Promise.all([waitingLoads(), repo.listDocs<Carrier>('carriers'), repo.listDocs<Supplier>('suppliers'), repo.listItems(), repo.listLocations()]);
-    const open = loads.filter((l) => openLoadLines(l).length);
+    const open = loads.filter((l) => openLoadLines(l).length || stillOpen(l));
     const poIds = [...new Set(open.flatMap((l) => openLoadLines(l).map((x) => x.poId)))];
     const pos = new Map<string, PurchaseOrder>();
     for (const id of poIds) {
@@ -770,6 +808,7 @@ purchasingRoutes.get(
     const carName = new Map(carriers.map((c) => [c.id, c.name]));
     const sup = new Map(suppliers.map((s) => [s.id, s.name]));
     const item = new Map(items.map((i) => [i.id, i]));
+    const placeOf = new Map(locs.map((l) => [l.id, l]));
     const out = open
       .map((l) => {
         const vendors = new Map<string, { supplierId: string; name: string; lines: unknown[] }>();
@@ -780,7 +819,7 @@ purchasingRoutes.get(
           const it = item.get(x.itemId);
           const placeId = lastPlace.get(x.itemId)?.placeId ?? (isActive(linked) ? linked : undefined) ?? (isActive(p.to) ? p.to : undefined) ?? active[0]?.id;
           const v = vendors.get(p.supplierId) ?? { supplierId: p.supplierId, name: sup.get(p.supplierId) ?? p.supplierId, lines: [] };
-          v.lines.push({ poId: p.id, poNo: p.no, itemId: x.itemId, nameEn: it?.nameEn ?? x.itemId, nameKn: it?.nameKn ?? '', unit: pl?.unit ?? '', onLoad: x.qty, received: receivedQty(p, x.itemId), due: dueOf(p, x.itemId), ...(canRate ? { ratePerUnit: x.ratePerUnit } : {}), ...(placeId ? { placeId } : {}) });
+          v.lines.push({ poId: p.id, poNo: p.no, itemId: x.itemId, nameEn: it?.nameEn ?? x.itemId, nameKn: it?.nameKn ?? '', unit: pl?.unit ?? '', onLoad: x.qty, received: receivedQty(p, x.itemId), due: dueOf(p, x.itemId), ...(placeId ? { placeId } : {}) });
           vendors.set(p.supplierId, v);
         }
         return {
@@ -791,10 +830,21 @@ purchasingRoutes.get(
           ...(l.driverName ? { driverName: l.driverName } : {}),
           date: l.date,
           notes: l.notes ?? '',
+          ...(canRate ? { tripCharge: loadCharge(l) } : {}),
+          // What was stored so far (each Update), oldest first.
+          stored: l.history
+            .filter((h) => h.action === 'stored')
+            .flatMap((h) =>
+              (h.lines ?? []).map((x) => {
+                const it = item.get(x.itemId);
+                const pl = placeOf.get(x.placeId ?? '');
+                return { at: h.at, itemId: x.itemId, qty: x.qty ?? 0, unit: x.unit ?? '', nameEn: it?.nameEn ?? x.itemId, nameKn: it?.nameKn ?? '', placeName: pl?.name ?? '', placeNameKn: pl?.nameKn ?? '' };
+              }),
+            ),
           vendors: [...vendors.values()].sort((a, b) => a.name.localeCompare(b.name)),
         };
       })
-      .filter((l) => l.vendors.length);
+      .filter((l) => l.vendors.length || l.stored.length);
     res.json({ loads: out, places: active.map((l) => ({ id: l.id, name: l.name, nameKn: l.nameKn })), canRate });
   }),
 );
@@ -812,16 +862,18 @@ purchasingRoutes.post(
       .object({
         notes: z.string().trim().max(1000).optional(),
         updateCost: z.boolean().optional(),
+        /** The trip's one delivery charge (admin only; a worker's is ignored). */
+        charge: z.number().min(0).max(1e7).optional(),
         lines: z
           .array(
             z.object({
               poId: z.string().min(1),
               itemId: z.string().min(1),
               arrived: z.number().min(0).max(1e6).default(0),
+              /** Old bodies: ignored (the delivery charge is one total per trip now). */
               ratePerUnit: z.number().min(0).max(1e6).optional(),
               remove: z.boolean().optional(),
               placeId: z.string().min(1).optional(),
-              places: z.array(z.object({ placeId: z.string().min(1), qty: z.number().min(0).max(1e6) })).max(20).optional(),
             }),
           )
           .max(300)
@@ -831,6 +883,7 @@ purchasingRoutes.post(
     const repo = getRepo();
     const canRate = who(req).role === 'admin';
     const ld = await loadById(String(req.params.loadId));
+    if (ld.done) throw new HttpError(409, 'This load is finished already');
     if (new Set(b.lines.map((l) => lineKey(l.poId, l.itemId))).size !== b.lines.length) throw new HttpError(400, 'A line is there twice');
     const by = audit(req).by;
     const at = now();
@@ -840,16 +893,7 @@ purchasingRoutes.post(
       if (!x) throw new HttpError(400, 'That item is not waiting on this load');
       if (!l.remove && l.arrived > x.qty + 1e-9) throw new HttpError(400, 'More arrived than was on this load: count again');
     }
-    // Rates (admin only): set on the waiting line before posting.
-    const rateChanges: { poId: string; itemId: string; from: number; to: number }[] = [];
-    if (canRate)
-      for (const l of b.lines) {
-        const x = openOf(l)!;
-        if (l.ratePerUnit == null || Math.abs(l.ratePerUnit - x.ratePerUnit) < 1e-9) continue;
-        rateChanges.push({ poId: l.poId, itemId: l.itemId, from: x.ratePerUnit, to: l.ratePerUnit });
-        x.ratePerUnit = l.ratePerUnit;
-      }
-    if (rateChanges.length) ld.history.push({ at, by, action: 'rate', lines: rateChanges });
+    if (canRate && b.charge != null) setCharge(ld, b.charge, by, at);
     // Removed: off the load, back to unallotted.
     const removed = b.lines.filter((l) => l.remove).map((l) => openOf(l)!);
     if (removed.length) {
@@ -870,6 +914,9 @@ purchasingRoutes.post(
     }
     const vendorBrings = ld.carrierId === VENDOR_CARRIER;
     const got: { poId: string; itemId: string; qty: number }[] = [];
+    const stored: { poId: string; itemId: string; qty: number; unit: string; placeId: string; name: string }[] = [];
+    const [allItems, locs] = arrived.length ? await Promise.all([repo.listItems(), repo.listLocations()]) : [[], []];
+    const itemOf = new Map(allItems.map((i) => [i.id, i]));
     for (const [poId, lines] of byPo) {
       const p = pos.get(poId)!;
       const mine = new Map(lines.map((l) => [l.itemId, l]));
@@ -877,7 +924,7 @@ purchasingRoutes.post(
         updateCost: canRate && b.updateCost === true,
         got: Object.fromEntries(p.lines.map((pl) => {
           const l = mine.get(pl.itemId);
-          return [pl.itemId, l ? { qty: l.arrived, ...(l.places ? { places: l.places } : l.placeId ? { placeId: l.placeId } : {}) } : { qty: 0 }];
+          return [pl.itemId, l ? { qty: l.arrived, ...(l.placeId ? { placeId: l.placeId } : {}) } : { qty: 0 }];
         })),
       };
       const rates = new Map(lines.map((l) => [l.itemId, { loadId: ld.id, rate: openOf(l)!.ratePerUnit }]));
@@ -898,9 +945,19 @@ purchasingRoutes.post(
         x.received = { qty: l.arrived, receipt, at };
         if (rest > 0) ld.lines.push({ poId: x.poId, itemId: x.itemId, qty: rest, ratePerUnit: x.ratePerUnit });
         got.push({ poId: x.poId, itemId: x.itemId, qty: l.arrived });
+        const unit = p.lines.find((y) => y.itemId === l.itemId)?.unit ?? '';
+        const it = itemOf.get(l.itemId);
+        const u = it ? findUnit(it, unit) : undefined;
+        const placeId = l.placeId ?? p.to ?? '';
+        stored.push({ poId: x.poId, itemId: x.itemId, qty: l.arrived, unit: u?.label || unit, placeId, name: it?.nameEn ?? l.itemId });
       }
     }
     if (got.length) ld.history.push({ at, by, action: 'received', lines: got });
+    // The log: "2 Box Parle-G → Shop", one entry per Update.
+    if (stored.length) {
+      const placeName = new Map(locs.map((l) => [l.id, l.name]));
+      ld.history.push({ at, by, action: 'stored', lines: stored.map(({ name: _n, ...x }) => x), note: stored.map((x) => x.qty + ' ' + x.unit + ' ' + x.name + ' → ' + (placeName.get(x.placeId) ?? x.placeId)).join(' · ') });
+    }
     if (b.notes != null && b.notes !== (ld.notes ?? '')) {
       if (b.notes) ld.notes = b.notes;
       else delete ld.notes;
@@ -910,5 +967,65 @@ purchasingRoutes.post(
     emit('pos');
     const waiting = openLoadLines(ld).reduce((n, x) => n + x.qty, 0);
     res.json({ ok: true, posted: r6(got.reduce((n, x) => n + x.qty, 0)), waiting: r6(waiting), removed: removed.length });
+  }),
+);
+
+/** Sets a load's one trip charge, with the change in its history. */
+function setCharge(ld: CarrierLoad, charge: number, by: string, at: string): boolean {
+  const from = ld.tripCharge;
+  if (from != null && Math.abs(from - charge) < 0.005) return false;
+  ld.tripCharge = round2(charge);
+  ld.history.push({ at, by, action: 'charge', note: (from != null ? round2(from) : loadTotal(ld.lines)) + ' → ' + ld.tripCharge });
+  return true;
+}
+
+/**
+ * Finish: closes one carrier's load. What did not arrive goes back to Allot (off the load, the
+ * order line unallotted again); the load is done and leaves Arriving. The trip charge (admin) is
+ * shared over every unit that arrived on it, into each receipt's landed cost.
+ */
+purchasingRoutes.post(
+  '/arriving/:loadId/finish',
+  anyWorker,
+  handler(async (req, res) => {
+    const b = z.object({ notes: z.string().trim().max(1000).optional(), charge: z.number().min(0).max(1e7).optional() }).parse(req.body ?? {});
+    const repo = getRepo();
+    const canRate = who(req).role === 'admin';
+    const ld = await loadById(String(req.params.loadId));
+    if (ld.done) throw new HttpError(409, 'This load is finished already');
+    const by = audit(req).by;
+    const at = now();
+    if (canRate && b.charge != null) setCharge(ld, b.charge, by, at);
+    if (b.notes != null && b.notes !== (ld.notes ?? '')) {
+      if (b.notes) ld.notes = b.notes;
+      else delete ld.notes;
+      ld.history.push({ at, by, action: 'notes', note: b.notes });
+    }
+    const back = openLoadLines(ld);
+    ld.lines = ld.lines.filter((x) => x.received);
+    ld.done = { at, by };
+    ld.history.push({ at, by, action: 'finish', lines: back.map((x) => ({ poId: x.poId, itemId: x.itemId, qty: x.qty })), note: 'back to Allot' });
+    const itemsChanged = await applyTripCharge(ld, by);
+    await repo.putDoc('loads', ld);
+    emit('pos');
+    if (itemsChanged) emit('items');
+    res.json({ ok: true, back: Math.round(back.reduce((n, x) => n + x.qty, 0) * 1e6) / 1e6, tripCharge: loadCharge(ld) });
+  }),
+);
+
+/** The trip's delivery charge, set or changed later (admin): on a finished load it goes into the landed costs again. */
+purchasingRoutes.put(
+  '/arriving/:loadId/charge',
+  admin,
+  handler(async (req, res) => {
+    const b = z.object({ charge: z.number().min(0).max(1e7) }).parse(req.body);
+    const ld = await loadById(String(req.params.loadId));
+    const by = audit(req).by;
+    setCharge(ld, b.charge, by, now());
+    const itemsChanged = ld.done ? await applyTripCharge(ld, by) : false;
+    await getRepo().putDoc('loads', ld);
+    emit('pos');
+    if (itemsChanged) emit('items');
+    res.json({ ok: true, tripCharge: loadCharge(ld) });
   }),
 );

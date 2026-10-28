@@ -240,8 +240,17 @@ interface ArrLine {
   onLoad: number;
   received: number;
   due: number;
-  ratePerUnit?: number;
   placeId?: string;
+}
+interface ArrStored {
+  at: string;
+  itemId: string;
+  qty: number;
+  unit: string;
+  nameEn: string;
+  nameKn: string;
+  placeName: string;
+  placeNameKn: string;
 }
 interface ArrLoad {
   id: string;
@@ -251,6 +260,9 @@ interface ArrLoad {
   driverName?: string;
   date: string;
   notes: string;
+  /** The trip's one delivery charge: only sent to the admin. */
+  tripCharge?: number;
+  stored: ArrStored[];
   vendors: { supplierId: string; name: string; lines: ArrLine[] }[];
 }
 interface ArrView {
@@ -259,7 +271,7 @@ interface ArrView {
   canRate: boolean;
 }
 
-/** Arriving: for the admin (with delivery ₹/unit) and the worker screens (without). */
+/** Arriving: for the admin (with the trip's delivery charge) and the worker screens (without). */
 export function ArrivingTab({ onDone }: { onDone?: (msg: string) => void }) {
   const [lim, setLim] = useState(PAGE);
   const bi = useBi();
@@ -297,61 +309,63 @@ export function ArrivingTab({ onDone }: { onDone?: (msg: string) => void }) {
   );
 }
 
+/**
+ * One carrier's load. Update: the ticked units go into stock at each item's "Store in" place and
+ * a line is logged ("2 Box Parle-G → Shop"); the rest stays on the load. Finish: the load closes,
+ * what did not come goes back to Allot.
+ */
 function ArrivingLoad({ ld, places, canRate, onDone }: { ld: ArrLoad; places: ArrView['places']; canRate: boolean; onDone: (m: string) => void }) {
   const bi = useBi();
   const { lang } = useSession();
   const all = ld.vendors.flatMap((v) => v.lines);
   const [count, setCount] = useState<Record<string, number>>({});
-  const [rate, setRate] = useState<Record<string, string>>(() => Object.fromEntries(all.map((l) => [keyOf(l.poId, l.itemId), l.ratePerUnit != null ? String(l.ratePerUnit) : ''])));
-  const [del, setDel] = useState<Set<string>>(new Set());
   const [storeIn, setStoreIn] = useState<Record<string, string>>(() => Object.fromEntries(all.map((l) => [keyOf(l.poId, l.itemId), l.placeId ?? places[0]?.id ?? ''])));
-  const [split, setSplit] = useState<Record<string, Record<string, string>>>({});
   const [notes, setNotes] = useState(ld.notes);
+  const [charge, setCharge] = useState(ld.tripCharge ? String(ld.tripCharge) : '');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const splitSum = (k: string) => r3(Object.values(split[k] ?? {}).reduce((n, x) => n + (Number(x) || 0), 0));
-  const splitBad = (k: string) => !!split[k] && !del.has(k) && (count[k] ?? 0) > 0 && Math.abs(splitSum(k) - (count[k] ?? 0)) > 1e-6;
-  const anyBad = all.some((l) => splitBad(keyOf(l.poId, l.itemId)));
-  const into = r3(all.reduce((n, l) => n + (del.has(keyOf(l.poId, l.itemId)) ? 0 : (count[keyOf(l.poId, l.itemId)] ?? 0)), 0));
-  const removed = all.filter((l) => del.has(keyOf(l.poId, l.itemId)));
-  const stay = r3(all.reduce((n, l) => n + (del.has(keyOf(l.poId, l.itemId)) ? 0 : l.onLoad - (count[keyOf(l.poId, l.itemId)] ?? 0)), 0));
-  const changedRate = canRate && all.some((l) => rate[keyOf(l.poId, l.itemId)] !== String(l.ratePerUnit ?? ''));
-  const nothing = !into && !removed.length && notes === ld.notes && !changedRate;
-  const save = async () => {
-    const summary =
-      bi(into + ' units into stock, ' + stay + ' stay waiting', into + ' ಘಟಕ ಸ್ಟಾಕಿಗೆ, ' + stay + ' ಕಾಯುತ್ತವೆ') + (removed.length ? bi(', ' + removed.length + ' taken off this carrier', ', ' + removed.length + ' ಈ ಸಾಗಣೆದಾರರಿಂದ ತೆಗೆದಿದೆ') : '') + '. ' + bi('Save?', 'ಉಳಿಸಬೇಕೆ?');
-    if (!window.confirm(summary)) return;
+  const into = r3(all.reduce((n, l) => n + (count[keyOf(l.poId, l.itemId)] ?? 0), 0));
+  const waiting = r3(all.reduce((n, l) => n + l.onLoad, 0));
+  const chargeBody = () => (canRate && charge.trim() !== '' && Number(charge) !== (ld.tripCharge ?? 0) ? { charge: Number(charge) || 0 } : {});
+  const chargeBad = canRate && charge.trim() !== '' && !(Number(charge) >= 0);
+  const run = async (f: () => Promise<unknown>, msg: string) => {
     setErr('');
     setBusy(true);
     try {
-      const lines = all
-        .map((l) => {
-          const k = keyOf(l.poId, l.itemId);
-          const n = count[k] ?? 0;
-          const r = canRate && rate[k] !== String(l.ratePerUnit ?? '') && rate[k] !== '' ? { ratePerUnit: Number(rate[k]) || 0 } : {};
-          if (del.has(k)) return { poId: l.poId, itemId: l.itemId, arrived: 0, remove: true };
-          if (!n && !('ratePerUnit' in r)) return null;
-          const where = split[k] ? { places: places.map((p) => ({ placeId: p.id, qty: Number(split[k]![p.id]) || 0 })).filter((p) => p.qty > 0) } : storeIn[k] ? { placeId: storeIn[k] } : {};
-          return { poId: l.poId, itemId: l.itemId, arrived: n, ...r, ...(n ? where : {}) };
-        })
-        .filter((x) => x != null);
-      await http.post('/arriving/' + ld.id + '/save', { notes: notes.trim(), lines });
-      onDone(bi('Saved: ' + into + ' units into stock, ' + stay + ' stay waiting.', 'ಉಳಿಸಲಾಗಿದೆ: ' + into + ' ಘಟಕ ಸ್ಟಾಕಿಗೆ, ' + stay + ' ಕಾಯುತ್ತವೆ.'));
+      await f();
+      onDone(msg);
     } catch (e) {
       setErr((e as Error).message);
       setBusy(false);
     }
   };
+  const update = () =>
+    run(
+      () =>
+        http.post('/arriving/' + ld.id + '/save', {
+          notes: notes.trim(),
+          ...chargeBody(),
+          lines: all
+            .map((l) => {
+              const k = keyOf(l.poId, l.itemId);
+              const n = count[k] ?? 0;
+              return n ? { poId: l.poId, itemId: l.itemId, arrived: n, ...(storeIn[k] ? { placeId: storeIn[k] } : {}) } : null;
+            })
+            .filter((x) => x != null),
+        }),
+      bi('Updated: ' + into + ' units into stock, ' + r3(waiting - into) + ' still on the load.', 'ಉಳಿಸಲಾಗಿದೆ: ' + into + ' ಘಟಕ ಸ್ಟಾಕಿಗೆ, ' + r3(waiting - into) + ' ಇನ್ನೂ ಸಾಗಣೆಯಲ್ಲಿ.'),
+    );
+  const finish = () => {
+    if (!window.confirm(bi(waiting + ' units go back to Allot. Finish this load?', waiting + ' ಘಟಕ ಮತ್ತೆ ಹಾಕುವುದಕ್ಕೆ ಹೋಗುತ್ತವೆ. ಈ ಸಾಗಣೆ ಮುಗಿಸಬೇಕೆ?'))) return;
+    return run(() => http.post('/arriving/' + ld.id + '/finish', { notes: notes.trim(), ...chargeBody() }), bi('Finished: ' + waiting + ' units back to Allot.', 'ಮುಗಿದಿದೆ: ' + waiting + ' ಘಟಕ ಮತ್ತೆ ಹಾಕುವುದಕ್ಕೆ.'));
+  };
   return (
     <div className="card" data-tour="arriving-carrier">
       <b>{ld.carrierId === VENDOR ? bi('Vendor brings it', 'ಮಾರಾಟಗಾರರೇ ತರುತ್ತಾರೆ') : ld.carrierName}</b>
-      <div className="muted">
-        {[ld.vehicleNo, ld.driverName, ld.date].filter(Boolean).join(' · ')}
-      </div>
+      <div className="muted">{[ld.vehicleNo, ld.driverName, ld.date].filter(Boolean).join(' · ')}</div>
       {err && <div className="msg err">{err}</div>}
       {ld.vendors.map((v) => {
-        const open = v.lines.filter((l) => !del.has(keyOf(l.poId, l.itemId)));
-        const allOn = open.length > 0 && open.every((l) => (count[keyOf(l.poId, l.itemId)] ?? 0) >= l.onLoad);
+        const allOn = v.lines.length > 0 && v.lines.every((l) => (count[keyOf(l.poId, l.itemId)] ?? 0) >= l.onLoad);
         return (
           <div className="card mt-8" key={v.supplierId} data-tour="arriving-vendor">
             <div className="bar">
@@ -362,7 +376,7 @@ function ArrivingLoad({ ld, places, canRate, onDone }: { ld: ArrLoad; places: Ar
                   checked={allOn}
                   onChange={(e) => {
                     const n = { ...count };
-                    for (const l of open) n[keyOf(l.poId, l.itemId)] = e.target.checked ? l.onLoad : 0;
+                    for (const l of v.lines) n[keyOf(l.poId, l.itemId)] = e.target.checked ? l.onLoad : 0;
                     setCount(n);
                   }}
                 />
@@ -373,87 +387,53 @@ function ArrivingLoad({ ld, places, canRate, onDone }: { ld: ArrLoad; places: Ar
               const k = keyOf(l.poId, l.itemId);
               const c = count[k] ?? 0;
               const name = pickName(l.nameEn, l.nameKn, lang);
-              const gone = del.has(k);
               const set = (n: number) => setCount({ ...count, [k]: n });
               return (
                 <div className="tick-row" key={k}>
                   <div className="bar mb-0">
-                    <span className={'grow' + (gone ? ' muted' : '')}>
+                    <span className="grow">
                       {name} · {l.unit} · {bi('on load ', 'ಸಾಗಣೆಯಲ್ಲಿ ')}
                       {l.onLoad}
                     </span>
-                    {!gone && <CountBox max={l.onLoad} count={c} onChange={set} label={bi('Arrived', 'ಬಂದದ್ದು')} />}
-                    <button
-                      type="button"
-                      className={'chip' + (gone ? ' on' : '')}
-                      onClick={() => {
-                        const n = new Set(del);
-                        if (gone) n.delete(k);
-                        else n.add(k);
-                        setDel(n);
-                      }}
-                      title={bi('Take it off this carrier: back to "not yet allotted"', 'ಈ ಸಾಗಣೆದಾರರಿಂದ ತೆಗೆಯಿರಿ: ಮತ್ತೆ "ಹಾಕಿಲ್ಲ"ಕ್ಕೆ')}
-                    >
-                      {gone ? bi('Undo', 'ರದ್ದು') : bi('Del', 'ತೆಗೆ')}
-                    </button>
+                    <CountBox max={l.onLoad} count={c} onChange={set} label={bi('Arrived', 'ಬಂದದ್ದು')} />
                   </div>
-                  {!gone && (
-                    <>
-                      <TickBoxes max={l.onLoad} count={c} onChange={set} label={name} />
-                      <div className="bar mt-6">
-                        {canRate && (
-                          <label className="field mb-0">
-                            <span>{bi('Delivery ₹/unit', 'ಸಾಗಣೆ ₹/ಘಟಕ')}</span>
-                            <input inputMode="decimal" className="in-price" value={rate[k] ?? ''} onChange={(e) => setRate({ ...rate, [k]: e.target.value })} aria-label={bi('Delivery charge per unit', 'ಪ್ರತಿ ಘಟಕ ಸಾಗಣೆ ವೆಚ್ಚ')} />
-                          </label>
-                        )}
-                        {!split[k] && (
-                          <label className="field grow mb-0">
-                            <span>{bi('Store in', 'ಇಡುವುದು')}</span>
-                            <Select value={storeIn[k] ?? ''} onChange={(x) => setStoreIn({ ...storeIn, [k]: x })} aria-label={bi('Store in', 'ಇಡುವುದು')} options={places.map((x) => ({ value: x.id, label: pickName(x.name, x.nameKn, lang) }))} />
-                          </label>
-                        )}
-                        <button
-                          type="button"
-                          className={'chip' + (split[k] ? ' on' : '')}
-                          onClick={() => (split[k] ? setSplit(Object.fromEntries(Object.entries(split).filter(([x]) => x !== k))) : setSplit({ ...split, [k]: Object.fromEntries(places.map((x) => [x.id, x.id === storeIn[k] && c ? String(c) : ''])) }))}
-                        >
-                          {bi('Split', 'ಹಂಚಿ')}
-                        </button>
-                      </div>
-                      {split[k] && (
-                        <div className="split-places">
-                          {places.map((x) => (
-                            <label key={x.id} className="bar mb-0">
-                              <span className="grow">{pickName(x.name, x.nameKn, lang)}</span>
-                              <input inputMode="decimal" className="in-qty" value={split[k]![x.id] ?? ''} onChange={(e) => setSplit({ ...split, [k]: { ...split[k]!, [x.id]: e.target.value } })} aria-label={pickName(x.name, x.nameKn, lang)} /> {l.unit}
-                            </label>
-                          ))}
-                          <div className={splitBad(k) ? 'msg err' : 'muted'} aria-live="polite">
-                            {splitSum(k)} / {c} {l.unit}
-                            {splitBad(k) && ' · ' + bi('must add up to what arrived', 'ಬಂದದ್ದಕ್ಕೆ ಸಮ ಆಗಬೇಕು')}
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )}
+                  <TickBoxes max={l.onLoad} count={c} onChange={set} label={name} />
+                  <div className="bar mt-6">
+                    <label className="field grow mb-0">
+                      <span>{bi('Store in', 'ಇಡುವುದು')}</span>
+                      <Select value={storeIn[k] ?? ''} onChange={(x) => setStoreIn({ ...storeIn, [k]: x })} aria-label={bi('Store in', 'ಇಡುವುದು')} options={places.map((x) => ({ value: x.id, label: pickName(x.name, x.nameKn, lang) }))} />
+                    </label>
+                  </div>
                 </div>
               );
             })}
           </div>
         );
       })}
+      {ld.stored.length > 0 && (
+        <div className="mt-8" data-tour="arriving-stored">
+          <b>{bi('Stored so far', 'ಇಲ್ಲಿಯವರೆಗೆ ಇಟ್ಟದ್ದು')}</b>
+          <div className="muted">{ld.stored.map((x) => x.qty + ' ' + x.unit + ' ' + pickName(x.nameEn, x.nameKn, lang) + ' → ' + pickName(x.placeName, x.placeNameKn, lang)).join(' · ')}</div>
+        </div>
+      )}
+      {canRate && (
+        <label className="field mt-8" data-tour="arriving-charge">
+          <span>{bi('Delivery charge for this trip ₹', 'ಈ ಓಡಾಟದ ಸಾಗಣೆ ಬಾಡಿಗೆ ₹')}</span>
+          <input inputMode="decimal" className="in-price" value={charge} onChange={(e) => setCharge(e.target.value)} placeholder="0" aria-label={bi('Delivery charge for this trip', 'ಈ ಓಡಾಟದ ಸಾಗಣೆ ಬಾಡಿಗೆ')} />
+        </label>
+      )}
       <label className="field mt-8" data-tour="arriving-notes">
         <span>{bi('Notes', 'ಟಿಪ್ಪಣಿ')}</span>
         <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder={bi('Anything about this load (optional)', 'ಈ ಸಾಗಣೆಯ ಬಗ್ಗೆ ಏನಾದರೂ (ಬೇಕಿದ್ದರೆ)')} />
       </label>
       <div className="bar">
-        <button type="button" className="btn primary" disabled={busy || anyBad || nothing} onClick={save} data-tour="arriving-save">
-          {bi('Finish / Save', 'ಮುಗಿಸಿ / ಉಳಿಸಿ')}
+        <button type="button" className="btn primary" disabled={busy || chargeBad || !into} onClick={update} data-tour="arriving-save">
+          {bi('Update', 'ಉಳಿಸಿ')}
         </button>
-        <span className="muted">
-          {bi(into + ' into stock · ' + stay + ' stay waiting', into + ' ಸ್ಟಾಕಿಗೆ · ' + stay + ' ಕಾಯುತ್ತವೆ')}
-        </span>
+        <button type="button" className="btn" disabled={busy || chargeBad} onClick={finish} data-tour="arriving-finish">
+          {bi('Finish', 'ಮುಗಿಸಿ')}
+        </button>
+        <span className="muted">{bi(into + ' ticked · ' + waiting + ' on the load', into + ' ಗುರುತಿಸಿದೆ · ' + waiting + ' ಸಾಗಣೆಯಲ್ಲಿ')}</span>
       </div>
     </div>
   );

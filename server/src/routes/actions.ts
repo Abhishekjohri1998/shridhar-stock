@@ -626,7 +626,8 @@ actionRoutes.post(
 );
 
 const deliveryBody = z.object({
-  mode: z.enum(DELIVERY_MODES),
+  /** Who brings it is decided in Allot now: an order without a mode is the vendor's. */
+  mode: z.enum(DELIVERY_MODES).default('self'),
   carrierId: z.string().min(1).optional(),
   vehicleNo: z.string().trim().max(20).optional(),
   driverName: z.string().trim().max(80).optional(),

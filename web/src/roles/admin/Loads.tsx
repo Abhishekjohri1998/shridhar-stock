@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { loadTotal, pickName, poStage, receivedQty, round2, type Carrier, type CarrierLoad, type PurchaseOrder, type Supplier } from '@stock/core';
+import { loadCharge, pickName, poStage, receivedQty, type Carrier, type CarrierLoad, type PurchaseOrder, type Supplier } from '@stock/core';
 import { http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { Money, Select, Table, useBi } from '../../components/ui';
@@ -15,8 +15,8 @@ const keyOf = (poId: string, itemId: string) => poId + '|' + itemId;
 const today = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
 
 /**
- * Open: ordered lines (from any vendors' orders) ticked and moved onto a carrier's load, each with
- * its own delivery rate per unit; the load's charge is Σ rate × qty, live. A load moves to another
+ * Open: ordered lines (from any vendors' orders) ticked and moved onto a carrier's load. The
+ * trip's one delivery charge is entered on Arriving and shown here. A load moves to another
  * carrier when one backs out; lines can be moved, or left for next time (back to unassigned).
  */
 export function CarrierLoads({ orders, sups, items, carriers, lang, onDone }: { orders: PurchaseOrder[]; sups: Supplier[]; items: Map<string, Brief>; carriers: Carrier[]; lang: 'en' | 'kn'; onDone: (msg: string) => void }) {
@@ -31,16 +31,12 @@ export function CarrierLoads({ orders, sups, items, carriers, lang, onDone }: { 
   const [vehicleNo, setVehicleNo] = useState('');
   const [driverName, setDriverName] = useState('');
   const [date, setDate] = useState(today());
-  const [rates, setRates] = useState<Record<string, string>>({});
   const [other, setOther] = useState<Record<string, string>>({});
   const [err, setErr] = useState('');
   useEffect(() => {
     http
       .get<NamedLoad[]>('/admin/loads?waiting=1')
-      .then((l) => {
-        setLoads(l);
-        setRates({});
-      })
+      .then(setLoads)
       .catch((e: Error) => setErr(e.message));
   }, [version, live]);
   const open = orders.filter((p) => poStage(p.status) === 'ordered');
@@ -87,11 +83,6 @@ export function CarrierLoads({ orders, sups, items, carriers, lang, onDone }: { 
     const [poId, itemId] = k.split('|') as [string, string];
     return { poId, itemId };
   });
-  const rateOf = (ld: NamedLoad, poId: string, itemId: string) => {
-    const t = rates[ld.id + '|' + keyOf(poId, itemId)];
-    if (t != null) return Number(t) || 0;
-    return ld.lines.find((x) => x.poId === poId && x.itemId === itemId)?.ratePerUnit ?? 0;
-  };
   const move = () =>
     run(
       () =>
@@ -121,8 +112,7 @@ export function CarrierLoads({ orders, sups, items, carriers, lang, onDone }: { 
         </>
       )}
       {shown.map((ld) => {
-        const lines = ld.lines.map((x) => ({ ...x, ratePerUnit: rateOf(ld, x.poId, x.itemId) }));
-        const changed = ld.lines.some((x) => rates[ld.id + '|' + keyOf(x.poId, x.itemId)] != null && rateOf(ld, x.poId, x.itemId) !== x.ratePerUnit);
+        const lines = ld.lines;
         const waiting = ld.lines.filter((x) => !x.received);
         const mine = selLines.filter((s) => waiting.some((x) => x.poId === s.poId && x.itemId === s.itemId));
         return (
@@ -141,8 +131,6 @@ export function CarrierLoads({ orders, sups, items, carriers, lang, onDone }: { 
                   <th />
                   <th>{bi('Item', 'ಸಾಮಾನು')}</th>
                   <th className="num">{bi('Qty', 'ಪ್ರಮಾಣ')}</th>
-                  <th className="num">{bi('Delivery ₹ / unit', 'ಸಾಗಣೆ ₹ / ಘಟಕ')}</th>
-                  <th className="num">₹</th>
                 </tr>
               </thead>
               <tbody>
@@ -163,10 +151,6 @@ export function CarrierLoads({ orders, sups, items, carriers, lang, onDone }: { 
                       <td className="num">
                         {qty} {(lang === 'kn' && x.unitLabelKn) || x.unitLabel || unitOf(p, x.itemId)}
                       </td>
-                      <td className="num">
-                        <input inputMode="decimal" className="in-price" value={rates[ld.id + '|' + k] ?? String(x.ratePerUnit)} onChange={(e) => setRates({ ...rates, [ld.id + '|' + k]: e.target.value })} aria-label={bi('Delivery ₹ / unit', 'ಸಾಗಣೆ ₹ / ಘಟಕ')} />
-                      </td>
-                      <td className="num">{round2(x.ratePerUnit * qty)}</td>
                     </tr>
                   );
                 })}
@@ -174,14 +158,8 @@ export function CarrierLoads({ orders, sups, items, carriers, lang, onDone }: { 
             </Table>
             <div className="bar mt-6">
               <b className="grow">
-                {bi('Delivery charge', 'ಸಾಗಣೆ ಬಾಡಿಗೆ')} <Money v={loadTotal(lines)} />
-                <div className="muted">{lines.map((x) => (x.received ? x.received.qty : x.qty) + '×' + x.ratePerUnit).join(' + ')}</div>
+                {bi('Delivery charge for this trip', 'ಈ ಓಡಾಟದ ಸಾಗಣೆ ಬಾಡಿಗೆ')} <Money v={loadCharge(ld)} />
               </b>
-              {changed && (
-                <button className="btn primary small" onClick={() => run(() => http.put('/admin/loads/' + ld.id + '/rates', { lines: lines.map((x) => ({ poId: x.poId, itemId: x.itemId, ratePerUnit: x.ratePerUnit })) }), bi('Delivery rates saved; costs updated for what was received.', 'ಸಾಗಣೆ ದರ ಉಳಿಸಲಾಗಿದೆ; ಬಂದ ಸಾಮಾನಿನ ಬೆಲೆ ಬದಲಾಗಿದೆ.'))}>
-                  {bi('Save rates', 'ದರ ಉಳಿಸಿ')}
-                </button>
-              )}
             </div>
             {waiting.length > 0 && (
               <div className="bar mt-6">

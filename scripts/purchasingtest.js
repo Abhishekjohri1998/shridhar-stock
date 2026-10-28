@@ -513,37 +513,37 @@ async function main() {
       eq('A: unallotted maths (core)', unallottedQty(10, [a3.body.load, av.body.load], po.id, twenty.id), 0);
       eq('A: an unknown carrier is 404', (await call('/admin/loads/allot', { method: 'POST', body: { carrierId: 'nope', lines: [{ poId: po.id, itemId: twenty.id, qty: 1 }] } })).status, 404);
 
-      // Arriving: grouped carrier -> vendor -> item, with rates for the admin.
+      // Arriving: grouped carrier -> vendor -> item, with the trip charge for the admin.
       const arr = (await call('/arriving')).body;
       const rj = arr.loads.find((l) => l.id === a1.body.load.id);
-      check('A: arriving groups by carrier then vendor', rj && rj.carrierName === 'Raju' && rj.vendors[0].supplierId === vY && rj.vendors[0].lines.length === 2 && rj.vendors[0].lines.every((l) => 'ratePerUnit' in l) && arr.canRate === true, JSON.stringify(rj));
+      check('A: arriving groups by carrier then vendor', rj && rj.carrierName === 'Raju' && rj.vendors[0].supplierId === vY && rj.vendors[0].lines.length === 2 && rj.vendors[0].lines.every((l) => !('ratePerUnit' in l)) && rj.tripCharge === 0 && arr.canRate === true, JSON.stringify(rj));
       check('A: the vendor load is shown as "Vendor brings it"', arr.loads.some((l) => l.carrierId === 'vendor' && l.carrierName === 'Vendor brings it'));
-      // Raju: 3 of 4 Parle arrive at ₹5/box delivery; 20-20 removed (Del); notes.
+      // Raju: 3 of 4 Parle arrive (an old body's ₹/unit rate is ignored now); 20-20 removed (Del); notes.
       const p0 = await at(parle);
       const sv = await call('/arriving/' + a1.body.load.id + '/save', { method: 'POST', body: { notes: 'Two boxes wet', lines: [{ poId: po.id, itemId: parle.id, arrived: 3, ratePerUnit: 5 }, { poId: po.id, itemId: twenty.id, arrived: 0, remove: true }] } });
       check('A: arriving save', sv.status === 200 && sv.body.posted === 3 && sv.body.waiting === 1 && sv.body.removed === 1, JSON.stringify(sv.body));
       eq('A: only the 3 ticked boxes are in stock', (await at(parle)) - p0, 30);
       const L = (await call('/admin/loads/' + a1.body.load.id)).body;
-      check('A: 3 received, 1 still waiting on the load', L.lines.some((l) => l.itemId === parle.id && l.received?.qty === 3) && L.lines.some((l) => l.itemId === parle.id && !l.received && l.qty === 1 && l.ratePerUnit === 5), JSON.stringify(L.lines));
+      check('A: 3 received, 1 still waiting on the load', L.lines.some((l) => l.itemId === parle.id && l.received?.qty === 3) && L.lines.some((l) => l.itemId === parle.id && !l.received && l.qty === 1 && !l.ratePerUnit), JSON.stringify(L.lines));
       check('A: notes saved, in the history', L.notes === 'Two boxes wet' && L.history.some((h) => h.action === 'notes'), JSON.stringify(L));
       eq('A: Del sends 20-20 back to unallotted', (await allotLine(twenty.id)).unallotted, 3);
       const hist = (await call('/admin/suppliers/' + vY + '/history')).body.purchases.find((p) => p.id === po.id);
       const rc = hist.received.find((r) => r.itemId === parle.id && r.qty === 3);
-      check('A: delivery ₹/unit x arrived in the landed cost', rc && rc.delivery === 15 && rc.landed === 105 && rc.loadId === a1.body.load.id, JSON.stringify(hist.received));
+      check('A: no per-unit delivery before the trip charge', rc && !rc.delivery && rc.loadId === a1.body.load.id, JSON.stringify(hist.received));
       eq('A: more than on the load is refused', (await call('/arriving/' + a1.body.load.id + '/save', { method: 'POST', body: { lines: [{ poId: po.id, itemId: parle.id, arrived: 2 }] } })).status, 400);
 
       // A worker: opens Arriving and saves, without rates; 403 on Allot.
       const adminTok = token;
       token = (await call('/auth/login', { method: 'POST', body: { phone: '9000000099', pin: '2580' } })).body.token;
       const wa = await call('/arriving');
-      check('A: a worker opens Arriving, with no rates', wa.status === 200 && wa.body.canRate === false && wa.body.loads.length > 0 && wa.body.loads.every((l) => l.vendors.every((v) => v.lines.every((x) => !('ratePerUnit' in x)))), JSON.stringify(wa.body));
+      check('A: a worker opens Arriving, with no charge', wa.status === 200 && wa.body.canRate === false && wa.body.loads.length > 0 && wa.body.loads.every((l) => !('tripCharge' in l) && l.vendors.every((v) => v.lines.every((x) => !('ratePerUnit' in x)))), JSON.stringify(wa.body));
       eq('A: a worker cannot see Allot', (await call('/admin/allot')).status, 403);
       eq('A: nor allot', (await call('/admin/loads/allot', { method: 'POST', body: { carrierId: raju.id, lines: [{ poId: po.id, itemId: twenty.id, qty: 1 }] } })).status, 403);
-      const ws = await call('/arriving/' + a1.body.load.id + '/save', { method: 'POST', body: { lines: [{ poId: po.id, itemId: parle.id, arrived: 1, ratePerUnit: 99 }] } });
+      const ws = await call('/arriving/' + a1.body.load.id + '/save', { method: 'POST', body: { charge: 999, lines: [{ poId: po.id, itemId: parle.id, arrived: 1, ratePerUnit: 99 }] } });
       eq('A: a worker saves arriving', ws.status, 200);
       token = adminTok;
       const L2 = (await call('/admin/loads/' + a1.body.load.id)).body;
-      check('A: the worker\'s rate is ignored: the existing rate is kept', L2.lines.filter((l) => l.itemId === parle.id).every((l) => l.ratePerUnit === 5), JSON.stringify(L2.lines));
+      check('A: the worker\'s rate and charge are ignored', L2.tripCharge === undefined && L2.lines.filter((l) => l.itemId === parle.id).every((l) => !l.ratePerUnit), JSON.stringify(L2));
       // The vendor brings the 7 boxes of 20-20: a "self" delivery on the order.
       const vs = await call('/arriving/' + av.body.load.id + '/save', { method: 'POST', body: { lines: [{ poId: po.id, itemId: twenty.id, arrived: 7 }] } });
       eq('A: the vendor-brings load is received', vs.status, 200);
@@ -555,6 +555,72 @@ async function main() {
       const oc = await call('/admin/purchases/' + po.id + '/checklist', { method: 'POST', body: { loadId: a2.body.load.id, lines: [{ itemId: twenty.id, arrived: 3, ok: true }, { itemId: parle.id, arrived: 2, ok: true }] } });
       check('A: the old checklist still works, and closes the order', oc.status === 200 && oc.body.status === 'received', JSON.stringify(oc.body));
       check('A: a received order leaves Arriving', !(await call('/arriving')).body.loads.some((l) => l.vendors.some((v) => v.lines.some((x) => x.poId === po.id))));
+    }
+
+    // ------------------------------------------------ Arriving: Update to a place, Finish, one trip charge
+    {
+      const places = (await call('/locations')).body;
+      const shopName = places.find((l) => l.id === shop).name;
+      const vZ = (await call('/admin/suppliers', { method: 'POST', body: { name: 'Zed Agencies', phone: '' } })).body.id;
+      const pg = (await call('/items', { method: 'POST', body: { nameEn: 'Parle-G', nameKn: 'ಪಾರ್ಲೆ', units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 10 }, { code: 'box', label: 'Box', labelKn: '', perBase: 10, price: 100 }], aliases: [], racks: {} } })).body;
+      const pgAt = async (loc) => (await call('/stock')).body.find((s) => s.itemId === pg.id && s.locationId === loc)?.qty ?? 0;
+      // The order form sends no "how it comes": the carrier is decided in Allot.
+      const np = await call('/admin/pos', { method: 'POST', body: { supplierId: vZ, to: godown, lines: [{ itemId: pg.id, unit: 'box', qty: 10, cost: 100 }] } });
+      check('U: an order without a delivery mode', np.status === 201 && np.body.status === 'ordered', JSON.stringify(np.body));
+      const np2 = await call('/admin/pos', { method: 'POST', body: { supplierId: vZ, to: godown, lines: [{ itemId: pg.id, unit: 'box', qty: 1, cost: 100 }], delivery: { expectedOn: '2026-11-02' } } });
+      check('U: only "expected on" is fine too', np2.status === 201 && np2.body.delivery.expectedOn === '2026-11-02', JSON.stringify(np2.body));
+      const po = np.body;
+      const ravi = (await call('/admin/carriers', { method: 'POST', body: { name: 'Ravi Goods' } })).body;
+      const ld = (await call('/admin/loads/allot', { method: 'POST', body: { carrierId: ravi.id, lines: [{ poId: po.id, itemId: pg.id, qty: 10 }] } })).body.load;
+      const s0 = await pgAt(shop);
+      const g0 = await pgAt(godown);
+      const u1 = await call('/arriving/' + ld.id + '/save', { method: 'POST', body: { notes: 'first lot', lines: [{ poId: po.id, itemId: pg.id, arrived: 2, placeId: shop }] } });
+      check('U: Update posts the ticked units', u1.status === 200 && u1.body.posted === 2 && u1.body.waiting === 8, JSON.stringify(u1.body));
+      eq('U: 2 boxes at the shop', (await pgAt(shop)) - s0, 20);
+      let L = (await call('/admin/loads/' + ld.id)).body;
+      check('U: the log line', L.history.some((h) => h.action === 'stored' && h.note === '2 Box Parle-G → ' + shopName), JSON.stringify(L.history));
+      check('U: the rest stays on the load', L.lines.some((l) => !l.received && l.qty === 8) && L.notes === 'first lot' && !L.done, JSON.stringify(L));
+      const u2 = await call('/arriving/' + ld.id + '/save', { method: 'POST', body: { lines: [{ poId: po.id, itemId: pg.id, arrived: 6, placeId: godown }] } });
+      check('U: a second Update to another place', u2.status === 200 && u2.body.posted === 6 && u2.body.waiting === 2, JSON.stringify(u2.body));
+      eq('U: 6 boxes at the godown', (await pgAt(godown)) - g0, 60);
+      const av = (await call('/arriving')).body.loads.find((l) => l.id === ld.id);
+      check('U: Arriving lists what was stored so far', av && av.stored.length === 2 && av.stored[0].qty === 2 && av.stored[0].placeName === shopName && av.stored[1].qty === 6 && av.stored[1].placeName === 'Godown' && av.vendors[0].lines[0].onLoad === 2, JSON.stringify(av));
+      // The worker cannot see or set the trip charge.
+      const adminTok = token;
+      token = (await call('/auth/login', { method: 'POST', body: { phone: '9000000099', pin: '2580' } })).body.token;
+      const wv = (await call('/arriving')).body.loads.find((l) => l.id === ld.id);
+      check('U: a worker sees no trip charge', wv && !('tripCharge' in wv), JSON.stringify(wv));
+      eq('U: a worker cannot set it', (await call('/arriving/' + ld.id + '/charge', { method: 'PUT', body: { charge: 10 } })).status, 403);
+      token = adminTok;
+      // Finish with ₹400 for the trip: 8 boxes arrived, so +50 each; the 2 not come go back to Allot.
+      const fin = await call('/arriving/' + ld.id + '/finish', { method: 'POST', body: { charge: 400 } });
+      check('U: Finish', fin.status === 200 && fin.body.back === 2 && fin.body.tripCharge === 400, JSON.stringify(fin.body));
+      L = (await call('/admin/loads/' + ld.id)).body;
+      check('U: the load is done, nothing left waiting', !!L.done && L.lines.every((l) => l.received) && L.history.some((h) => h.action === 'finish'), JSON.stringify(L));
+      check('U: it leaves Arriving', !(await call('/arriving')).body.loads.some((l) => l.id === ld.id));
+      const al = (await call('/admin/allot')).body.vendors.find((v) => v.supplierId === vZ).lines.find((l) => l.poId === po.id);
+      eq('U: 2 back in Allot', al.unallotted, 2);
+      const recs = async () => (await call('/admin/suppliers/' + vZ + '/history')).body.purchases.find((p) => p.id === po.id).received.filter((r) => r.itemId === pg.id);
+      let rs = await recs();
+      check('U: ₹400 over 8 units: +50 each in the landed cost', rs.length === 2 && rs.every((r) => r.landed === 150 && r.ratePerUnit === 50) && rs.find((r) => r.qty === 2).delivery === 100 && rs.find((r) => r.qty === 6).delivery === 300, JSON.stringify(rs));
+      check('U: the charge is in the history', L.history.some((h) => h.action === 'charge') && L.history.some((h) => h.action === 'rate' && h.lines.length === 2), JSON.stringify(L.history));
+      eq('U: Update on a finished load is refused', (await call('/arriving/' + ld.id + '/save', { method: 'POST', body: { lines: [] } })).status, 409);
+      // Edited later: ₹800 makes it +100 each.
+      const ch = await call('/arriving/' + ld.id + '/charge', { method: 'PUT', body: { charge: 800 } });
+      rs = await recs();
+      check('U: the charge edited later', ch.status === 200 && rs.every((r) => r.landed === 200), JSON.stringify(rs));
+      // The 2 left come with the worker on another trip; a worker's charge is ignored; the order is received.
+      const ld2 = (await call('/admin/loads/allot', { method: 'POST', body: { carrierId: ravi.id, lines: [{ poId: po.id, itemId: pg.id, qty: 2 }] } })).body.load;
+      check('U: a new load for the next trip', ld2.id !== ld.id, JSON.stringify(ld2));
+      token = (await call('/auth/login', { method: 'POST', body: { phone: '9000000099', pin: '2580' } })).body.token;
+      const wu = await call('/arriving/' + ld2.id + '/save', { method: 'POST', body: { charge: 50, lines: [{ poId: po.id, itemId: pg.id, arrived: 2, placeId: shop }] } });
+      const wf = await call('/arriving/' + ld2.id + '/finish', { method: 'POST', body: { charge: 50 } });
+      token = adminTok;
+      const L2 = (await call('/admin/loads/' + ld2.id)).body;
+      check('U: a worker Updates and Finishes, the charge ignored', wu.status === 200 && wf.status === 200 && wf.body.back === 0 && L2.tripCharge === undefined && !!L2.done, JSON.stringify([wu.body, wf.body, L2]));
+      eq('U: every line in: the order is received', (await call('/admin/suppliers/' + vZ + '/history')).body.purchases.find((p) => p.id === po.id).progress, 'received');
+      const { loadCharge } = require(path.join(root, 'core'));
+      eq('U: an old load reads its charge as Σ rate × qty', loadCharge({ lines: [{ qty: 3, ratePerUnit: 5 }, { qty: 2, ratePerUnit: 10, received: { qty: 1, receipt: 1, at: '' } }] }), 25);
     }
 
     // ------------------------------------------------ running low, for the new order form

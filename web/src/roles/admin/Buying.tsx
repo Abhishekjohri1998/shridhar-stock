@@ -602,11 +602,7 @@ function NewOrder({ locs, sups, carriers, fromBuyList, onDone }: { locs: Locatio
   const { lang } = useSession();
   const [supplierId, setSupplier] = useState(sups[0]?.id ?? '');
   const [lines, setLines] = useState<Line[]>([]);
-  // How it comes: the vendor themselves, or a goods carrier (who, which vehicle, when).
-  const [mode, setMode] = useState<DeliveryMode>('self');
-  const [carrierId, setCarrierId] = useState('');
-  const [vehicleNo, setVehicleNo] = useState('');
-  const [driverName, setDriverName] = useState('');
+  // Who brings it is decided only in Allot; the order keeps just when it is expected.
   const [expectedOn, setExpectedOn] = useState('');
   const [known, setKnown] = useState<Map<string, ItemBrief>>(new Map());
   const [q, setQ] = useState('');
@@ -683,8 +679,7 @@ function NewOrder({ locs, sups, carriers, fromBuyList, onDone }: { locs: Locatio
     setErr('');
     setBusy(true);
     try {
-      const delivery = { mode, ...(mode === 'carrier' ? { ...(carrierId ? { carrierId } : {}), ...(vehicleNo.trim() ? { vehicleNo: vehicleNo.trim() } : {}), ...(driverName.trim() ? { driverName: driverName.trim() } : {}) } : {}), ...(expectedOn ? { expectedOn } : {}) };
-      await http.post('/admin/pos', { supplierId, delivery, lines: lines.map((l) => ({ itemId: l.itemId, unit: l.unit, qty: Number(l.qty), cost: Number(l.cost) || 0 })) });
+      await http.post('/admin/pos', { supplierId, delivery: { mode: 'self', ...(expectedOn ? { expectedOn } : {}) }, lines: lines.map((l) => ({ itemId: l.itemId, unit: l.unit, qty: Number(l.qty), cost: Number(l.cost) || 0 })) });
       onDone(true);
     } catch (e) {
       setErr((e as Error).message);
@@ -733,53 +728,12 @@ function NewOrder({ locs, sups, carriers, fromBuyList, onDone }: { locs: Locatio
           <Select value={supplierId} onChange={setSupplier} aria-label={bi('Supplier', 'ಸರಬರಾಜುದಾರ')} options={sups.map((s) => ({ value: s.id, label: s.name, hint: s.phone }))} />
         </label>
       </div>
-      <div className="field" data-tour="purchases-new-delivery">
-        <span>{bi('How it comes', 'ಹೇಗೆ ಬರುತ್ತದೆ')}</span>
-        <div className="chips">
-          <button type="button" className={'chip' + (mode === 'self' ? ' on' : '')} onClick={() => setMode('self')}>
-            🏪 {bi('Vendor brings it', 'ಮಾರಾಟಗಾರರೇ ತರುತ್ತಾರೆ')}
-          </button>
-          <button type="button" className={'chip' + (mode === 'carrier' ? ' on' : '')} onClick={() => setMode('carrier')}>
-            🚚 {bi('Goods carrier', 'ಸಾಗಣೆ ವಾಹನ')}
-          </button>
-        </div>
-      </div>
-      <div className="grid2">
-        {mode === 'carrier' && (
-          <>
-            <label className="field">
-              <span>{bi('Carrier', 'ಸಾಗಣೆದಾರ')}</span>
-              <Select
-                value={carrierId}
-                onChange={(id) => {
-                  setCarrierId(id);
-                  setVehicleNo(carriers.find((x) => x.id === id)?.vehicleNo ?? '');
-                }}
-                aria-label={bi('Carrier', 'ಸಾಗಣೆದಾರ')}
-                options={[{ value: '', label: bi('Not yet assigned', 'ಇನ್ನೂ ನಿಗದಿಯಾಗಿಲ್ಲ') }, ...carriers.filter((c) => c.active).map((c) => ({ value: c.id, label: c.name, hint: c.vehicleNo }))]}
-              />
-            </label>
-            {carrierId && (
-              <>
-                <label className="field">
-                  <span>{bi('Vehicle no. (optional)', 'ವಾಹನ ಸಂಖ್ಯೆ (ಬೇಕಿದ್ದರೆ)')}</span>
-                  <input value={vehicleNo} onChange={(e) => setVehicleNo(e.target.value)} />
-                </label>
-                <label className="field">
-                  <span>{bi('Driver (optional)', 'ಚಾಲಕ (ಬೇಕಿದ್ದರೆ)')}</span>
-                  <input value={driverName} onChange={(e) => setDriverName(e.target.value)} />
-                </label>
-              </>
-            )}
-            {!carrierId && <div className="muted">{bi('Put it on a carrier later: Open → tick the lines → Move to carrier.', 'ನಂತರ ಸಾಗಣೆದಾರರಿಗೆ ಹಾಕಿ: ತೆರೆದವು → ಸಾಲುಗಳನ್ನು ಗುರುತಿಸಿ → ಸಾಗಣೆದಾರರಿಗೆ ಹಾಕಿ.')}</div>}
-          </>
-        )}
+      <div className="grid2" data-tour="purchases-new-delivery">
         <label className="field">
           <span>{bi('Expected on (optional)', 'ಬರುವ ದಿನ (ಬೇಕಿದ್ದರೆ)')}</span>
           <input type="date" value={expectedOn} onChange={(e) => setExpectedOn(e.target.value)} />
         </label>
       </div>
-      {mode === 'carrier' && carriers.length === 0 && <div className="muted">{bi('Add carriers in Buy & move → Carriers.', 'ಸಾಗಣೆದಾರರನ್ನು ಖರೀದಿ → ಸಾಗಣೆದಾರರು ಇಲ್ಲಿ ಸೇರಿಸಿ.')}</div>}
       {groups.length > 0 && (
         <div className="field" data-tour="purchases-groups">
           <span>{bi('The buy list, by usual supplier: one order each', 'ಖರೀದಿ ಪಟ್ಟಿ, ಯಾವಾಗಲೂ ಕೊಡುವವರ ಪ್ರಕಾರ: ಒಬ್ಬರಿಗೆ ಒಂದು ಆರ್ಡರ್')}</span>

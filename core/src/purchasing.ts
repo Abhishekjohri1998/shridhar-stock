@@ -504,12 +504,13 @@ export interface LoadLine {
 export interface LoadHistory {
   at: string;
   by: string;
-  action: 'create' | 'add' | 'move-in' | 'move-out' | 'carrier' | 'rate' | 'unassign' | 'received' | 'edit' | 'allot' | 'notes' | 'cancel';
+  action: 'create' | 'add' | 'move-in' | 'move-out' | 'carrier' | 'rate' | 'unassign' | 'received' | 'edit' | 'allot' | 'notes' | 'cancel' | 'stored' | 'finish' | 'charge';
   /** The other load, for a move. */
   loadId?: string;
   carrierId?: string;
   fromCarrierId?: string;
-  lines?: { poId: string; itemId: string; qty?: number; from?: number; to?: number }[];
+  lines?: { poId: string; itemId: string; qty?: number; from?: number; to?: number; placeId?: string; unit?: string }[];
+  /** 'stored': the log line, e.g. "2 Box Parle-G → Shop". */
   note?: string;
 }
 
@@ -525,6 +526,10 @@ export interface CarrierLoad {
   history: LoadHistory[];
   /** Notes typed on Arriving (the latest; every change is in the history too). */
   notes?: string;
+  /** One delivery charge for the whole trip (rupees), shared by quantity over what arrived. Old loads use per-unit rates. */
+  tripCharge?: number;
+  /** Finished on Arriving: closed, what did not come went back to Allot. */
+  done?: { at: string; by: string };
   at: string;
 }
 
@@ -546,6 +551,11 @@ export function unallottedQty(due: number, loads: Pick<CarrierLoad, 'lines'>[], 
 /** A load's delivery charge: Σ rate × qty (what came, once received), to the paisa. */
 export function loadTotal(lines: Pick<LoadLine, 'qty' | 'ratePerUnit' | 'received'>[]): number {
   return round2(lines.reduce((s, l) => s + (l.ratePerUnit || 0) * (l.received ? l.received.qty : l.qty), 0));
+}
+
+/** A load's trip charge: the one total when set, else (old loads) Σ rate × qty. */
+export function loadCharge(l: Pick<CarrierLoad, 'lines' | 'tripCharge'>): number {
+  return l.tripCharge != null ? round2(l.tripCharge) : loadTotal(l.lines);
 }
 
 /** The load lines still waiting for the goods. */
