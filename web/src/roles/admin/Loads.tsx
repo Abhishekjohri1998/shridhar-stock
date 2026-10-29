@@ -16,7 +16,7 @@ const today = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0,
 
 /**
  * Open: ordered lines (from any vendors' orders) ticked and moved onto a carrier's load. The
- * trip's one delivery charge is entered on Arriving and shown here. A load moves to another
+ * trip's delivery charge is set in the carrier's history (Carriers) and shown here. A load moves to another
  * carrier when one backs out; lines can be moved, or left for next time (back to unassigned).
  */
 export function CarrierLoads({ orders, sups, items, carriers, lang, onDone }: { orders: PurchaseOrder[]; sups: Supplier[]; items: Map<string, Brief>; carriers: Carrier[]; lang: 'en' | 'kn'; onDone: (msg: string) => void }) {

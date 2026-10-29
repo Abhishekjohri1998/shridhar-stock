@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { formatRate, pickName, type Carrier, type CarrierTrip, type DeliveryChecklist, type Item, type Supplier } from '@stock/core';
+import { deliveryRows, formatRate, pickName, round2, type Carrier, type CarrierLoad, type CarrierTrip, type DeliveryChecklist, type Item, type Supplier } from '@stock/core';
 import { api, http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
-import { Empty, Loading, Money, Select, useBi } from '../../components/ui';
+import { Empty, Loading, Money, Select, Table, useBi } from '../../components/ui';
 import { useItemSearch } from './Buying';
 
 /** Today in India, YYYY-MM-DD. */
@@ -25,8 +25,8 @@ export function CarriersPage() {
   const [version, setVersion] = useState(0);
   const live = useLive('pos');
   const { value, error } = useLoad(async () => {
-    const [data, sups, items] = await Promise.all([http.get<{ carriers: Carrier[]; trips: CarrierTrip[]; deliveries?: CarrierDelivery[] }>('/admin/carriers'), http.get<Supplier[]>('/admin/suppliers'), api.items(true)]);
-    return { ...data, sups, items: new Map<string, ItemName>(items.map((i) => [i.id, i])) };
+    const [data, sups, items, loads] = await Promise.all([http.get<{ carriers: Carrier[]; trips: CarrierTrip[]; deliveries?: CarrierDelivery[] }>('/admin/carriers'), http.get<Supplier[]>('/admin/suppliers'), api.items(true), http.get<CarrierLoad[]>('/admin/loads')]);
+    return { ...data, sups, loads, items: new Map<string, ItemName>(items.map((i) => [i.id, i])) };
   }, [version, live]);
   const [editing, setEditing] = useState<Carrier | 'new' | null>(null);
   const [tripFor, setTripFor] = useState<{ carrierId: string; trip?: CarrierTrip } | null>(null);
@@ -55,6 +55,7 @@ export function CarriersPage() {
       {value.carriers.map((c) => {
         const trips = value.trips.filter((t) => t.carrierId === c.id);
         const brought = (value.deliveries ?? []).filter((d) => d.carrierId === c.id);
+        const loads = value.loads.filter((l) => l.carrierId === c.id && l.lines.some((x) => x.received && x.received.qty > 0));
         return (
           <div className="card carrier-card" key={c.id} data-carrier={c.id}>
             <div className="bar between">
@@ -108,6 +109,14 @@ export function CarriersPage() {
                   </li>
                 ))}
               </ul>
+            )}
+            {loads.length > 0 && (
+              <>
+                <div className="muted mt-10">{bi('Loads brought', 'ತಂದ ಲೋಡುಗಳು')} · {loads.length}</div>
+                {loads.map((l) => (
+                  <LoadCharges key={l.id + ':' + version} ld={l} items={value.items} onDone={done} />
+                ))}
+              </>
             )}
             {brought.length > 0 && (
               <>
@@ -313,6 +322,116 @@ function TripForm({ carrierId, trip, sups, items, onDone }: { carrierId: string;
           {bi('Cancel', 'ರದ್ದು')}
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * One load in a carrier's history, with its delivery-charge table: a row per item (qty = what
+ * arrived on the load) and per combined package (qty 1), the rate per item editable. Save keeps
+ * the rates; "Add to cost of items" puts them into the items' landed cost (again after an edit,
+ * it replaces, never adds twice).
+ */
+function LoadCharges({ ld, items, onDone }: { ld: CarrierLoad; items: Map<string, ItemName>; onDone: (msg?: string) => void }) {
+  const bi = useBi();
+  const { lang } = useSession();
+  const [open, setOpen] = useState(false);
+  const start = deliveryRows(ld);
+  const [rate, setRate] = useState<Record<string, string>>(() => Object.fromEntries(start.rows.map((r) => [r.kind + ':' + r.id, r.rate ? String(r.rate) : ''])));
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const nameOf = (id: string) => {
+    const it = items.get(id);
+    return it ? pickName(it.nameEn, it.nameKn, lang) : id;
+  };
+  const rates = {
+    items: Object.fromEntries(start.rows.filter((r) => r.kind === 'item').map((r) => [r.id, Number(rate['item:' + r.id]) || 0])),
+    packages: Object.fromEntries(start.rows.filter((r) => r.kind === 'package').map((r) => [r.id, Number(rate['package:' + r.id]) || 0])),
+  };
+  const now = deliveryRows(ld, rates);
+  const bad = Object.values(rate).some((v) => v.trim() !== '' && !(Number(v) >= 0));
+  const save = async (apply: boolean) => {
+    setErr('');
+    setBusy(true);
+    try {
+      await http.put('/admin/loads/' + ld.id + '/delivery', { ...rates, apply });
+      onDone(apply ? bi('Delivery charges added to the cost of items.', 'ಸಾಗಣೆ ಬಾಡಿಗೆ ಸಾಮಾನಿನ ಖರೀದಿ ಬೆಲೆಗೆ ಸೇರಿಸಲಾಗಿದೆ.') : bi('Delivery charges saved.', 'ಸಾಗಣೆ ಬಾಡಿಗೆ ಉಳಿಸಲಾಗಿದೆ.'));
+    } catch (e) {
+      setErr((e as Error).message);
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="card mt-8" data-load-charges={ld.id}>
+      <div className="bar between">
+        <span>
+          <span className="trip-date">{ld.date}</span> {ld.vehicleNo && <span className="muted">· {ld.vehicleNo}</span>}
+          {ld.done && <span className="pill ok"> {bi('Finished', 'ಮುಗಿದಿದೆ')}</span>}
+        </span>
+        <span className="bar">
+          <Money v={start.total} />
+          <button className="btn small" onClick={() => setOpen(!open)}>
+            {open ? bi('Close', 'ಮುಚ್ಚಿ') : bi('Delivery charges', 'ಸಾಗಣೆ ಬಾಡಿಗೆ')}
+          </button>
+        </span>
+      </div>
+      {open && (
+        <>
+          {err && <div className="msg err">{err}</div>}
+          {!ld.deliveryRates && start.total > 0 && <div className="muted">{bi('Converted from this load’s old charge.', 'ಈ ಲೋಡಿನ ಹಳೆಯ ಬಾಡಿಗೆಯಿಂದ ಬದಲಿಸಲಾಗಿದೆ.')}</div>}
+          <Table>
+            <thead>
+              <tr>
+                <th>{bi('No', 'ಸಂ')}</th>
+                <th>{bi('Item', 'ಸಾಮಾನು')}</th>
+                <th className="num">{bi('Qty', 'ಪ್ರಮಾಣ')}</th>
+                <th className="num">{bi('Rate per item', 'ಪ್ರತಿ ಸಾಮಾನಿನ ದರ')}</th>
+                <th className="num">{bi('Total', 'ಒಟ್ಟು')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {now.rows.map((r) => {
+                const k = r.kind + ':' + r.id;
+                return (
+                  <tr key={k}>
+                    <td>{r.no}</td>
+                    <td>{r.kind === 'item' ? nameOf(r.id) : (r.label ?? '') + ' ' + bi('(combined)', '(ಒಟ್ಟು)')}</td>
+                    <td className="num">{r.qty}</td>
+                    <td className="num">
+                      <input inputMode="decimal" className="in-price" value={rate[k] ?? ''} placeholder="0" onChange={(e) => setRate({ ...rate, [k]: e.target.value })} aria-label={bi('Rate per item', 'ಪ್ರತಿ ಸಾಮಾನಿನ ದರ')} />
+                    </td>
+                    <td className="num">
+                      <Money v={r.total} />
+                    </td>
+                  </tr>
+                );
+              })}
+              <tr>
+                <td />
+                <td />
+                <td />
+                <td className="num">
+                  <b>{bi('Total', 'ಒಟ್ಟು')}</b>
+                </td>
+                <td className="num">
+                  <b>
+                    <Money v={round2(now.total)} />
+                  </b>
+                </td>
+              </tr>
+            </tbody>
+          </Table>
+          <div className="bar mt-6">
+            <button className="btn" disabled={busy || bad} onClick={() => save(false)}>
+              {bi('Save', 'ಉಳಿಸಿ')}
+            </button>
+            <button className="btn primary" disabled={busy || bad} onClick={() => save(true)}>
+              {bi('Add to cost of items', 'ಸಾಮಾನಿನ ಖರೀದಿ ಬೆಲೆಗೆ ಸೇರಿಸಿ')}
+            </button>
+            {ld.deliveryRates?.appliedAt && <span className="muted">{bi('Added on ', 'ಸೇರಿಸಿದ್ದು ') + ld.deliveryRates.appliedAt.slice(0, 10)}</span>}
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -260,8 +260,6 @@ interface ArrLoad {
   driverName?: string;
   date: string;
   notes: string;
-  /** The trip's one delivery charge: only sent to the admin. */
-  tripCharge?: number;
   stored: ArrStored[];
   vendors: { supplierId: string; name: string; lines: ArrLine[] }[];
 }
@@ -271,7 +269,7 @@ interface ArrView {
   canRate: boolean;
 }
 
-/** Arriving: for the admin (with the trip's delivery charge) and the worker screens (without). */
+/** Arriving: for the admin and the worker screens. Delivery charges are set in the carrier's history. */
 export function ArrivingTab({ onDone }: { onDone?: (msg: string) => void }) {
   const [lim, setLim] = useState(PAGE);
   const bi = useBi();
@@ -298,7 +296,7 @@ export function ArrivingTab({ onDone }: { onDone?: (msg: string) => void }) {
       {note && <div className="msg ok">{note}</div>}
       {view.loads.length === 0 && <Empty tour="arriving-carrier">{bi('Nothing is on the way. Allot goods to a carrier first.', 'ಯಾವುದೂ ದಾರಿಯಲ್ಲಿಲ್ಲ. ಮೊದಲು ಸಾಮಾನನ್ನು ಸಾಗಣೆದಾರರಿಗೆ ಹಾಕಿ.')}</Empty>}
       {view.loads.slice(0, lim).map((ld) => (
-        <ArrivingLoad key={ld.id + ':' + version} ld={ld} places={view.places} canRate={view.canRate} onDone={done} />
+        <ArrivingLoad key={ld.id + ':' + version} ld={ld} places={view.places} onDone={done} />
       ))}
       {view.loads.length > lim && (
         <button className="btn small mt-8" onClick={() => setLim((n) => n + PAGE)}>
@@ -314,20 +312,18 @@ export function ArrivingTab({ onDone }: { onDone?: (msg: string) => void }) {
  * a line is logged ("2 Box Parle-G → Shop"); the rest stays on the load. Finish: the load closes,
  * what did not come goes back to Allot.
  */
-function ArrivingLoad({ ld, places, canRate, onDone }: { ld: ArrLoad; places: ArrView['places']; canRate: boolean; onDone: (m: string) => void }) {
+function ArrivingLoad({ ld, places, onDone }: { ld: ArrLoad; places: ArrView['places']; onDone: (m: string) => void }) {
   const bi = useBi();
   const { lang } = useSession();
   const all = ld.vendors.flatMap((v) => v.lines);
   const [count, setCount] = useState<Record<string, number>>({});
   const [storeIn, setStoreIn] = useState<Record<string, string>>(() => Object.fromEntries(all.map((l) => [keyOf(l.poId, l.itemId), l.placeId ?? places[0]?.id ?? ''])));
   const [notes, setNotes] = useState(ld.notes);
-  const [charge, setCharge] = useState(ld.tripCharge ? String(ld.tripCharge) : '');
+  const [packing, setPacking] = useState<'separate' | 'combined'>('separate');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const into = r3(all.reduce((n, l) => n + (count[keyOf(l.poId, l.itemId)] ?? 0), 0));
   const waiting = r3(all.reduce((n, l) => n + l.onLoad, 0));
-  const chargeBody = () => (canRate && charge.trim() !== '' && Number(charge) !== (ld.tripCharge ?? 0) ? { charge: Number(charge) || 0 } : {});
-  const chargeBad = canRate && charge.trim() !== '' && !(Number(charge) >= 0);
   const run = async (f: () => Promise<unknown>, msg: string) => {
     setErr('');
     setBusy(true);
@@ -339,25 +335,39 @@ function ArrivingLoad({ ld, places, canRate, onDone }: { ld: ArrLoad; places: Ar
       setBusy(false);
     }
   };
+  /** The ticked units with their places, sent by Update and Finish alike. */
+  const body = () => ({
+    notes: notes.trim(),
+    packing,
+    lines: all
+      .map((l) => {
+        const k = keyOf(l.poId, l.itemId);
+        const n = count[k] ?? 0;
+        return n ? { poId: l.poId, itemId: l.itemId, arrived: n, ...(storeIn[k] ? { placeId: storeIn[k] } : {}) } : null;
+      })
+      .filter((x) => x != null),
+  });
   const update = () =>
     run(
-      () =>
-        http.post('/arriving/' + ld.id + '/save', {
-          notes: notes.trim(),
-          ...chargeBody(),
-          lines: all
-            .map((l) => {
-              const k = keyOf(l.poId, l.itemId);
-              const n = count[k] ?? 0;
-              return n ? { poId: l.poId, itemId: l.itemId, arrived: n, ...(storeIn[k] ? { placeId: storeIn[k] } : {}) } : null;
-            })
-            .filter((x) => x != null),
-        }),
+      () => http.post('/arriving/' + ld.id + '/save', body()),
       bi('Updated: ' + into + ' units into stock, ' + r3(waiting - into) + ' still on the load.', 'ಉಳಿಸಲಾಗಿದೆ: ' + into + ' ಘಟಕ ಸ್ಟಾಕಿಗೆ, ' + r3(waiting - into) + ' ಇನ್ನೂ ಸಾಗಣೆಯಲ್ಲಿ.'),
     );
   const finish = () => {
-    if (!window.confirm(bi(waiting + ' units go back to Allot. Finish this load?', waiting + ' ಘಟಕ ಮತ್ತೆ ಹಾಕುವುದಕ್ಕೆ ಹೋಗುತ್ತವೆ. ಈ ಸಾಗಣೆ ಮುಗಿಸಬೇಕೆ?'))) return;
-    return run(() => http.post('/arriving/' + ld.id + '/finish', { notes: notes.trim(), ...chargeBody() }), bi('Finished: ' + waiting + ' units back to Allot.', 'ಮುಗಿದಿದೆ: ' + waiting + ' ಘಟಕ ಮತ್ತೆ ಹಾಕುವುದಕ್ಕೆ.'));
+    // "3 into stock (Shop) · 2 back to Allot"
+    const at = new Map<string, number>();
+    for (const l of all) {
+      const k = keyOf(l.poId, l.itemId);
+      const n = count[k] ?? 0;
+      if (!n) continue;
+      const pl = places.find((x) => x.id === storeIn[k]);
+      const name = pl ? pickName(pl.name, pl.nameKn, lang) : '';
+      at.set(name, r3((at.get(name) ?? 0) + n));
+    }
+    const back = r3(waiting - into);
+    const parts = [...at].map(([name, n]) => n + bi(' into stock', ' ಸ್ಟಾಕಿಗೆ') + (name ? ' (' + name + ')' : ''));
+    const summary = [...parts, back + bi(' back to Allot', ' ಮತ್ತೆ ಹಾಕುವುದಕ್ಕೆ')].join(' · ');
+    if (!window.confirm(summary + '. ' + bi('Finish this load?', 'ಈ ಸಾಗಣೆ ಮುಗಿಸಬೇಕೆ?'))) return;
+    return run(() => http.post('/arriving/' + ld.id + '/finish', body()), bi('Finished: ', 'ಮುಗಿದಿದೆ: ') + summary + '.');
   };
   return (
     <div className="card" data-tour="arriving-carrier">
@@ -416,21 +426,27 @@ function ArrivingLoad({ ld, places, canRate, onDone }: { ld: ArrLoad; places: Ar
           <div className="muted">{ld.stored.map((x) => x.qty + ' ' + x.unit + ' ' + pickName(x.nameEn, x.nameKn, lang) + ' → ' + pickName(x.placeName, x.placeNameKn, lang)).join(' · ')}</div>
         </div>
       )}
-      {canRate && (
-        <label className="field mt-8" data-tour="arriving-charge">
-          <span>{bi('Delivery charge for this trip ₹', 'ಈ ಓಡಾಟದ ಸಾಗಣೆ ಬಾಡಿಗೆ ₹')}</span>
-          <input inputMode="decimal" className="in-price" value={charge} onChange={(e) => setCharge(e.target.value)} placeholder="0" aria-label={bi('Delivery charge for this trip', 'ಈ ಓಡಾಟದ ಸಾಗಣೆ ಬಾಡಿಗೆ')} />
-        </label>
-      )}
+      <div className="mt-8" data-tour="arriving-packing">
+        <b>{bi('Packing type', 'ಪ್ಯಾಕಿಂಗ್ ವಿಧ')}</b>
+        <div className="chips mt-6">
+          <button type="button" className={'chip' + (packing === 'separate' ? ' on' : '')} aria-pressed={packing === 'separate'} onClick={() => setPacking('separate')}>
+            {bi('Separate units', 'ಬೇರೆ ಬೇರೆ ಘಟಕ')}
+          </button>
+          <button type="button" className={'chip' + (packing === 'combined' ? ' on' : '')} aria-pressed={packing === 'combined'} onClick={() => setPacking('combined')}>
+            {bi('Combined units', 'ಒಟ್ಟು ಘಟಕ')}
+          </button>
+        </div>
+        {packing === 'combined' && <div className="muted">{bi('The ticked units count as one package for delivery.', 'ಗುರುತಿಸಿದ ಘಟಕಗಳು ಸಾಗಣೆಗೆ ಒಂದು ಪ್ಯಾಕೇಜ್.')}</div>}
+      </div>
       <label className="field mt-8" data-tour="arriving-notes">
         <span>{bi('Notes', 'ಟಿಪ್ಪಣಿ')}</span>
         <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder={bi('Anything about this load (optional)', 'ಈ ಸಾಗಣೆಯ ಬಗ್ಗೆ ಏನಾದರೂ (ಬೇಕಿದ್ದರೆ)')} />
       </label>
       <div className="bar">
-        <button type="button" className="btn primary" disabled={busy || chargeBad || !into} onClick={update} data-tour="arriving-save">
+        <button type="button" className="btn primary" disabled={busy || !into} onClick={update} data-tour="arriving-save">
           {bi('Update', 'ಉಳಿಸಿ')}
         </button>
-        <button type="button" className="btn" disabled={busy || chargeBad} onClick={finish} data-tour="arriving-finish">
+        <button type="button" className="btn" disabled={busy} onClick={finish} data-tour="arriving-finish">
           {bi('Finish', 'ಮುಗಿಸಿ')}
         </button>
         <span className="muted">{bi(into + ' ticked · ' + waiting + ' on the load', into + ' ಗುರುತಿಸಿದೆ · ' + waiting + ' ಸಾಗಣೆಯಲ್ಲಿ')}</span>

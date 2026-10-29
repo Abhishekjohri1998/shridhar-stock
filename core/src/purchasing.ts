@@ -504,7 +504,7 @@ export interface LoadLine {
 export interface LoadHistory {
   at: string;
   by: string;
-  action: 'create' | 'add' | 'move-in' | 'move-out' | 'carrier' | 'rate' | 'unassign' | 'received' | 'edit' | 'allot' | 'notes' | 'cancel' | 'stored' | 'finish' | 'charge';
+  action: 'create' | 'add' | 'move-in' | 'move-out' | 'carrier' | 'rate' | 'unassign' | 'received' | 'edit' | 'allot' | 'notes' | 'cancel' | 'stored' | 'finish' | 'charge' | 'package';
   /** The other load, for a move. */
   loadId?: string;
   carrierId?: string;
@@ -528,9 +528,105 @@ export interface CarrierLoad {
   notes?: string;
   /** One delivery charge for the whole trip (rupees), shared by quantity over what arrived. Old loads use per-unit rates. */
   tripCharge?: number;
+  /** Units ticked together under "Combined units": each counts as one package for delivery. */
+  packages?: LoadPackage[];
+  /** The delivery-charge table (carrier history): rate per item unit and per package. */
+  deliveryRates?: DeliveryRates;
   /** Finished on Arriving: closed, what did not come went back to Allot. */
   done?: { at: string; by: string };
   at: string;
+}
+
+/** Units of several items that came packed as one: one delivery charge for the lot. */
+export interface LoadPackage {
+  id: string;
+  lines: { itemId: string; qty: number }[];
+  /** e.g. "12 Surf Excel Front load + 12 Surf Excel Top load". */
+  label: string;
+  at?: string;
+}
+
+/** Rates of the delivery table: rupees per arrived unit of an item, and per package. */
+export interface DeliveryRates {
+  items: Record<string, number>;
+  packages: Record<string, number>;
+  /** When "Add to cost of items" last put them into the landed cost. */
+  appliedAt?: string;
+}
+
+/** One row of a load's delivery table: an item (its loose units) or a package (qty 1). */
+export interface DeliveryRow {
+  no: number;
+  kind: 'item' | 'package';
+  /** The item id, or the package id. */
+  id: string;
+  label?: string;
+  qty: number;
+  rate: number;
+  total: number;
+}
+
+const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
+
+/** What arrived on a load per item (received lines, every order). */
+export function arrivedByItem(l: Pick<CarrierLoad, 'lines'>): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const x of l.lines) if (x.received && x.received.qty > 0) m.set(x.itemId, r6((m.get(x.itemId) ?? 0) + x.received.qty));
+  return m;
+}
+
+/**
+ * The delivery table of a load: a row per item for its units not in a package (qty = arrived),
+ * then a row per package (qty 1), with rates from `deliveryRates`. Old loads without them show
+ * their charge converted: a trip charge shared by quantity, else each item's per-unit rate.
+ */
+export function deliveryRows(l: Pick<CarrierLoad, 'lines' | 'packages' | 'deliveryRates' | 'tripCharge'>, rates: Pick<DeliveryRates, 'items' | 'packages'> | undefined = l.deliveryRates): { rows: DeliveryRow[]; total: number } {
+  const got = arrivedByItem(l);
+  const packed = new Map<string, number>();
+  for (const p of l.packages ?? []) for (const x of p.lines) packed.set(x.itemId, r6((packed.get(x.itemId) ?? 0) + x.qty));
+  const units = [...got.values()].reduce((n, q) => n + q, 0);
+  const oldRate = (itemId: string) => {
+    if (l.tripCharge != null) return units > 0 ? round4(l.tripCharge / units) : 0;
+    const ls = l.lines.filter((x) => x.itemId === itemId && x.received && x.received.qty > 0);
+    const q = ls.reduce((n, x) => n + x.received!.qty, 0);
+    return q > 0 ? round4(ls.reduce((s, x) => s + (x.ratePerUnit || 0) * x.received!.qty, 0) / q) : 0;
+  };
+  const rows: DeliveryRow[] = [];
+  for (const [id, q] of got) {
+    const qty = r6(Math.max(0, q - (packed.get(id) ?? 0)));
+    if (!(qty > 0)) continue;
+    const rate = rates ? (rates.items[id] ?? 0) : oldRate(id);
+    rows.push({ no: rows.length + 1, kind: 'item', id, qty, rate, total: round2(rate * qty) });
+  }
+  for (const p of l.packages ?? []) {
+    const rate = rates?.packages[p.id] ?? 0;
+    rows.push({ no: rows.length + 1, kind: 'package', id: p.id, label: p.label, qty: 1, rate, total: round2(rate) });
+  }
+  return { rows, total: round2(rows.reduce((s, r) => s + r.total, 0)) };
+}
+
+/**
+ * What the table adds to one unit of each item: (its loose total + its share of each package,
+ * a package's charge shared over the package's units by qty) ÷ all its units arrived on the load.
+ */
+export function deliveryPerUnit(l: Pick<CarrierLoad, 'lines' | 'packages' | 'deliveryRates' | 'tripCharge'>, rates: Pick<DeliveryRates, 'items' | 'packages'> | undefined = l.deliveryRates): Map<string, number> {
+  const got = arrivedByItem(l);
+  const sum = new Map<string, number>();
+  for (const r of deliveryRows(l, rates).rows) if (r.kind === 'item') sum.set(r.id, r.rate * r.qty);
+  for (const p of l.packages ?? []) {
+    const rate = rates?.packages[p.id] ?? 0;
+    const n = p.lines.reduce((s, x) => s + x.qty, 0);
+    if (!(n > 0)) continue;
+    for (const x of p.lines) sum.set(x.itemId, (sum.get(x.itemId) ?? 0) + (rate * x.qty) / n);
+  }
+  const out = new Map<string, number>();
+  for (const [id, q] of got) out.set(id, q > 0 ? round4((sum.get(id) ?? 0) / q) : 0);
+  return out;
+}
+
+/** The label of a combined package: "12 Surf Excel Front load + 12 Surf Excel Top load". */
+export function packageLabel(lines: { qty: number; name: string }[]): string {
+  return lines.map((x) => r6(x.qty) + ' ' + x.name).join(' + ');
 }
 
 /** The carrier id of a load the vendor brings themselves ("Vendor brings it"). */
@@ -554,7 +650,8 @@ export function loadTotal(lines: Pick<LoadLine, 'qty' | 'ratePerUnit' | 'receive
 }
 
 /** A load's trip charge: the one total when set, else (old loads) Σ rate × qty. */
-export function loadCharge(l: Pick<CarrierLoad, 'lines' | 'tripCharge'>): number {
+export function loadCharge(l: Pick<CarrierLoad, 'lines' | 'tripCharge' | 'deliveryRates' | 'packages'>): number {
+  if (l.deliveryRates) return deliveryRows(l).total;
   return l.tripCharge != null ? round2(l.tripCharge) : loadTotal(l.lines);
 }
 

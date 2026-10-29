@@ -623,6 +623,81 @@ async function main() {
       eq('U: an old load reads its charge as Σ rate × qty', loadCharge({ lines: [{ qty: 3, ratePerUnit: 5 }, { qty: 2, ratePerUnit: 10, received: { qty: 1, receipt: 1, at: '' } }] }), 25);
     }
 
+    // ------------------------------------------------ Finish stores the ticks, packing, the delivery table
+    {
+      const places = (await call('/locations')).body;
+      const shopName = places.find((l) => l.id === shop).name;
+      const sup = (await call('/admin/suppliers', { method: 'POST', body: { name: 'Table Traders', phone: '' } })).body.id;
+      const mk = async (nameEn, code, label) => (await call('/items', { method: 'POST', body: { nameEn, nameKn: '', units: [{ code, label, labelKn: '', perBase: 1, price: 100 }], aliases: [], racks: {} } })).body;
+      const sugar = await mk('Sugar', 'bag', 'Bag');
+      const wheel = await mk('Wheel', 'box', 'Box');
+      const maida = await mk('Maida', 'bag', 'Bag');
+      const surfF = await mk('Surf Excel Front load', 'pkt', 'Pkt');
+      const surfT = await mk('Surf Excel Top load', 'pkt', 'Pkt');
+      const stockAt = async (id, loc) => (await call('/stock')).body.find((s) => s.itemId === id && s.locationId === loc)?.qty ?? 0;
+      // Finish with 3 of 5 ticked: 3 into stock at the Shop, 2 back to Allot.
+      const p5 = (await call('/admin/pos', { method: 'POST', body: { supplierId: sup, to: godown, lines: [{ itemId: sugar.id, unit: 'bag', qty: 5, cost: 1000 }] } })).body;
+      const car = (await call('/admin/carriers', { method: 'POST', body: { name: 'Table Carrier' } })).body;
+      const l5 = (await call('/admin/loads/allot', { method: 'POST', body: { carrierId: car.id, lines: [{ poId: p5.id, itemId: sugar.id, qty: 5 }] } })).body.load;
+      const s0 = await stockAt(sugar.id, shop);
+      const f5 = await call('/arriving/' + l5.id + '/finish', { method: 'POST', body: { lines: [{ poId: p5.id, itemId: sugar.id, arrived: 3, placeId: shop }] } });
+      check('F: Finish stores the ticked and returns the rest', f5.status === 200 && f5.body.posted === 3 && f5.body.back === 2, JSON.stringify(f5.body));
+      eq('F: 3 bags at the Shop', (await stockAt(sugar.id, shop)) - s0, 3);
+      const L5 = (await call('/admin/loads/' + l5.id)).body;
+      check('F: the log line and the load closed', !!L5.done && L5.history.some((h) => h.action === 'stored' && h.note === '3 Bag Sugar → ' + shopName), JSON.stringify(L5.history));
+      eq('F: 2 back in Allot', (await call('/admin/allot')).body.vendors.find((v) => v.supplierId === sup).lines.find((l) => l.poId === p5.id).unallotted, 2);
+
+      // The example load: sugar 30, wheel 20, maida 3 separate; 12 + 12 Surf combined.
+      const po = (await call('/admin/pos', { method: 'POST', body: { supplierId: sup, to: godown, lines: [{ itemId: sugar.id, unit: 'bag', qty: 30, cost: 1000 }, { itemId: wheel.id, unit: 'box', qty: 20, cost: 300 }, { itemId: maida.id, unit: 'bag', qty: 3, cost: 800 }, { itemId: surfF.id, unit: 'pkt', qty: 12, cost: 100 }, { itemId: surfT.id, unit: 'pkt', qty: 12, cost: 110 }] } })).body;
+      const qtyOf = (i) => (i === sugar ? 30 : i === wheel ? 20 : i === maida ? 3 : 12);
+      const ld = (await call('/admin/loads/allot', { method: 'POST', body: { carrierId: car.id, lines: [sugar, wheel, maida, surfF, surfT].map((i) => ({ poId: po.id, itemId: i.id, qty: qtyOf(i) })) } })).body.load;
+      const sep = await call('/arriving/' + ld.id + '/save', { method: 'POST', body: { updateCost: true, packing: 'separate', lines: [{ poId: po.id, itemId: sugar.id, arrived: 30, placeId: shop }, { poId: po.id, itemId: wheel.id, arrived: 20, placeId: shop }, { poId: po.id, itemId: maida.id, arrived: 3, placeId: shop }] } });
+      const comb = await call('/arriving/' + ld.id + '/finish', { method: 'POST', body: { updateCost: true, packing: 'combined', lines: [{ poId: po.id, itemId: surfF.id, arrived: 12, placeId: shop }, { poId: po.id, itemId: surfT.id, arrived: 12, placeId: shop }] } });
+      check('P: separate Update then combined Finish', sep.status === 200 && comb.status === 200 && comb.body.posted === 24 && comb.body.back === 0, JSON.stringify([sep.body, comb.body]));
+      const L = (await call('/admin/loads/' + ld.id)).body;
+      check('P: one package with its label', L.packages?.length === 1 && L.packages[0].label === '12 Surf Excel Front load + 12 Surf Excel Top load' && L.packages[0].lines.length === 2, JSON.stringify(L.packages));
+      const pkgId = L.packages[0].id;
+      const { deliveryRows } = require(path.join(root, 'core'));
+      const rates = { items: { [sugar.id]: 50, [wheel.id]: 15, [maida.id]: 40 }, packages: { [pkgId]: 20 } };
+      const t = deliveryRows(L, rates);
+      check('P: the table: 3 item rows and the package', t.rows.length === 4 && t.rows[3].kind === 'package' && t.rows[3].qty === 1 && t.rows[0].qty === 30 && t.rows[1].total === 300, JSON.stringify(t));
+      eq('P: the example totals 1940', t.total, 1940);
+      // A worker cannot touch it.
+      const adminTok = token;
+      token = (await call('/auth/login', { method: 'POST', body: { phone: '9000000099', pin: '2580' } })).body.token;
+      eq('P: a worker gets 403 on the delivery table', (await call('/admin/loads/' + ld.id + '/delivery', { method: 'PUT', body: rates })).status, 403);
+      eq('P: a worker cannot list loads', (await call('/admin/loads')).status, 403);
+      token = adminTok;
+      const sv = await call('/admin/loads/' + ld.id + '/delivery', { method: 'PUT', body: rates });
+      check('P: Save stores the rates', sv.status === 200 && sv.body.total === 1940 && sv.body.load.deliveryRates.items[sugar.id] === 50 && !sv.body.load.deliveryRates.appliedAt, JSON.stringify(sv.body));
+      const costOf = async (it, code) => (await call('/items/' + it.id)).body.units.find((u) => u.code === code).cost;
+      eq('P: Save alone leaves the cost', await costOf(sugar, 'bag'), 1000);
+      const ap = await call('/admin/loads/' + ld.id + '/delivery', { method: 'PUT', body: { ...rates, apply: true } });
+      check('P: Add to cost of items', ap.status === 200 && !!ap.body.load.deliveryRates.appliedAt, JSON.stringify(ap.body));
+      eq('P: sugar +50 a bag', await costOf(sugar, 'bag'), 1050);
+      eq('P: wheel +15 a box', await costOf(wheel, 'box'), 315);
+      eq('P: maida +40 a bag', await costOf(maida, 'bag'), 840);
+      const recs = async () => (await call('/admin/suppliers/' + sup + '/history')).body.purchases.find((p) => p.id === po.id).received;
+      let rs = await recs();
+      const sf = rs.find((r) => r.itemId === surfF.id && r.qty > 0);
+      const st = rs.find((r) => r.itemId === surfT.id && r.qty > 0);
+      check('P: the 20 rupee package shared over 24 packets', Math.abs(sf.delivery + st.delivery - 20) < 0.02 && Math.abs(sf.landed - (100 + 20 / 24)) < 0.01 && Math.abs(st.landed - (110 + 20 / 24)) < 0.01, JSON.stringify([sf, st]));
+      check('P: the history has it', (await call('/admin/loads/' + ld.id)).body.history.some((h) => h.action === 'rate' && h.note === 'added to cost of items'));
+      // Edited and applied again (twice): replaces, never adds twice.
+      const edited = { ...rates, items: { ...rates.items, [sugar.id]: 60 }, apply: true };
+      await call('/admin/loads/' + ld.id + '/delivery', { method: 'PUT', body: edited });
+      await call('/admin/loads/' + ld.id + '/delivery', { method: 'PUT', body: edited });
+      eq('P: re-applied after an edit: sugar +60, not more', await costOf(sugar, 'bag'), 1060);
+      eq('P: wheel still +15', await costOf(wheel, 'box'), 315);
+      rs = await recs();
+      eq('P: sugar receipt landed', rs.find((r) => r.itemId === sugar.id && r.qty > 0).landed, 1060);
+      eq('P: a row that is not on the load is refused', (await call('/admin/loads/' + ld.id + '/delivery', { method: 'PUT', body: { items: { nope: 1 } } })).status, 400);
+      // Old loads: their charge shows converted.
+      const rcv = (q) => ({ qty: q, receipt: 1, at: '' });
+      eq('P: an old trip charge converted', deliveryRows({ tripCharge: 100, lines: [{ itemId: 'a', qty: 10, ratePerUnit: 0, received: rcv(10) }, { itemId: 'b', qty: 10, ratePerUnit: 0, received: rcv(10) }] }).rows[0].rate, 5);
+      eq('P: old per-unit rates converted', deliveryRows({ lines: [{ itemId: 'a', qty: 4, ratePerUnit: 7, received: rcv(4) }] }).total, 28);
+    }
+
     // ------------------------------------------------ running low, for the new order form
     const lowA = (await call('/items', { method: 'POST', body: { nameEn: 'Zz Low Soap', nameKn: 'ಸೋಪು', units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 10 }, { code: 'box', label: 'Box', labelKn: '', perBase: 60, price: 580 }], lowAt: { qty: 2, unit: 'box' }, aliases: [], racks: {} } })).body;
     const lowB = (await call('/items', { method: 'POST', body: { nameEn: 'Aa Low Salt', nameKn: 'ಉಪ್ಪು', units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 20 }], lowAt: { qty: 10, unit: 'pc' }, aliases: [], racks: {} } })).body;

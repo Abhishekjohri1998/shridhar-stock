@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { expiringWithin, findUnit, loadCharge, loadTotal, openLoadLines, unallottedQty, VENDOR_CARRIER, landedUnitCost, poStage, priceVolatility, receivedQty, round2, soonestExpiry, unitCostsFrom, type BillMirror, type Carrier, type CarrierLoad, type CarrierTrip, type LoadLine, type Lot, type PurchaseOrder, type Supplier } from '@stock/core';
+import { expiringWithin, findUnit, deliveryPerUnit, deliveryRows, loadCharge, loadTotal, packageLabel, openLoadLines, unallottedQty, VENDOR_CARRIER, landedUnitCost, poStage, priceVolatility, receivedQty, round2, soonestExpiry, unitCostsFrom, type BillMirror, type Carrier, type CarrierLoad, type CarrierTrip, type LoadLine, type Lot, type PurchaseOrder, type Supplier } from '@stock/core';
 import { audit, requireRole, who } from '../auth';
 import { receiveGoods, type ReceiveInput } from './actions';
 import { handler, HttpError } from '../http';
@@ -849,21 +849,14 @@ purchasingRoutes.get(
   }),
 );
 
-/**
- * Saves one carrier's arrival: arrived units are posted per order (the receive, with the landed
- * cost including rate x arrived); `remove` takes a line off the load (back to unallotted); what
- * did not come stays on the load. Notes are saved with the load. A worker's rates are ignored.
- */
-purchasingRoutes.post(
-  '/arriving/:loadId/save',
-  anyWorker,
-  handler(async (req, res) => {
-    const b = z
+const arrivalBody = z
       .object({
         notes: z.string().trim().max(1000).optional(),
         updateCost: z.boolean().optional(),
         /** The trip's one delivery charge (admin only; a worker's is ignored). */
         charge: z.number().min(0).max(1e7).optional(),
+        /** Combined units: the units ticked in this Update / Finish came as one package. */
+        packing: z.enum(['separate', 'combined']).optional(),
         lines: z
           .array(
             z.object({
@@ -879,85 +872,117 @@ purchasingRoutes.post(
           .max(300)
           .default([]),
       })
-      .parse(req.body);
+;
+
+/**
+ * Posts one Update / Finish of a carrier's arrival onto the load (not saved): arrived units are
+ * received per order at their places and logged ("3 Bag Sugar → Shop"); removed lines go back to
+ * unallotted; under "Combined units" what arrived now is kept as one package.
+ */
+async function postArrival(req: Parameters<typeof who>[0], ld: CarrierLoad, b: z.infer<typeof arrivalBody>, at: string) {
+  const repo = getRepo();
+  const canRate = who(req).role === 'admin';
+  if (new Set(b.lines.map((l) => lineKey(l.poId, l.itemId))).size !== b.lines.length) throw new HttpError(400, 'A line is there twice');
+  const by = audit(req).by;
+  const openOf = (l: { poId: string; itemId: string }) => ld.lines.find((x) => !x.received && x.poId === l.poId && x.itemId === l.itemId);
+  for (const l of b.lines) {
+    const x = openOf(l);
+    if (!x) throw new HttpError(400, 'That item is not waiting on this load');
+    if (!l.remove && l.arrived > x.qty + 1e-9) throw new HttpError(400, 'More arrived than was on this load: count again');
+  }
+  if (canRate && b.charge != null) setCharge(ld, b.charge, by, at);
+  // Removed: off the load, back to unallotted.
+  const removed = b.lines.filter((l) => l.remove).map((l) => openOf(l)!);
+  if (removed.length) {
+    ld.lines = ld.lines.filter((x) => !removed.includes(x));
+    ld.history.push({ at, by, action: 'unassign', lines: removed.map((x) => ({ poId: x.poId, itemId: x.itemId, qty: x.qty })), note: 'removed on arriving' });
+  }
+  // Arrived: posted per order.
+  const arrived = b.lines.filter((l) => !l.remove && l.arrived > 0);
+  const byPo = new Map<string, typeof arrived>();
+  for (const l of arrived) byPo.set(l.poId, [...(byPo.get(l.poId) ?? []), l]);
+  const pos = new Map<string, PurchaseOrder>();
+  for (const id of byPo.keys()) {
+    const p = await repo.getDoc<PurchaseOrder>('pos', id);
+    if (!p) throw new HttpError(404, 'No such order');
+    if (poStage(p.status) !== 'ordered') throw new HttpError(409, 'Order ' + p.no + ' is already ' + p.status);
+    for (const l of byPo.get(id)!) if (l.arrived > dueOf(p, l.itemId) + 1e-9) throw new HttpError(400, 'More arrived than is still due on order ' + p.no);
+    pos.set(id, p);
+  }
+  const vendorBrings = ld.carrierId === VENDOR_CARRIER;
+  const got: { poId: string; itemId: string; qty: number }[] = [];
+  const stored: { poId: string; itemId: string; qty: number; unit: string; placeId: string; name: string }[] = [];
+  const [allItems, locs] = arrived.length ? await Promise.all([repo.listItems(), repo.listLocations()]) : [[], []];
+  const itemOf = new Map(allItems.map((i) => [i.id, i]));
+  for (const [poId, lines] of byPo) {
+    const p = pos.get(poId)!;
+    const mine = new Map(lines.map((l) => [l.itemId, l]));
+    const input: ReceiveInput = {
+      updateCost: canRate && b.updateCost === true,
+      got: Object.fromEntries(p.lines.map((pl) => {
+        const l = mine.get(pl.itemId);
+        return [pl.itemId, l ? { qty: l.arrived, ...(l.placeId ? { placeId: l.placeId } : {}) } : { qty: 0 }];
+      })),
+    };
+    const rates = new Map(lines.map((l) => [l.itemId, { loadId: ld.id, rate: openOf(l)!.ratePerUnit }]));
+    const receipt = await receiveGoods(req, p, input, false, {
+      id: newId('chk'),
+      at,
+      by,
+      mode: vendorBrings ? 'self' : 'carrier',
+      ...(vendorBrings ? {} : { carrierId: ld.carrierId }),
+      ...(ld.vehicleNo ? { vehicleNo: ld.vehicleNo } : {}),
+      ...(ld.driverName ? { driverName: ld.driverName } : {}),
+      lines: lines.map((l) => ({ itemId: l.itemId, arrived: l.arrived, ok: true, condition: 'ok' as const })),
+    }, rates);
+    for (const l of lines) {
+      const x = openOf(l)!;
+      const rest = r6(x.qty - l.arrived);
+      x.qty = l.arrived;
+      x.received = { qty: l.arrived, receipt, at };
+      if (rest > 0) ld.lines.push({ poId: x.poId, itemId: x.itemId, qty: rest, ratePerUnit: x.ratePerUnit });
+      got.push({ poId: x.poId, itemId: x.itemId, qty: l.arrived });
+      const unit = p.lines.find((y) => y.itemId === l.itemId)?.unit ?? '';
+      const it = itemOf.get(l.itemId);
+      const u = it ? findUnit(it, unit) : undefined;
+      const placeId = l.placeId ?? p.to ?? '';
+      stored.push({ poId: x.poId, itemId: x.itemId, qty: l.arrived, unit: u?.label || unit, placeId, name: it?.nameEn ?? l.itemId });
+    }
+  }
+  if (got.length) ld.history.push({ at, by, action: 'received', lines: got });
+  // The log: "2 Box Parle-G → Shop", one entry per Update.
+  if (stored.length) {
+    const placeName = new Map(locs.map((l) => [l.id, l.name]));
+    ld.history.push({ at, by, action: 'stored', lines: stored.map(({ name: _n, ...x }) => x), note: stored.map((x) => x.qty + ' ' + x.unit + ' ' + x.name + ' → ' + (placeName.get(x.placeId) ?? x.placeId)).join(' · ') });
+  }
+  if (b.packing === 'combined' && got.length) {
+    const per = new Map<string, number>();
+    for (const x of got) per.set(x.itemId, r6((per.get(x.itemId) ?? 0) + x.qty));
+    const lines = [...per].map(([itemId, qty]) => ({ itemId, qty }));
+    const label = packageLabel(lines.map((x) => ({ qty: x.qty, name: itemOf.get(x.itemId)?.nameEn ?? x.itemId })));
+    const pkg = { id: newId('pkg'), lines, label, at };
+    ld.packages = [...(ld.packages ?? []), pkg];
+    ld.history.push({ at, by, action: 'package', note: label });
+  }
+  return { got, removed, stored };
+}
+
+/**
+ * Saves one carrier's arrival: arrived units are posted per order (the receive, with the landed
+ * cost including rate x arrived); `remove` takes a line off the load (back to unallotted); what
+ * did not come stays on the load. Notes are saved with the load. A worker's rates are ignored.
+ */
+purchasingRoutes.post(
+  '/arriving/:loadId/save',
+  anyWorker,
+  handler(async (req, res) => {
+    const b = arrivalBody.parse(req.body);
     const repo = getRepo();
-    const canRate = who(req).role === 'admin';
     const ld = await loadById(String(req.params.loadId));
     if (ld.done) throw new HttpError(409, 'This load is finished already');
-    if (new Set(b.lines.map((l) => lineKey(l.poId, l.itemId))).size !== b.lines.length) throw new HttpError(400, 'A line is there twice');
     const by = audit(req).by;
     const at = now();
-    const openOf = (l: { poId: string; itemId: string }) => ld.lines.find((x) => !x.received && x.poId === l.poId && x.itemId === l.itemId);
-    for (const l of b.lines) {
-      const x = openOf(l);
-      if (!x) throw new HttpError(400, 'That item is not waiting on this load');
-      if (!l.remove && l.arrived > x.qty + 1e-9) throw new HttpError(400, 'More arrived than was on this load: count again');
-    }
-    if (canRate && b.charge != null) setCharge(ld, b.charge, by, at);
-    // Removed: off the load, back to unallotted.
-    const removed = b.lines.filter((l) => l.remove).map((l) => openOf(l)!);
-    if (removed.length) {
-      ld.lines = ld.lines.filter((x) => !removed.includes(x));
-      ld.history.push({ at, by, action: 'unassign', lines: removed.map((x) => ({ poId: x.poId, itemId: x.itemId, qty: x.qty })), note: 'removed on arriving' });
-    }
-    // Arrived: posted per order.
-    const arrived = b.lines.filter((l) => !l.remove && l.arrived > 0);
-    const byPo = new Map<string, typeof arrived>();
-    for (const l of arrived) byPo.set(l.poId, [...(byPo.get(l.poId) ?? []), l]);
-    const pos = new Map<string, PurchaseOrder>();
-    for (const id of byPo.keys()) {
-      const p = await repo.getDoc<PurchaseOrder>('pos', id);
-      if (!p) throw new HttpError(404, 'No such order');
-      if (poStage(p.status) !== 'ordered') throw new HttpError(409, 'Order ' + p.no + ' is already ' + p.status);
-      for (const l of byPo.get(id)!) if (l.arrived > dueOf(p, l.itemId) + 1e-9) throw new HttpError(400, 'More arrived than is still due on order ' + p.no);
-      pos.set(id, p);
-    }
-    const vendorBrings = ld.carrierId === VENDOR_CARRIER;
-    const got: { poId: string; itemId: string; qty: number }[] = [];
-    const stored: { poId: string; itemId: string; qty: number; unit: string; placeId: string; name: string }[] = [];
-    const [allItems, locs] = arrived.length ? await Promise.all([repo.listItems(), repo.listLocations()]) : [[], []];
-    const itemOf = new Map(allItems.map((i) => [i.id, i]));
-    for (const [poId, lines] of byPo) {
-      const p = pos.get(poId)!;
-      const mine = new Map(lines.map((l) => [l.itemId, l]));
-      const input: ReceiveInput = {
-        updateCost: canRate && b.updateCost === true,
-        got: Object.fromEntries(p.lines.map((pl) => {
-          const l = mine.get(pl.itemId);
-          return [pl.itemId, l ? { qty: l.arrived, ...(l.placeId ? { placeId: l.placeId } : {}) } : { qty: 0 }];
-        })),
-      };
-      const rates = new Map(lines.map((l) => [l.itemId, { loadId: ld.id, rate: openOf(l)!.ratePerUnit }]));
-      const receipt = await receiveGoods(req, p, input, false, {
-        id: newId('chk'),
-        at,
-        by,
-        mode: vendorBrings ? 'self' : 'carrier',
-        ...(vendorBrings ? {} : { carrierId: ld.carrierId }),
-        ...(ld.vehicleNo ? { vehicleNo: ld.vehicleNo } : {}),
-        ...(ld.driverName ? { driverName: ld.driverName } : {}),
-        lines: lines.map((l) => ({ itemId: l.itemId, arrived: l.arrived, ok: true, condition: 'ok' as const })),
-      }, rates);
-      for (const l of lines) {
-        const x = openOf(l)!;
-        const rest = r6(x.qty - l.arrived);
-        x.qty = l.arrived;
-        x.received = { qty: l.arrived, receipt, at };
-        if (rest > 0) ld.lines.push({ poId: x.poId, itemId: x.itemId, qty: rest, ratePerUnit: x.ratePerUnit });
-        got.push({ poId: x.poId, itemId: x.itemId, qty: l.arrived });
-        const unit = p.lines.find((y) => y.itemId === l.itemId)?.unit ?? '';
-        const it = itemOf.get(l.itemId);
-        const u = it ? findUnit(it, unit) : undefined;
-        const placeId = l.placeId ?? p.to ?? '';
-        stored.push({ poId: x.poId, itemId: x.itemId, qty: l.arrived, unit: u?.label || unit, placeId, name: it?.nameEn ?? l.itemId });
-      }
-    }
-    if (got.length) ld.history.push({ at, by, action: 'received', lines: got });
-    // The log: "2 Box Parle-G → Shop", one entry per Update.
-    if (stored.length) {
-      const placeName = new Map(locs.map((l) => [l.id, l.name]));
-      ld.history.push({ at, by, action: 'stored', lines: stored.map(({ name: _n, ...x }) => x), note: stored.map((x) => x.qty + ' ' + x.unit + ' ' + x.name + ' → ' + (placeName.get(x.placeId) ?? x.placeId)).join(' · ') });
-    }
+    const { got, removed } = await postArrival(req, ld, b, at);
     if (b.notes != null && b.notes !== (ld.notes ?? '')) {
       if (b.notes) ld.notes = b.notes;
       else delete ld.notes;
@@ -980,7 +1005,7 @@ function setCharge(ld: CarrierLoad, charge: number, by: string, at: string): boo
 }
 
 /**
- * Finish: closes one carrier's load. What did not arrive goes back to Allot (off the load, the
+ * Finish: posts the ticked units like Update, then closes one carrier's load. What did not arrive goes back to Allot (off the load, the
  * order line unallotted again); the load is done and leaves Arriving. The trip charge (admin) is
  * shared over every unit that arrived on it, into each receipt's landed cost.
  */
@@ -988,14 +1013,14 @@ purchasingRoutes.post(
   '/arriving/:loadId/finish',
   anyWorker,
   handler(async (req, res) => {
-    const b = z.object({ notes: z.string().trim().max(1000).optional(), charge: z.number().min(0).max(1e7).optional() }).parse(req.body ?? {});
+    const b = arrivalBody.parse(req.body ?? {});
     const repo = getRepo();
-    const canRate = who(req).role === 'admin';
     const ld = await loadById(String(req.params.loadId));
     if (ld.done) throw new HttpError(409, 'This load is finished already');
     const by = audit(req).by;
     const at = now();
-    if (canRate && b.charge != null) setCharge(ld, b.charge, by, at);
+    // Finish = Update + close: the ticked units go in first, at their places.
+    const { got } = await postArrival(req, ld, b, at);
     if (b.notes != null && b.notes !== (ld.notes ?? '')) {
       if (b.notes) ld.notes = b.notes;
       else delete ld.notes;
@@ -1009,7 +1034,7 @@ purchasingRoutes.post(
     await repo.putDoc('loads', ld);
     emit('pos');
     if (itemsChanged) emit('items');
-    res.json({ ok: true, back: Math.round(back.reduce((n, x) => n + x.qty, 0) * 1e6) / 1e6, tripCharge: loadCharge(ld) });
+    res.json({ ok: true, posted: r6(got.reduce((n, x) => n + x.qty, 0)), back: r6(back.reduce((n, x) => n + x.qty, 0)), ...(who(req).role === 'admin' ? { tripCharge: loadCharge(ld) } : {}) });
   }),
 );
 
@@ -1027,5 +1052,49 @@ purchasingRoutes.put(
     emit('pos');
     if (itemsChanged) emit('items');
     res.json({ ok: true, tripCharge: loadCharge(ld) });
+  }),
+);
+
+/**
+ * The delivery-charge table of a load (carrier history, admin): rows per item and per combined
+ * package. Save stores the rates; `apply` ("Add to cost of items") puts them into the landed cost:
+ * each item's per-unit rate is recomputed from the table and set on its received lines, so applying
+ * again after an edit replaces, never adds twice.
+ */
+purchasingRoutes.put(
+  '/admin/loads/:id/delivery',
+  admin,
+  handler(async (req, res) => {
+    const rec = z.record(z.string(), z.number().min(0).max(1e6));
+    const b = z.object({ items: rec.default({}), packages: rec.default({}), apply: z.boolean().optional() }).parse(req.body);
+    const ld = await loadById(String(req.params.id));
+    const by = audit(req).by;
+    const at = now();
+    const before = loadCharge(ld);
+    const pkgIds = new Set((ld.packages ?? []).map((p) => p.id));
+    const itemIds = new Set(ld.lines.filter((x) => x.received).map((x) => x.itemId));
+    if (Object.keys(b.packages).some((k) => !pkgIds.has(k)) || Object.keys(b.items).some((k) => !itemIds.has(k))) throw new HttpError(400, 'That row is not on this load');
+    ld.deliveryRates = { items: b.items, packages: b.packages, ...(ld.deliveryRates?.appliedAt ? { appliedAt: ld.deliveryRates.appliedAt } : {}) };
+    const total = deliveryRows(ld).total;
+    if (Math.abs(total - before) >= 0.005 || !ld.history.some((h) => h.action === 'charge')) ld.history.push({ at, by, action: 'charge', note: round2(before) + ' → ' + total });
+    let itemsChanged = false;
+    if (b.apply) {
+      const per = deliveryPerUnit(ld);
+      const pos = new Map<string, PurchaseOrder>();
+      const changes: { poId: string; itemId: string; from: number; to: number }[] = [];
+      for (const x of ld.lines.filter((y) => y.received && y.received.qty > 0)) {
+        const rate = per.get(x.itemId) ?? 0;
+        if (Math.abs((x.ratePerUnit || 0) - rate) < 1e-9) continue;
+        changes.push({ poId: x.poId, itemId: x.itemId, from: x.ratePerUnit || 0, to: rate });
+        if (await setLineRate(ld, x, rate, pos)) itemsChanged = true;
+      }
+      if (changes.length) ld.history.push({ at, by, action: 'rate', lines: changes, note: 'added to cost of items' });
+      for (const p of pos.values()) await getRepo().putDoc('pos', p);
+      ld.deliveryRates.appliedAt = at;
+    }
+    await getRepo().putDoc('loads', ld);
+    emit('pos');
+    if (itemsChanged) emit('items');
+    res.json({ ok: true, ...deliveryRows(ld), load: ld });
   }),
 );
