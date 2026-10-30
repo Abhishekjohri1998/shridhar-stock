@@ -348,7 +348,7 @@ function ItemDetails({
               <div className="unit-grid">
                 <label className="field">
                   <span>{t('items.code')}</span>
-                  <SuggestInput value={u.code} onChange={(v) => pickCode(i, v)} aria-label={t('items.code')} placeholder={i === 0 ? bi('e.g. gm, pc, kg', 'ಉದಾ. gm, pc, kg') : undefined} suggestions={known.map((k) => ({ value: k.code, hint: itemsWord(k.count) }))} />
+                  <SuggestInput limit={0} value={u.code} onChange={(v) => pickCode(i, v)} aria-label={t('items.code')} placeholder={i === 0 ? bi('e.g. gm, pc, kg', 'ಉದಾ. gm, pc, kg') : undefined} suggestions={known.map((k) => ({ value: k.code, hint: itemsWord(k.count) }))} />
                 </label>
                 <label className="field">
                   <span>{t('items.label')}</span>

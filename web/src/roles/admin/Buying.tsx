@@ -6,9 +6,8 @@ import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
 import { statusWord } from '../../lib/words';
 import { Empty, Loading, Money, Select, Status, Tabs, useBi, when, Table } from '../../components/ui';
-import { CarrierLoads } from './Loads';
 import { AllotTab, ArrivingTab } from './Arrivals';
-import { BillLine, ChecklistList, CONDITION_WORDS, deleteChecklist, deletePurchase, DeliveryText, PaymentForm, PaymentsList, SupplierHistory, useCarriers } from './VendorHistory';
+import { BillLine, ChecklistList, CONDITION_WORDS, deleteChecklist, deletePurchase, PaymentForm, PaymentsList, SupplierHistory, useCarriers } from './VendorHistory';
 
 /** An item as the orders page needs it: names and units, never the whole catalogue. */
 type ItemBrief = Pick<Item, 'id' | 'nameEn' | 'nameKn' | 'defaultUnit'> & { units: { code: string; label: string; labelKn: string; perBase: number; cost?: number }[] };
@@ -171,7 +170,6 @@ export function PurchasesPage() {
                 : bi('No orders yet. Tap “+ New order” to make the first one.', 'ಇನ್ನೂ ಆರ್ಡರ್ ಇಲ್ಲ. ಮೊದಲನೆಯದಕ್ಕೆ “+ ಹೊಸ ಆರ್ಡರ್” ಒತ್ತಿ.')}
             </Empty>
           )}
-          {tab === 'open' && <CarrierLoads orders={value.page.orders} sups={value.sups} items={items} carriers={carriers} lang={lang} onDone={setNote} />}
           {value.page.orders.map((p) => (
             <OrderCard key={p.id + ':' + p.status + ':' + (p.receipts ?? 0)} p={p} carriers={carriers} reload={(m) => { setNote(m); setVersion((v) => v + 1); }} supplier={value.sups.find((s) => s.id === p.supplierId)} items={items} locs={value.locs} lang={lang} act={act} />
           ))}
@@ -283,8 +281,7 @@ function OrderCard({
         <Status s={progress} label={statusWord(progress, lang)} />
       </div>
       <div className="muted" data-tour="purchases-delivery">
-        <DeliveryText d={p.delivery} carriers={carriers} />
-        {p.delivery?.expectedOn && ' · ' + bi('expected', 'ನಿರೀಕ್ಷೆ') + ' ' + p.delivery.expectedOn}
+        {p.delivery?.expectedOn && bi('expected', 'ನಿರೀಕ್ಷೆ') + ' ' + p.delivery.expectedOn}
       </div>
       <div className="muted">
         {bi('Ordered', 'ಆರ್ಡರ್')} {when(p.times.ordered ?? p.at, lang)}

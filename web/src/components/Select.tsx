@@ -237,6 +237,7 @@ export function SuggestInput({
   placeholder,
   'data-tour': tour,
   'aria-label': ariaLabel,
+  limit = 8,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -244,6 +245,8 @@ export function SuggestInput({
   placeholder?: string;
   'data-tour'?: string;
   'aria-label'?: string;
+  /** How many suggestions to show; 0 shows them all (the list scrolls). */
+  limit?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -252,7 +255,7 @@ export function SuggestInput({
   const list = useRef<HTMLDivElement>(null);
   const id = useId();
   const q = value.trim().toLowerCase();
-  const shown = suggestions.filter((s) => s.value.toLowerCase().includes(q) && s.value.toLowerCase() !== q).slice(0, 8);
+  const shown = suggestions.filter((s) => s.value.toLowerCase().includes(q) && s.value.toLowerCase() !== q).slice(0, limit > 0 ? limit : undefined);
   const visible = open && shown.length > 0;
 
   const measure = useCallback(() => {

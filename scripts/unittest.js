@@ -42,6 +42,18 @@ const rice = { units: [{ code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price
   check('used units: every name once', u.length === 6, JSON.stringify(u.map((x) => x.code)));
 }
 {
+  // Every unit ever used comes back, not just the top few: "Box" must be suggested before it is typed.
+  const many = Array.from({ length: 15 }, (_, i) => ({ units: [{ code: 'u' + i, label: 'U' + i }] }));
+  many.push({ units: [{ code: 'Box', label: 'Box' }] });
+  const all = C.usedUnits(many);
+  check('used units: all of them, not a top few', all.length === 16 && all.some((x) => x.code === 'Box'), JSON.stringify(all.map((x) => x.code)));
+  const item = fs.readFileSync(path.join(__dirname, '..', 'web', 'src', 'pages', 'admin', 'InventoryItem.tsx'), 'utf8');
+  const sel = fs.readFileSync(path.join(__dirname, '..', 'web', 'src', 'components', 'Select.tsx'), 'utf8');
+  check('unit name suggestions are not capped', /<SuggestInput limit=\{0\} value=\{u\.code\}/.test(item) && /limit > 0 \? limit : undefined/.test(sel));
+  const buying = fs.readFileSync(path.join(__dirname, '..', 'web', 'src', 'roles', 'admin', 'Buying.tsx'), 'utf8');
+  check('the Order tab has no carrier panel and no delivery line', !/CarrierLoads|DeliveryText/.test(buying));
+}
+{
   const p = C.priceFor(parle, 'pack', 1);
   check('a pack of Parle-G is ₹110, not 24 × ₹5', p.amount === 110 && p.baseQty === 24, JSON.stringify(p));
   const two = C.priceFor(parle, 'pack', 2);
