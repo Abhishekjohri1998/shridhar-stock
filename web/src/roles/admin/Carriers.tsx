@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { deliveryRows, formatRate, pickName, round2, type Carrier, type CarrierLoad, type CarrierTrip, type DeliveryChecklist, type Item, type Supplier } from '@stock/core';
+import { deliveryRows, formatRate, formatRupees, pickName, round2, type Carrier, type CarrierLoad, type CarrierTrip, type DeliveryChecklist, type Item, type Supplier } from '@stock/core';
 import { api, http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
@@ -395,7 +395,17 @@ function LoadCharges({ ld, items, onDone }: { ld: CarrierLoad; items: Map<string
                 return (
                   <tr key={k}>
                     <td>{r.no}</td>
-                    <td>{r.kind === 'item' ? nameOf(r.id) : (r.label ?? '') + ' ' + bi('(combined)', '(ಒಟ್ಟು)')}</td>
+                    <td>
+                      {r.kind === 'item' ? nameOf(r.id) : (r.label ?? '') + ' ' + bi('(combined)', '(ಒಟ್ಟು)')}
+                      {r.kind === 'item' && ld.costApplied?.[r.id] && (() => {
+                        const a = ld.costApplied![r.id]!;
+                        return (
+                          <div className="muted" data-cost-now={r.id}>
+                            {bi('Cost now ', 'ಈಗಿನ ಖರೀದಿ ಬೆಲೆ ') + formatRupees(a.landed) + ' / ' + a.unit + ' (' + formatRupees(a.cost) + ' + ' + formatRupees(a.delivery) + bi(' delivery)', ' ಸಾಗಣೆ)')}
+                          </div>
+                        );
+                      })()}
+                    </td>
                     <td className="num">{r.qty}</td>
                     <td className="num">
                       <input inputMode="decimal" className="in-price" value={rate[k] ?? ''} placeholder="0" onChange={(e) => setRate({ ...rate, [k]: e.target.value })} aria-label={bi('Rate per item', 'ಪ್ರತಿ ಸಾಮಾನಿನ ದರ')} />

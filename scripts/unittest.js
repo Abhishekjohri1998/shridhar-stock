@@ -158,6 +158,20 @@ const rice = { units: [{ code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price
   check('the middle of a word does not', !C.itemMatches(item, 'soori'));
   check('an empty search finds nothing', !C.itemMatches(item, '  '));
   {
+    // The client's miss: "Ni" found Nimraani, "Nim" found nothing (the anusvara fold keys it ninrani).
+    const nim = { nameEn: 'Nimraani 5kg', nameKn: 'ನಿಮ್ರಾನಿ 5kg' };
+    for (const q of ['N', 'n', 'Ni', 'Nim', 'NIM', 'Nimr', 'nimraani', 'Nimraani 5', 'ನಿ', 'ನಿಮ್', 'ನಿಮ್ರಾ', 'ನಿಮ್ರಾನಿ', '5kg'])
+      check('Nimraani is found by ' + JSON.stringify(q), C.itemMatches(nim, q));
+    check('by sound across scripts: "nimrani" finds it', C.itemMatches({ nameEn: '', nameKn: 'ನಿಮ್ರಾನಿ' }, 'nimrani'));
+    check('by sound across scripts: "nim" finds the Kannada-only name', C.itemMatches({ nameEn: '', nameKn: 'ನಿಮ್ರಾನಿ' }, 'nim'));
+    check('Kannada query finds the English-only name', C.itemMatches({ nameEn: 'Nimraani', nameKn: '' }, 'ನಿಮ್ರಾ'));
+    check('zero-width characters in the query are ignored', C.itemMatches(nim, 'N\u200bi\u200dm\uFEFF'));
+    check('zero-width characters in the name are ignored', C.itemMatches({ nameEn: 'Ni\u200Bmraani', nameKn: 'ನಿ\u200Cಮ್ರಾನಿ' }, 'nimr'));
+    check('a query of only invisible characters finds nothing', !C.itemMatches(nim, '\u200b\u200c'));
+    check('something else does not find it', !C.itemMatches(nim, 'Nir'));
+    check('plainSearchText strips and lowers', C.plainSearchText(' Ni​m  Raani ') === 'nim raani');
+  }
+  {
     const hg = { aliases: [{ text: 'HG box', unit: 'Box' }, { text: 'Kit', unit: 'pc' }, { text: 'HG' }] };
     check('an alias with a unit answers it', C.matchedAliasUnit(hg, 'HG box') === 'Box');
     check('part of its second word too', C.matchedAliasUnit(hg, 'hg b') === 'Box');

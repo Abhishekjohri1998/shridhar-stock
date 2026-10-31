@@ -532,6 +532,8 @@ export interface CarrierLoad {
   packages?: LoadPackage[];
   /** The delivery-charge table (carrier history): rate per item unit and per package. */
   deliveryRates?: DeliveryRates;
+  /** Per item, what the last "Add to cost of items" (or Finish) set: "Cost now ₹1650 / Box (₹1640 + ₹10 delivery)". */
+  costApplied?: Record<string, AppliedCost>;
   /** Finished on Arriving: closed, what did not come went back to Allot. */
   done?: { at: string; by: string };
   at: string;
@@ -552,6 +554,14 @@ export interface DeliveryRates {
   packages: Record<string, number>;
   /** When "Add to cost of items" last put them into the landed cost. */
   appliedAt?: string;
+}
+
+/** An item's cost as set from a load: the receipt's purchase cost + delivery per unit = landed. */
+export interface AppliedCost {
+  unit: string;
+  cost: number;
+  delivery: number;
+  landed: number;
 }
 
 /** One row of a load's delivery table: an item (its loose units) or a package (qty 1). */

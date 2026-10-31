@@ -169,18 +169,40 @@ export function itemKeys(item: { nameEn: string; nameKn: string; aliases?: Alias
 }
 
 /**
- * Whether a typed query finds an item: the start of any word of any of its names, in either
- * script. `akki` finds ಅಕ್ಕಿ and "Sona Masoori rice" alike; `ice` finds neither.
+ * Invisible characters a phone keyboard can slip into text (the Samsung handwriting pad does):
+ * zero-width space / non-joiner / joiner, word joiner, soft hyphen, BOM, bidi marks.
+ */
+const INVISIBLE = /[\u00AD\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g;
+
+/** Text as typed, for the plain comparison: no invisible characters, lower case, spaces single. */
+export function plainSearchText(text: string): string {
+  return String(text ?? '').replace(INVISIBLE, '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Whether a typed query finds an item. First plainly: the name or one of its words, in lower case,
+ * starts with what was typed ("Nim" finds "Nimraani 5kg", ನಿಮ್ finds ನಿಮ್ರಾನಿ). Then by sound, in either script: the
+ * start of any word of any of its names (`akki` finds ಅಕ್ಕಿ and "Sona Masoori rice" alike).
+ *
+ * The sound key folds an `m` before a consonant into `n` (the anusvara rule), so "Nimraani" keys
+ * as `ninrani`; a query that stops on that `m` ("Nim") has no consonant after it yet and keys as
+ * `nim`. So a query key ending in `m` is also tried ending in `n`.
  */
 export function itemMatches(item: { nameEn: string; nameKn: string; aliases?: Alias[] }, query: string): boolean {
-  const q = searchKey(query);
-  if (!q) return false;
+  const plain = plainSearchText(query);
+  if (!plain) return false;
   const names = [item.nameEn, item.nameKn, ...(item.aliases ?? []).map((a) => a.text)];
+  // Plain first: the start of the name or of any of its words, exactly as typed.
+  if (names.some((n) => { const t = plainSearchText(n); return t.startsWith(plain) || t.includes(' ' + plain); })) return true;
+  const q = searchKey(plain);
+  if (!q) return false;
+  const qs = q.endsWith('m') ? [q, q.slice(0, -1) + 'n'] : [q];
+  const hit = (k: string) => qs.some((x) => k.startsWith(x));
   for (const name of names) {
-    const whole = searchKey(name);
-    if (whole.startsWith(q)) return true;
-    for (const word of String(name).split(/\s+/)) {
-      if (searchKey(word).startsWith(q)) return true;
+    const clean = String(name ?? '').replace(INVISIBLE, '');
+    if (hit(searchKey(clean))) return true;
+    for (const word of clean.split(/\s+/)) {
+      if (hit(searchKey(word))) return true;
     }
   }
   return false;

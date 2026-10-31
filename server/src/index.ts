@@ -16,6 +16,7 @@ import { publicRoutes } from './routes/public';
 import { reportRoutes } from './routes/reports';
 import { roleRoutes } from './routes/roles';
 import { purchasingRoutes } from './routes/purchasing';
+import { unitRoutes } from './routes/units';
 import { startLink } from './billing/link';
 import { markInk } from './billing/sync';
 import { cleanStaleLoadLines } from './orderLoads';
@@ -66,6 +67,7 @@ async function main(): Promise<void> {
   api.use(reportRoutes);
   api.use(deliveryRoutes);
   api.use(purchasingRoutes);
+  api.use(unitRoutes);
   if (env.demo) api.use(demoRoutes);
   api.use((_req, res) => {
     res.status(404).json({ error: 'No such address' });

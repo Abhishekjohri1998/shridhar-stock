@@ -38,6 +38,7 @@ const PlacesPage = named(() => import('./pages/admin/Places'), 'PlacesPage');
 const PeoplePage = named(() => import('./pages/admin/People'), 'PeoplePage');
 const FilesPage = named(() => import('./pages/admin/Files'), 'FilesPage');
 const VehiclesPage = named(() => import('./pages/admin/Vehicles'), 'VehiclesPage');
+const UnitsPage = named(() => import('./pages/admin/Units'), 'UnitsPage');
 /** three.js is big: the 3D view is its own chunk, fetched only when the tab is opened. */
 const Inventory3DPage = named(() => import('./pages/admin/Inventory3D'), 'Inventory3DPage');
 const DeliveriesPage = named(() => import('./pages/admin/Deliveries'), 'DeliveriesPage');
@@ -90,6 +91,7 @@ const ADMIN: Place[] = [
       tab('/admin/places', 'Places', 'ಸ್ಥಳಗಳು'),
       tab('/admin/people', 'People', 'ಜನರು'),
       tab('/admin/vehicles', 'Vehicles', 'ವಾಹನಗಳು'),
+      tab('/admin/units', 'Units', 'ಘಟಕಗಳು'),
       tab('/admin/files', 'Excel', 'ಎಕ್ಸೆಲ್'),
       tab('/admin/settings', 'Settings', 'ಸೆಟ್ಟಿಂಗ್ಸ್'),
     ],
@@ -547,6 +549,7 @@ function Shell() {
                 <Route path="/admin/places" element={<PlacesPage />} />
                 <Route path="/admin/people" element={<PeoplePage />} />
                 <Route path="/admin/vehicles" element={<VehiclesPage />} />
+                <Route path="/admin/units" element={<UnitsPage />} />
                 <Route path="/admin/files" element={<FilesPage />} />
                 <Route path="/admin/settings" element={<SettingsPage />} />
                 <Route path="/explainer/record" element={<RecordPage />} />

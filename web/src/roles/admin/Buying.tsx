@@ -28,6 +28,22 @@ interface Line {
 }
 
 /**
+ * A new order still being made, kept on the server (`/admin/order-drafts`) so it survives a tab
+ * switch, a restart or another phone. Held ones wait in "Held orders" until reopened.
+ */
+interface OrderDraft {
+  id: string;
+  supplierId?: string;
+  expectedOn?: string;
+  lines: Line[];
+  extra?: { known?: ItemBrief[] };
+  held?: boolean;
+  updatedAt: string;
+}
+
+const newDraftId = () => 'od_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+/**
  * The unit an item is bought in: its default unit when the shop chose one, else the biggest one,
  * which is how suppliers sell.
  */
@@ -87,6 +103,32 @@ export function PurchasesPage() {
   const [making, setMaking] = useState(params.get('new') === 'buy');
   const [err, setErr] = useState('');
   const [note, setNote] = useState('');
+  // Held and in-progress new orders. The one being made reopens after a tab switch or a restart.
+  const [drafts, setDrafts] = useState<OrderDraft[]>([]);
+  const [openDraft, setOpenDraft] = useState<OrderDraft | null>(null);
+  const [showHeld, setShowHeld] = useState(false);
+  const [draftsV, setDraftsV] = useState(0);
+  const resumed = useRef(false);
+  // Only while the form is open does a save update the open draft; one saved as it closes goes to Held orders.
+  const makingRef = useRef(making);
+  makingRef.current = making;
+  const [formKey, setFormKey] = useState(0);
+  useEffect(() => {
+    http
+      .get<OrderDraft[]>('/admin/order-drafts')
+      .then((all) => {
+        setDrafts(all);
+        if (resumed.current) return;
+        resumed.current = true;
+        const cur = all.find((d) => !d.held);
+        if (cur && params.get('new') !== 'buy') {
+          setOpenDraft(cur);
+          setMaking(true);
+        }
+      })
+      .catch(() => undefined);
+  }, [draftsV]);
+  const held = drafts.filter((d) => d.id !== openDraft?.id);
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
   const items = new Map(value.page.items.map((i) => [i.id, i]));
@@ -125,9 +167,23 @@ export function PurchasesPage() {
       {step === 'order' && (
       <>
       <div className="bar">
-        <button className="btn primary" data-tour="purchases-new" onClick={() => setMaking(!making)}>
+        <button
+          className="btn primary"
+          data-tour="purchases-new"
+          onClick={() => {
+            // Closing it keeps what was typed: it is saved as it closes and listed under Held orders.
+            setOpenDraft(null);
+            if (making) setTimeout(() => setDraftsV((v) => v + 1), 500);
+            setMaking(!making);
+          }}
+        >
           + {bi('New order', 'ಹೊಸ ಆರ್ಡರ್')}
         </button>
+        {held.length > 0 && (
+          <button className={'btn' + (showHeld ? ' primary' : '')} data-held-orders onClick={() => setShowHeld(!showHeld)}>
+            {bi('Held orders', 'ತಡೆಹಿಡಿದ ಆರ್ಡರ್') + ' (' + held.length + ')'}
+          </button>
+        )}
         <div className="chips" data-tour="purchases-filter">
           {(['open', 'all', 'suppliers'] as const).map((k) => (
             <button
@@ -145,17 +201,62 @@ export function PurchasesPage() {
       </div>
       {err && <div className="msg err">{err}</div>}
       {note && <div className="msg ok">{note}</div>}
+      {showHeld && held.length > 0 && (
+        <div className="card" data-held-list>
+          <b>{bi('Held orders', 'ತಡೆಹಿಡಿದ ಆರ್ಡರ್')}</b>
+          {held.map((d) => (
+            <div className="bar mt-6" key={d.id}>
+              <span className="grow">
+                <span className="name">{value.sups.find((x) => x.id === d.supplierId)?.name ?? bi('No supplier', 'ಸರಬರಾಜುದಾರರಿಲ್ಲ')}</span>{' '}
+                <span className="muted">
+                  · {d.lines.length} {bi('items', 'ಸಾಮಾನು')} · {when(d.updatedAt, lang)}
+                </span>
+              </span>
+              <button
+                className="btn small primary"
+                onClick={() => {
+                  setOpenDraft({ ...d, held: false });
+                  setFormKey((k) => k + 1);
+                  setMaking(true);
+                  setShowHeld(false);
+                  http.put('/admin/order-drafts/' + d.id, { ...d, held: false }).catch(() => undefined);
+                }}
+              >
+                {bi('Open', 'ತೆರೆಯಿರಿ')}
+              </button>
+              <button
+                className="btn small"
+                onClick={() => {
+                  if (!window.confirm(bi('Discard this held order? It cannot be brought back.', 'ಈ ತಡೆಹಿಡಿದ ಆರ್ಡರ್ ತೆಗೆಯಬೇಕೆ? ಮತ್ತೆ ತರಲು ಆಗುವುದಿಲ್ಲ.'))) return;
+                  http.del('/admin/order-drafts/' + d.id).then(() => setDraftsV((v) => v + 1), (e: Error) => setErr(e.message));
+                }}
+              >
+                {bi('Discard', 'ತೆಗೆಯಿರಿ')}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       {making && (
         <NewOrder
+          key={formKey}
           locs={value.locs}
           sups={value.sups.filter((s) => s.active)}
           carriers={carriers}
-          fromBuyList={params.get('new') === 'buy'}
-          onDone={(saved) => {
+          fromBuyList={params.get('new') === 'buy' && !openDraft}
+          draft={openDraft}
+          onDraft={(d) => {
+            if (makingRef.current) setOpenDraft((prev) => (prev && prev.id !== d.id ? prev : d));
+            setDrafts((all) => [d, ...all.filter((x) => x.id !== d.id)]);
+          }}
+          onDone={(how) => {
             setMaking(false);
+            setOpenDraft(null);
             setParams({});
-            if (saved) setNote(bi('Order saved. Stock goes up when you tick the delivery checklist.', 'ಆರ್ಡರ್ ಉಳಿಸಲಾಗಿದೆ. ಸಾಮಾನು ಪರಿಶೀಲನೆ ಗುರುತಿಸಿದಾಗ ಸ್ಟಾಕ್ ಹೆಚ್ಚುತ್ತದೆ.'));
+            if (how === 'saved') setNote(bi('Order saved. Stock goes up when you tick the delivery checklist.', 'ಆರ್ಡರ್ ಉಳಿಸಲಾಗಿದೆ. ಸಾಮಾನು ಪರಿಶೀಲನೆ ಗುರುತಿಸಿದಾಗ ಸ್ಟಾಕ್ ಹೆಚ್ಚುತ್ತದೆ.'));
+            if (how === 'held') setNote(bi('Order held. Open it again from “Held orders”.', 'ಆರ್ಡರ್ ತಡೆಹಿಡಿಯಲಾಗಿದೆ. “ತಡೆಹಿಡಿದ ಆರ್ಡರ್”ನಿಂದ ಮತ್ತೆ ತೆರೆಯಿರಿ.'));
             setVersion((v) => v + 1);
+            setDraftsV((v) => v + 1);
           }}
         />
       )}
@@ -594,17 +695,95 @@ export function useItemSearch(q: string) {
   return found;
 }
 
-function NewOrder({ locs, sups, carriers, fromBuyList, onDone }: { locs: Location[]; sups: Supplier[]; carriers: Carrier[]; fromBuyList: boolean; onDone: (saved: boolean) => void }) {
+function NewOrder({
+  locs,
+  sups,
+  carriers,
+  fromBuyList,
+  draft,
+  onDraft,
+  onDone,
+}: {
+  locs: Location[];
+  sups: Supplier[];
+  carriers: Carrier[];
+  fromBuyList: boolean;
+  draft: OrderDraft | null;
+  onDraft: (d: OrderDraft) => void;
+  onDone: (how: 'saved' | 'held' | 'cancelled') => void;
+}) {
   const bi = useBi();
   const { lang } = useSession();
-  const [supplierId, setSupplier] = useState(sups[0]?.id ?? '');
-  const [lines, setLines] = useState<Line[]>([]);
+  const [supplierId, setSupplier] = useState(draft?.supplierId ?? sups[0]?.id ?? '');
+  const [lines, setLines] = useState<Line[]>(draft?.lines ?? []);
   // Who brings it is decided only in Allot; the order keeps just when it is expected.
-  const [expectedOn, setExpectedOn] = useState('');
-  const [known, setKnown] = useState<Map<string, ItemBrief>>(new Map());
+  const [expectedOn, setExpectedOn] = useState(draft?.expectedOn ?? '');
+  const [known, setKnown] = useState<Map<string, ItemBrief>>(() => new Map((draft?.extra?.known ?? []).map((i) => [i.id, i])));
   const [q, setQ] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  /*
+   * The draft autosaves a second after each change, and at once when the form closes (a tab
+   * switch), so nothing typed is lost. Nothing is saved until there is something to keep.
+   */
+  const draftId = useRef(draft?.id ?? newDraftId());
+  const pending = useRef<OrderDraft | null>(null);
+  const stored = useRef(!!draft);
+  const gone = useRef(false);
+  const payload = (held = false): OrderDraft => ({
+    id: draftId.current,
+    ...(supplierId ? { supplierId } : {}),
+    ...(expectedOn ? { expectedOn } : {}),
+    lines,
+    extra: {
+      known: lines
+        .map((l) => known.get(l.itemId))
+        .filter((x): x is ItemBrief => !!x)
+        .map((i) => ({ id: i.id, nameEn: i.nameEn, nameKn: i.nameKn, ...(i.defaultUnit ? { defaultUnit: i.defaultUnit } : {}), units: i.units.map((u) => ({ code: u.code, label: u.label, labelKn: u.labelKn, perBase: u.perBase, ...(u.cost != null ? { cost: u.cost } : {}) })) })),
+    },
+    ...(held ? { held: true } : {}),
+    updatedAt: new Date().toISOString(),
+  });
+  const putDraft = (d: OrderDraft) => {
+    stored.current = true;
+    return http.put<OrderDraft>('/admin/order-drafts/' + d.id, d);
+  };
+  const flush = () => {
+    const d = pending.current;
+    pending.current = null;
+    if (!d || gone.current) return;
+    onDraft(d);
+    putDraft(d).catch(() => undefined);
+  };
+  useEffect(() => {
+    if (gone.current) return;
+    if (!stored.current && lines.length === 0) return;
+    pending.current = payload();
+    const t = setTimeout(flush, 1000);
+    return () => clearTimeout(t);
+  }, [supplierId, expectedOn, lines]);
+  // Closing the form mid-edit (a tab switch) saves what was typed straight away.
+  useEffect(() => () => flush(), []);
+  const hold = async () => {
+    setErr('');
+    setBusy(true);
+    pending.current = null;
+    try {
+      await putDraft(payload(true));
+      gone.current = true;
+      onDone('held');
+    } catch (e) {
+      setErr((e as Error).message);
+      setBusy(false);
+    }
+  };
+  const cancel = async () => {
+    if (lines.length > 0 && !window.confirm(bi('Discard this order? What you typed is lost. Tap Hold to keep it for later.', 'ಈ ಆರ್ಡರ್ ತೆಗೆಯಬೇಕೆ? ಬರೆದದ್ದು ಹೋಗುತ್ತದೆ. ನಂತರಕ್ಕೆ ಇಡಲು ತಡೆಹಿಡಿ ಒತ್ತಿ.'))) return;
+    pending.current = null;
+    gone.current = true;
+    if (stored.current) await http.del('/admin/order-drafts/' + draftId.current).catch(() => undefined);
+    onDone('cancelled');
+  };
   const found = useItemSearch(q).filter((i) => !lines.some((l) => l.itemId === i.id));
   // Who supplies each item, the usual one first: added by hand on the item, or from past orders.
   const [whoSupplies, setWho] = useState<Record<string, ItemSupplierRow[]>>({});
@@ -676,8 +855,10 @@ function NewOrder({ locs, sups, carriers, fromBuyList, onDone }: { locs: Locatio
     setErr('');
     setBusy(true);
     try {
-      await http.post('/admin/pos', { supplierId, delivery: { mode: 'self', ...(expectedOn ? { expectedOn } : {}) }, lines: lines.map((l) => ({ itemId: l.itemId, unit: l.unit, qty: Number(l.qty), cost: Number(l.cost) || 0 })) });
-      onDone(true);
+      pending.current = null;
+      await http.post('/admin/pos', { supplierId, draftId: draftId.current, delivery: { mode: 'self', ...(expectedOn ? { expectedOn } : {}) }, lines: lines.map((l) => ({ itemId: l.itemId, unit: l.unit, qty: Number(l.qty), cost: Number(l.cost) || 0 })) });
+      gone.current = true;
+      onDone('saved');
     } catch (e) {
       setErr((e as Error).message);
       setBusy(false);
@@ -804,7 +985,10 @@ function NewOrder({ locs, sups, carriers, fromBuyList, onDone }: { locs: Locatio
         <button className="btn primary" disabled={!ok || busy} onClick={save}>
           {bi('Save order', 'ಆರ್ಡರ್ ಉಳಿಸಿ')}
         </button>
-        <button className="btn" onClick={() => onDone(false)}>
+        <button className="btn" disabled={busy || lines.length === 0} onClick={hold}>
+          {bi('Hold', 'ತಡೆಹಿಡಿ')}
+        </button>
+        <button className="btn" onClick={cancel}>
           {bi('Cancel', 'ರದ್ದು')}
         </button>
       </div>

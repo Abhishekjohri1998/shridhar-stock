@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { expiringWithin, findUnit, deliveryPerUnit, deliveryRows, loadCharge, loadTotal, packageLabel, openLoadLines, unallottedQty, VENDOR_CARRIER, landedUnitCost, poStage, priceVolatility, receivedQty, round2, soonestExpiry, unitCostsFrom, type BillMirror, type Carrier, type CarrierLoad, type CarrierTrip, type LoadLine, type Lot, type PurchaseOrder, type Supplier } from '@stock/core';
+import { expiringWithin, findUnit, deliveryPerUnit, deliveryRows, loadCharge, loadTotal, packageLabel, openLoadLines, unallottedQty, VENDOR_CARRIER, landedUnitCost, poStage, round4, priceVolatility, receivedQty, round2, soonestExpiry, unitCostsFrom, type BillMirror, type Carrier, type CarrierLoad, type CarrierTrip, type LoadLine, type Lot, type PurchaseOrder, type Supplier } from '@stock/core';
 import { audit, requireRole, who } from '../auth';
 import { receiveGoods, type ReceiveInput } from './actions';
 import { handler, HttpError } from '../http';
@@ -549,7 +549,7 @@ purchasingRoutes.post(
  * and is still its latest. The orders touched are kept in `pos` (the caller saves them). True when
  * an item's cost changed.
  */
-async function setLineRate(ld: CarrierLoad, line: LoadLine, rate: number, pos: Map<string, PurchaseOrder>): Promise<boolean> {
+async function setLineRate(ld: CarrierLoad, line: LoadLine, rate: number, pos: Map<string, PurchaseOrder>, force = false): Promise<boolean> {
   const repo = getRepo();
   const from = line.ratePerUnit || 0;
   line.ratePerUnit = rate;
@@ -574,10 +574,21 @@ async function setLineRate(ld: CarrierLoad, line: LoadLine, rate: number, pos: M
   const unit = p.lines.find((x) => x.itemId === line.itemId)?.unit;
   const item = unit ? await repo.getItem(line.itemId) : null;
   const u = item && unit ? findUnit(item, unit) : undefined;
-  if (!item || !unit || !u || u.cost == null || Math.abs(u.cost - round2(oldLanded)) > 0.005) return false;
+  if (!item || !unit || !u) return false;
+  /*
+   * "Add to cost of items" and Finish (force) always set the item's cost to this receipt's purchase
+   * cost + delivery per unit (1640 + 10 = 1650 a Box), whatever the cost was before: worked out from
+   * the receipt's own purchase cost, so applying again never stacks. A rate edit alone only follows
+   * a cost this receipt set.
+   */
+  if (!force && (u.cost == null || Math.abs(u.cost - round2(oldLanded)) > 0.005)) return false;
+  if (force) {
+    (ld.costApplied ??= {})[line.itemId] = { unit: u.code, cost: round2(rc.cost), delivery: round4(landed - rc.cost), landed: round2(landed) };
+  }
   const all = await repo.listDocs<PurchaseOrder>('pos', { filter: { 'received.itemId': line.itemId }, fields: ['received'] });
   const latest = all.flatMap((q) => (q.received ?? []).filter((x) => x.itemId === line.itemId && x.qty > 0 && x.at)).reduce((m, x) => (x.at! > m ? x.at! : m), '');
   if (!rc.at || rc.at < latest) return false;
+  if (u.cost != null && Math.abs(u.cost - round2(landed)) < 0.005) return false;
   item.units = unitCostsFrom(item.units, unit, landed);
   item.updatedAt = now();
   await repo.saveItem(item);
@@ -599,9 +610,8 @@ async function applyTripCharge(ld: CarrierLoad, by: string): Promise<boolean> {
   const changes: { poId: string; itemId: string; from: number; to: number }[] = [];
   let itemsChanged = false;
   for (const x of got) {
-    if (Math.abs((x.ratePerUnit || 0) - rate) < 1e-9) continue;
-    changes.push({ poId: x.poId, itemId: x.itemId, from: x.ratePerUnit || 0, to: rate });
-    if (await setLineRate(ld, x, rate, pos)) itemsChanged = true;
+    if (Math.abs((x.ratePerUnit || 0) - rate) >= 1e-9) changes.push({ poId: x.poId, itemId: x.itemId, from: x.ratePerUnit || 0, to: rate });
+    if (await setLineRate(ld, x, rate, pos, true)) itemsChanged = true;
   }
   if (changes.length) ld.history.push({ at: now(), by, action: 'rate', lines: changes, note: 'trip charge ' + round2(ld.tripCharge) + ' over ' + Math.round(units * 1e6) / 1e6 + ' units' });
   for (const p of pos.values()) await getRepo().putDoc('pos', p);
@@ -1084,9 +1094,8 @@ purchasingRoutes.put(
       const changes: { poId: string; itemId: string; from: number; to: number }[] = [];
       for (const x of ld.lines.filter((y) => y.received && y.received.qty > 0)) {
         const rate = per.get(x.itemId) ?? 0;
-        if (Math.abs((x.ratePerUnit || 0) - rate) < 1e-9) continue;
-        changes.push({ poId: x.poId, itemId: x.itemId, from: x.ratePerUnit || 0, to: rate });
-        if (await setLineRate(ld, x, rate, pos)) itemsChanged = true;
+        if (Math.abs((x.ratePerUnit || 0) - rate) >= 1e-9) changes.push({ poId: x.poId, itemId: x.itemId, from: x.ratePerUnit || 0, to: rate });
+        if (await setLineRate(ld, x, rate, pos, true)) itemsChanged = true;
       }
       if (changes.length) ld.history.push({ at, by, action: 'rate', lines: changes, note: 'added to cost of items' });
       for (const p of pos.values()) await getRepo().putDoc('pos', p);

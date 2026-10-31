@@ -114,6 +114,11 @@ async function main() {
     check('Kannada typed in English finds it', (await names('akki')).includes(rice.id));
     check('an alias finds it', (await names('biscuit')).includes(parle.id));
     eq('nothing typed, nothing found', (await names('')).length, 0);
+    {
+      const nim = (await call('/items', { nameEn: 'Nimraani 5kg', nameKn: 'ನಿಮ್ರಾನಿ 5kg', units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 300 }], aliases: [], racks: {}, reorderAt: {} })).body;
+      for (const q of ['Ni', 'Nim', 'Nimr', 'nimraani', 'ನಿಮ್'])
+        check('billing search finds Nimraani by ' + q, (await names(q)).includes(nim.id));
+    }
     const p = (await link('/items?q=parle')).body.items[0];
     check('with its units, prices and range, and no cost', p.units.length === 2 && p.units[0].price === 5 && p.units[0].min === 4 && p.units[0].max === 6 && p.units[1].code === 'pack' && p.units[1].price === 110 && p.units[1].min === undefined && !('cost' in p.units[0]) && p.nameKn === 'ಪಾರ್ಲೆ-ಜಿ', JSON.stringify(p));
     const r1 = (await link('/items?q=rice')).body.items.find((i) => i.id === rice.id);

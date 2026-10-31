@@ -411,6 +411,8 @@ actionRoutes.post(
         lines: z.array(z.object({ itemId: z.string(), unit: z.string(), qty: z.number().positive().max(1e6), cost: z.number().min(0).max(1e7).default(0) })).min(1).max(100),
         /** How it comes: the vendor themselves, or a carrier (who, which vehicle, when). */
         delivery: deliveryBody.optional(),
+        /** The held draft this order was made from: deleted once the order is saved. */
+        draftId: z.string().max(60).optional(),
       })
       .parse(req.body);
     const repo = getRepo();
@@ -426,6 +428,7 @@ actionRoutes.post(
     const delivery = body.delivery ? await deliveryFrom(body.delivery) : undefined;
     const p: PurchaseOrder = { id: 'po_' + no, no, supplierId: body.supplierId, ...(body.to ? { to: body.to } : {}), lines: body.lines, status: 'ordered', at: now(), times: { ordered: now() }, ...(delivery ? { delivery } : {}) };
     await repo.putDoc('pos', p);
+    if (body.draftId) await repo.deleteDoc('orderDrafts', body.draftId);
     emit('pos', {}, p.id);
     res.status(201).json(p);
   }),

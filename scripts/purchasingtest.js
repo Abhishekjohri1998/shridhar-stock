@@ -692,10 +692,101 @@ async function main() {
       rs = await recs();
       eq('P: sugar receipt landed', rs.find((r) => r.itemId === sugar.id && r.qty > 0).landed, 1060);
       eq('P: a row that is not on the load is refused', (await call('/admin/loads/' + ld.id + '/delivery', { method: 'PUT', body: { items: { nope: 1 } } })).status, 400);
+      // The client's SVT example: 1 Box ordered at 1640, ₹10 a Box delivery -> cost 1650 a Box, never stacking.
+      {
+        const svt = (await call('/items', { method: 'POST', body: { nameEn: 'SVT', nameKn: '', units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 150 }, { code: 'box', label: 'Box', labelKn: '', perBase: 12, price: 1700 }], aliases: [], racks: {} } })).body;
+        const sp = (await call('/admin/pos', { method: 'POST', body: { supplierId: sup, to: godown, lines: [{ itemId: svt.id, unit: 'box', qty: 1, cost: 1640 }] } })).body;
+        const sl = (await call('/admin/loads/allot', { method: 'POST', body: { carrierId: car.id, lines: [{ poId: sp.id, itemId: svt.id, qty: 1 }] } })).body.load;
+        const sf = await call('/arriving/' + sl.id + '/finish', { method: 'POST', body: { updateCost: true, lines: [{ poId: sp.id, itemId: svt.id, arrived: 1, placeId: shop }] } });
+        eq('SVT: finished', sf.status, 200);
+        const body = { items: { [svt.id]: 10 }, packages: {}, apply: true };
+        const a1 = await call('/admin/loads/' + sl.id + '/delivery', { method: 'PUT', body });
+        eq('SVT: 1640 + 10 = 1650 a Box', await costOf(svt, 'box'), 1650);
+        eq('SVT: pc derived from the Box', await costOf(svt, 'pc'), 137.5);
+        check('SVT: the table says what it set', JSON.stringify(a1.body.load.costApplied[svt.id]) === JSON.stringify({ unit: 'box', cost: 1640, delivery: 10, landed: 1650 }), JSON.stringify(a1.body.load.deliveryRates));
+        await call('/admin/loads/' + sl.id + '/delivery', { method: 'PUT', body });
+        eq('SVT: applied again: still 1650', await costOf(svt, 'box'), 1650);
+        // Someone already put the delivery in by hand (1650): applying never adds it again.
+        const it = (await call('/items/' + svt.id)).body;
+        await call('/items/' + svt.id, { method: 'PUT', body: { ...it, units: it.units.map((u) => (u.code === 'box' ? { ...u, cost: 1660 } : u)) } });
+        await call('/admin/loads/' + sl.id + '/delivery', { method: 'PUT', body });
+        eq('SVT: from the receipt purchase cost, not the cost before', await costOf(svt, 'box'), 1650);
+        const rcS = (await call('/admin/suppliers/' + sup + '/history')).body.purchases.find((p) => p.id === sp.id).received.find((r) => r.qty > 0);
+        check('SVT: receipt keeps 1640, landed 1650', rcS.cost === 1640 && rcS.landed === 1650, JSON.stringify(rcS));
+      }
       // Old loads: their charge shows converted.
       const rcv = (q) => ({ qty: q, receipt: 1, at: '' });
       eq('P: an old trip charge converted', deliveryRows({ tripCharge: 100, lines: [{ itemId: 'a', qty: 10, ratePerUnit: 0, received: rcv(10) }, { itemId: 'b', qty: 10, ratePerUnit: 0, received: rcv(10) }] }).rows[0].rate, 5);
       eq('P: old per-unit rates converted', deliveryRows({ lines: [{ itemId: 'a', qty: 4, ratePerUnit: 7, received: rcv(4) }] }).total, 28);
+    }
+
+    // ------------------------------------------------ Setup -> Units: every unit in one place, renamed everywhere
+    {
+      const mkU = async (nameEn, boxSize) => (await call('/items', { method: 'POST', body: { nameEn, nameKn: '', defaultUnit: 'Box', sellUnit: 'Box', units: [{ code: 'pc', label: 'pc', labelKn: 'ಪೀಸ್', perBase: 1, price: 10 }, { code: 'Box', label: 'Box', labelKn: 'ಡಬ್ಬ', perBase: boxSize, price: boxSize * 9, slabs: [{ minQty: 5, rate: boxSize * 8 }] }], aliases: [{ text: nameEn + ' box', unit: 'Box' }], lowAt: { qty: 2, unit: 'Box' }, racks: {} } })).body;
+      const ua = await mkU('Uu Wheel', 60);
+      const ub = await mkU('Uu Xsoap', 12);
+      await call('/stock/open', { method: 'POST', body: { itemId: ua.id, locationId: shop, qty: 120 } });
+      const levelOf = async (id) => (await call('/stock')).body.filter((x) => x.itemId === id).reduce((n, x) => n + x.qty, 0);
+      const before = await levelOf(ua.id);
+      const us = (await call('/admin/units')).body;
+      const box = us.find((u) => u.code.toLowerCase() === 'box');
+      check('Units: Box listed with both items and their sizes', box && box.count >= 2 && box.items.find((i) => i.id === ua.id).perBase === 60 && box.items.find((i) => i.id === ub.id).perBase === 12, JSON.stringify(box));
+      check('Units: labels and the Kannada label', box.label === 'Box' && box.labelKn === 'ಡಬ್ಬ', JSON.stringify(box));
+      const sp = (await call('/admin/suppliers', { method: 'POST', body: { name: 'Unit Supplier', phone: '' } })).body.id;
+      const upo = (await call('/admin/pos', { method: 'POST', body: { supplierId: sp, to: godown, lines: [{ itemId: ua.id, unit: 'Box', qty: 1, cost: 500 }] } })).body;
+      // A worker cannot.
+      const adminTok = token;
+      token = (await call('/auth/login', { method: 'POST', body: { phone: '9000000099', pin: '2580' } })).body.token;
+      eq('Units: a worker gets 403', (await call('/admin/units')).status, 403);
+      token = adminTok;
+      // Rename the label everywhere.
+      const r1 = await call('/admin/units/Box', { method: 'PUT', body: { label: 'Carton', labelKn: 'ಪೆಟ್ಟಿಗೆ' } });
+      eq('Units: label renamed on every item', r1.status === 200 && r1.body.items >= 2, true);
+      const a1 = (await call('/items/' + ua.id)).body;
+      const bx = a1.units.find((u) => u.code === 'Box');
+      check('Units: the label changed, size, price and slabs kept', bx.label === 'Carton' && bx.labelKn === 'ಪೆಟ್ಟಿಗೆ' && bx.perBase === 60 && bx.price === 540 && bx.slabs.length === 1 && bx.slabs[0].rate === 480, JSON.stringify(bx));
+      // The code: refused without a yes, then everywhere.
+      eq('Units: a code change needs confirm', (await call('/admin/units/box', { method: 'PUT', body: { label: 'Carton', code: 'ctn' } })).status, 409);
+      const r2 = await call('/admin/units/box', { method: 'PUT', body: { label: 'Carton', code: 'ctn', confirm: true } });
+      check('Units: code renamed, the open order too', r2.status === 200 && r2.body.orders >= 1, JSON.stringify(r2.body));
+      for (const it of [ua, ub]) {
+        const x = (await call('/items/' + it.id)).body;
+        check('Units: ' + it.nameEn + ' points at the new code everywhere', x.units.some((u) => u.code === 'ctn') && !x.units.some((u) => u.code === 'Box') && x.defaultUnit === 'ctn' && x.sellUnit === 'ctn' && x.aliases[0].unit === 'ctn' && x.lowAt.unit === 'ctn' && x.units.find((u) => u.code === 'ctn').slabs.length === 1, JSON.stringify(x));
+      }
+      eq('Units: stock levels untouched', await levelOf(ua.id), before);
+      const po2 = (await call('/admin/suppliers/' + sp + '/history')).body.purchases.find((p) => p.id === upo.id);
+      eq('Units: the order line follows', po2.lines[0].unit, 'ctn');
+      eq('Units: an unknown unit is 404', (await call('/admin/units/nope', { method: 'PUT', body: { label: 'X' } })).status, 404);
+      eq('Units: a code an item already has is refused', (await call('/admin/units/ctn', { method: 'PUT', body: { label: 'Carton', code: 'pc', confirm: true } })).status, 409);
+    }
+
+    // ------------------------------------------------ held orders (drafts on the server)
+    {
+      const sp = (await call('/admin/suppliers', { method: 'POST', body: { name: 'Draft Supplier', phone: '' } })).body.id;
+      const it = (await call('/items', { method: 'POST', body: { nameEn: 'Draft Dal', nameKn: '', units: [{ code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price: 100 }], aliases: [], racks: {} } })).body;
+      const body = { supplierId: sp, expectedOn: '2026-11-05', lines: [{ itemId: it.id, unit: 'kg', qty: '5', cost: '90' }], extra: { known: [{ id: it.id, nameEn: 'Draft Dal' }] } };
+      const d1 = await call('/admin/order-drafts/od_test1', { method: 'PUT', body });
+      check('Drafts: saved', d1.status === 200 && d1.body.lines[0].qty === '5' && !d1.body.held, JSON.stringify(d1.body));
+      await call('/admin/order-drafts/od_test2', { method: 'PUT', body: { ...body, held: true } });
+      let all = (await call('/admin/order-drafts')).body;
+      check('Drafts: both listed, one held', all.length === 2 && all.find((d) => d.id === 'od_test2').held === true && all.find((d) => d.id === 'od_test1').expectedOn === '2026-11-05', JSON.stringify(all));
+      // Autosave again: the held mark stays, the lines are replaced.
+      await call('/admin/order-drafts/od_test2', { method: 'PUT', body: { ...body, lines: [{ itemId: it.id, unit: 'kg', qty: '7', cost: '90' }] } });
+      const d2 = (await call('/admin/order-drafts')).body.find((d) => d.id === 'od_test2');
+      check('Drafts: reopened as it was', d2.held === true && d2.lines[0].qty === '7' && d2.extra.known[0].id === it.id, JSON.stringify(d2));
+      eq('Drafts: a bad id is refused', (await call('/admin/order-drafts/a b', { method: 'PUT', body })).status, 400);
+      const adminTok = token;
+      token = (await call('/auth/login', { method: 'POST', body: { phone: '9000000099', pin: '2580' } })).body.token;
+      eq('Drafts: a worker gets 403', (await call('/admin/order-drafts')).status, 403);
+      token = adminTok;
+      // Discard.
+      eq('Drafts: discarded', (await call('/admin/order-drafts/od_test2', { method: 'DELETE' })).status, 200);
+      all = (await call('/admin/order-drafts')).body;
+      check('Drafts: gone after discard', all.length === 1 && all[0].id === 'od_test1', JSON.stringify(all));
+      // Save order turns the draft into an order and deletes it.
+      const po = await call('/admin/pos', { method: 'POST', body: { supplierId: sp, draftId: 'od_test1', lines: [{ itemId: it.id, unit: 'kg', qty: 5, cost: 90 }] } });
+      eq('Drafts: Save order makes the order', po.status, 201);
+      eq('Drafts: and removes the draft', (await call('/admin/order-drafts')).body.length, 0);
     }
 
     // ------------------------------------------------ running low, for the new order form
