@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { withLowAt, type Item, type Location, type StockLevel, type StockMove } from '@stock/core';
-import { asQuery, levelsFromMoves, matchesFilter, shapeDocs, type DocCollection, type DocFilter, type DocQuery, type InvRepo, type MoveQuery, type PersonRecord } from './types';
+import { asQuery, DOC_COLLECTIONS, levelsFromMoves, matchesFilter, shapeDocs, type BackupData, type DocCollection, type DocFilter, type DocQuery, type InvRepo, type MoveQuery, type PersonRecord } from './types';
 
 interface Db {
   people: PersonRecord[];
@@ -157,6 +157,47 @@ export async function createFileRepo(dir: string): Promise<InvRepo> {
       write(() => {
         db.counters[series] = (db.counters[series] ?? 0) + 1;
         return db.counters[series]!;
+      }),
+
+    dumpAll: () =>
+      serial(() => {
+        const out = {
+          people: clone(db.people),
+          locations: clone(db.locations),
+          items: clone(db.items),
+          stockmoves: clone(db.moves),
+          stock: clone(db.stock),
+          counters: Object.entries(db.counters).map(([series, value]) => ({ series, value })),
+        } as unknown as BackupData;
+        for (const c of DOC_COLLECTIONS) out[c] = clone(Object.values(db.docs[c] ?? {})) as Record<string, unknown>[];
+        return out;
+      }),
+    restoreAll: (data) =>
+      // The whole new store is built first, then written to a temp file and renamed over the
+      // old one by write(): a failure anywhere before the rename leaves the old data in place.
+      serial(async () => {
+        const next: Db = {
+          people: clone(data.people) as unknown as PersonRecord[],
+          locations: clone(data.locations) as unknown as Location[],
+          items: clone(data.items) as unknown as Item[],
+          moves: clone(data.stockmoves) as unknown as StockMove[],
+          stock: clone(data.stock) as unknown as StockLevel[],
+          docs: {},
+          counters: Object.fromEntries(data.counters.map((c) => [String(c.series), Number(c.value)])),
+        };
+        for (const c of DOC_COLLECTIONS) {
+          const into: Record<string, Record<string, unknown>> = {};
+          for (const d of clone(data[c] ?? [])) into[String(d.id)] = d;
+          next.docs[c] = into;
+        }
+        const old = db;
+        db = next;
+        try {
+          await flush();
+        } catch (err) {
+          db = old;
+          throw err;
+        }
       }),
 
     eraseAll: () =>

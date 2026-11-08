@@ -1,7 +1,7 @@
 import mongoose, { Schema } from 'mongoose';
 import type { Item, Location, StockLevel, StockMove } from '@stock/core';
 import { MOVE_KINDS, ROLES, withLowAt } from '@stock/core';
-import { asQuery, DOC_COLLECTIONS, type DocCollection, type DocCond, type DocFilter, type DocQuery, type InvRepo, type MoveQuery, type PersonRecord } from './types';
+import { asQuery, BACKUP_COLLECTIONS, DOC_COLLECTIONS, type BackupCollection, type BackupData, type DocCollection, type DocCond, type DocFilter, type DocQuery, type InvRepo, type MoveQuery, type PersonRecord } from './types';
 
 /*
  * Schema style, as in the billing app: no __v, no _id on subdocuments, and an optional field is
@@ -207,6 +207,10 @@ export async function createMongoRepo(uri: string, dbName: string): Promise<InvR
     ...Object.values(Docs).map((m) => m.syncIndexes()),
   ]);
 
+  /** Each backup collection's model, by its collection name. */
+  const byName = { people: People, locations: Locations, items: Items, stockmoves: Moves, stock: Stock, counters: Counters, ...Docs } as unknown as Record<BackupCollection, mongoose.Model<unknown>>;
+  const TMP = '__restore';
+
   const isDuplicate = (err: unknown) => (err as { code?: number })?.code === 11000;
 
   return {
@@ -330,6 +334,46 @@ export async function createMongoRepo(uri: string, dbName: string): Promise<InvR
     nextNo: async (series) => {
       const d = await Counters.findOneAndUpdate({ series }, { $inc: { value: 1 } }, { upsert: true, new: true }).lean();
       return (d as unknown as { value: number }).value;
+    },
+
+    dumpAll: async () => {
+      const out = {} as BackupData;
+      for (const name of BACKUP_COLLECTIONS) {
+        out[name] = (await byName[name].collection.find({}, { projection: { _id: 0 } }).toArray()) as Record<string, unknown>[];
+      }
+      return out;
+    },
+    restoreAll: async (data) => {
+      const db = conn.db;
+      if (!db) throw new Error('Not connected to the database');
+      const tmpOf = (name: string) => name + TMP;
+      const dropTemps = async () => {
+        for (const name of BACKUP_COLLECTIONS) await db.collection(tmpOf(name)).drop().catch(() => undefined);
+      };
+      // 1. Fill a temporary copy of every collection, with its indexes, while the live ones are
+      //    untouched. Any failure here (a duplicate, a lost connection) drops the copies and stops.
+      await dropTemps();
+      try {
+        for (const name of BACKUP_COLLECTIONS) {
+          const tmp = await db.createCollection(tmpOf(name));
+          for (const [fields, options] of byName[name].schema.indexes()) {
+            await tmp.createIndex(fields as Record<string, 1 | -1>, options as Record<string, unknown>);
+          }
+          const docs = (data[name] ?? []).map((d) => {
+            const { _id, ...rest } = d;
+            void _id;
+            return rest;
+          });
+          for (let i = 0; i < docs.length; i += 1000) await tmp.insertMany(docs.slice(i, i + 1000), { ordered: true });
+        }
+      } catch (err) {
+        await dropTemps();
+        throw err;
+      }
+      // 2. Only now swap: each copy renamed over its live collection, one quick step each.
+      for (const name of BACKUP_COLLECTIONS) {
+        await db.collection(tmpOf(name)).rename(name, { dropTarget: true });
+      }
     },
 
     close: () => conn.close(),

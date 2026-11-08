@@ -15,6 +15,17 @@ export interface PersonRecord extends Person {
 export const DOC_COLLECTIONS = ['bills', 'customers', 'transfers', 'suppliers', 'pos', 'deliveries', 'deliveryPhotos', 'orders', 'vehicles', 'meta', 'carriers', 'trips', 'lots', 'loads', 'orderDrafts', 'unitChanges'] as const;
 export type DocCollection = (typeof DOC_COLLECTIONS)[number];
 
+/** The collections with their own shape: people (with PIN hashes), places, items, the ledger, the stock cache, the number series. */
+export const CORE_COLLECTIONS = ['people', 'locations', 'items', 'stockmoves', 'stock', 'counters'] as const;
+/**
+ * Every collection the store keeps, by its Mongo name. A backup holds each of these, so adding a
+ * collection to DOC_COLLECTIONS puts it in the backup with nothing else to change.
+ */
+export const BACKUP_COLLECTIONS = [...CORE_COLLECTIONS, ...DOC_COLLECTIONS] as const;
+export type BackupCollection = (typeof BACKUP_COLLECTIONS)[number];
+/** Everything in the store as plain records, one list per collection. Counters are `{ series, value }`. */
+export type BackupData = Record<BackupCollection, Record<string, unknown>[]>;
+
 /** A comparison on one field. `ne` also matches a missing field; `exists` means present and not null. */
 export interface DocRange {
   gt?: string | number;
@@ -182,6 +193,15 @@ export interface InvRepo {
   deleteDoc(col: DocCollection, id: string): Promise<void>;
   /** The next number in a series (transfers, purchase orders), starting at 1. */
   nextNo(series: string): Promise<number>;
+
+  /** Every record in every collection, exactly as stored (Mongo's own `_id` left out). */
+  dumpAll(): Promise<BackupData>;
+  /**
+   * Replaces every collection with the given records, as one swap as far as the store allows:
+   * the file store writes a new file and renames it over the old; Mongo fills temporary
+   * collections first and only then renames each over its live one.
+   */
+  restoreAll(data: BackupData): Promise<void>;
 
   /** Demo only, and only on the file store: empties everything. The Mongo store has none. */
   eraseAll?(): Promise<void>;

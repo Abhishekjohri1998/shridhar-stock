@@ -8,6 +8,7 @@ import { reconcile } from './posting';
 import { actionRoutes } from './routes/actions';
 import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
+import { backupRoutes, RESTORE_PATH, restoreBody } from './routes/backup';
 import { billingLinkRoutes } from './routes/billingLink';
 import { demoRoutes } from './routes/demo';
 import { deliveryRoutes } from './routes/deliveries';
@@ -45,6 +46,8 @@ async function main(): Promise<void> {
   app.set('trust proxy', 'loopback');
   // Before everything else, so answers and the website go out gzipped (never the live stream).
   app.use(gzip());
+  // A restore carries the whole store: its own large limit, for the admin only, before the general one.
+  app.use(RESTORE_PATH, ...restoreBody);
   app.use(express.json({ limit: '3mb' }));
   app.use(cors({ origin: env.corsOrigins.length ? env.corsOrigins : true }));
 
@@ -62,6 +65,7 @@ async function main(): Promise<void> {
   api.use(authRoutes);
   api.use(liveRoutes);
   api.use(adminRoutes);
+  api.use(backupRoutes);
   api.use(roleRoutes);
   api.use(actionRoutes);
   api.use(reportRoutes);

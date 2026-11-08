@@ -18,7 +18,7 @@
     "unittest": "node scripts/unittest.js",
     "schematest": "node scripts/schematest.js",
     "apitest": "node scripts/apitest.js",
-    "test": "npm run typecheck && npm run unittest && npm run schematest && npm run apitest && npm run roletest && npm run linktest && npm run billinglinktest && npm run livetest && npm run deliverytest && npm run tourtest && npm run purchasingtest",
+    "test": "npm run typecheck && npm run unittest && npm run schematest && npm run apitest && npm run roletest && npm run linktest && npm run billinglinktest && npm run livetest && npm run deliverytest && npm run tourtest && npm run purchasingtest && npm run backuptest",
     "roletest": "node scripts/roletest.js",
     "demo": "bash scripts/demo.sh",
     "linktest": "node scripts/linktest.js",
@@ -26,7 +26,8 @@
     "billinglinktest": "node scripts/billinglinktest.js",
     "tourtest": "node scripts/tourtest.js",
     "deliverytest": "node scripts/deliverytest.js",
-    "purchasingtest": "node scripts/purchasingtest.js"
+    "purchasingtest": "node scripts/purchasingtest.js",
+    "backuptest": "node scripts/backuptest.js"
   },
   "devDependencies": {
     "typescript": "^5.7.2"

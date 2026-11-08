@@ -10,10 +10,15 @@ export async function initRepo(): Promise<InvRepo> {
   if (repo) return repo;
   const base = env.mongoUri
     ? await createMongoRepo(env.mongoUri, env.mongoDb)
-    : await createFileRepo(env.dataDir || path.join(__dirname, '..', '..', '.data'));
+    : await createFileRepo(dataDir());
   repo = withCache(base);
   console.log('[store] using ' + (repo.kind === 'mongo' ? 'MongoDB database "' + env.mongoDb + '"' : 'the local JSON file'));
   return repo;
+}
+
+/** Where the file store keeps its data, and where safety backups go on either store. */
+export function dataDir(): string {
+  return env.dataDir || path.join(__dirname, '..', '..', '.data');
 }
 
 export function getRepo(): InvRepo {
@@ -86,6 +91,10 @@ export function withCache(inner: InvRepo): InvRepo {
     putDocs: w(inner.putDocs),
     deleteDoc: w(inner.deleteDoc),
     nextNo: w(inner.nextNo),
+    restoreAll: w(inner.restoreAll, () => {
+      dropItems();
+      dropPlaces();
+    }),
     ...(inner.eraseAll
       ? {
           eraseAll: w(inner.eraseAll, () => {

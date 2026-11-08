@@ -19,6 +19,7 @@ import { useLoad, useSession } from '../../lib/session';
 import { statusWord } from '../../lib/words';
 import { Empty, InkView, Loading, Money, Status, useBi, when, Table } from '../../components/ui';
 import { PinPicker } from '../../components/PinPicker';
+import { BackupCard } from './Backup';
 
 // ---------------------------------------------------------------- bills from billing
 
@@ -177,6 +178,7 @@ export function SettingsPage() {
         </button>
       </div>
       {settings && <DeliverySettings s={settings} save={saveSettings} />}
+      <BackupCard />
     </>
   );
 }

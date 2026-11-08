@@ -17,6 +17,8 @@ export const env = {
   port: Number(str('PORT', '4200')),
   /** Overrides where the JSON fallback store lives. Used by the tests. */
   dataDir: str('DATA_DIR', ''),
+  /** Where the safety backup taken before each restore is saved. Empty: a backups folder in the data folder (server/.data/backups). */
+  backupDir: str('BACKUP_DIR', ''),
   corsOrigins: str('CORS_ORIGIN', 'http://localhost:5174').split(',').map((s) => s.trim()).filter(Boolean),
   /**
    * The first admin, created on start when nobody can sign in yet. Set these once, start the

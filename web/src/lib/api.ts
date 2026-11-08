@@ -177,5 +177,11 @@ export const api = {
     request<{ posted: number; qty: number }>('/stock/adjust', send('POST', a)),
   recount: () => request<{ checked: number; fixed: unknown[] }>('/stock/recount', { method: 'POST' }),
 
+  /** Safety backups saved on the server before each restore, newest first. */
+  backups: () => request<{ name: string; size: number; at: string }[]>('/admin/backups'),
+  /** Replaces everything with a backup file's contents. `text` is the file, already checked to be JSON. */
+  restore: (text: string) =>
+    request<{ ok: true; safety: string; counts: Record<string, number> }>('/admin/restore', { method: 'POST', body: '{"confirm":"RESTORE","backup":' + text + '}' }),
+
   importItems: (csv: string, dry: boolean) => request<ImportReport>('/import/items', send('POST', { csv, dry })),
 };
