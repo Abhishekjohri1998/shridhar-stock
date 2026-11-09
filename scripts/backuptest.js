@@ -1,7 +1,8 @@
 /*
  * Backup and restore, end to end, against a real server on the demo file store in a temp folder:
  * backup -> erase -> restore gives back exactly the same data; a damaged file is refused and
- * changes nothing; a worker is refused; a safety backup is saved before the restore.
+ * changes nothing; a worker is refused; a safety backup is saved before the restore. Erasing
+ * (both ways) clears exactly what it says, keeps the logins, and its safety backup puts it all back.
  * Never a database: nothing here can reach the shop's data.
  */
 const path = require('node:path');
@@ -182,6 +183,115 @@ async function main() {
     admin = await asAdmin();
     const b3 = (await call('/admin/backup', { token: admin })).body;
     same('identical after a restart', b3.collections, b1.collections);
+
+    // ------------------------------------------------ erasing (Setup -> Settings -> Erasing everything)
+    const { ERASE_KEEPS } = require(path.join(out, 'backup.js'));
+    same('every collection has an erase rule', Object.keys(ERASE_KEEPS).sort(), [...BACKUP_COLLECTIONS].sort());
+    const erase = (body, token = admin) => call('/admin/erase', { method: 'POST', token, body });
+    const backupNow = async () => (await call('/admin/backup', { token: admin })).body;
+    const safetyCount = async () => (await call('/admin/backups', { token: admin })).body.length;
+    const full = await backupNow();
+    check('there are bills, moves, items, suppliers, carriers, vehicles to erase', ['bills', 'stockmoves', 'items', 'suppliers', 'vehicles', 'pos', 'counters'].every((c) => full.collections[c].length > 0), JSON.stringify(full.counts));
+    const maxBill = full.collections.bills.reduce((m, b) => Math.max(m, b.no), 0);
+    const nSafety = await safetyCount();
+
+    eq('erase: worker refused', (await erase({ mode: 'everything', pin: '2468', confirm: 'ERASE' }, worker)).status, 403);
+    eq('erase: nobody signed in refused', (await call('/admin/erase', { method: 'POST', body: { mode: 'everything', pin: '1111', confirm: 'ERASE' } })).status, 401);
+    const wrongPin = await erase({ mode: 'everything', pin: '9999', confirm: 'ERASE' });
+    eq('erase: wrong PIN refused', wrongPin.status, 400);
+    check('erase: wrong PIN said plainly', /not your PIN/.test(wrongPin.body.error), wrongPin.text);
+    eq('erase: the worker\'s PIN is not the admin\'s', (await erase({ mode: 'everything', pin: '2468', confirm: 'ERASE' })).status, 400);
+    eq('erase: without ERASE typed refused', (await erase({ mode: 'everything', pin: '1111', confirm: 'erase it' })).status, 400);
+    eq('erase: an unknown mode refused', (await erase({ mode: 'bills', pin: '1111', confirm: 'ERASE' })).status, 400);
+    eq('erase: no PIN refused', (await erase({ mode: 'stock', confirm: 'ERASE' })).status, 400);
+    same('erase: nothing changed after the refusals', (await backupNow()).collections, full.collections);
+    eq('erase: no safety backup for a refusal', await safetyCount(), nSafety);
+
+    for (const mode of ['stock', 'everything']) {
+      const before = await backupNow();
+      const r = await erase({ mode, pin: '1111', confirm: 'ERASE' });
+      eq(mode + ': erased', r.status, 200);
+      check(mode + ': names its safety backup', /^safety-.*\.json$/.test(r.body.safety || ''), r.text);
+      eq(mode + ': and its download', r.body.download, '/admin/backups/' + r.body.safety);
+      eq(mode + ': bills are read again only after the newest one stock had', r.body.billsFrom, maxBill + 1);
+      const list = (await call('/admin/backups', { token: admin })).body;
+      eq(mode + ': the safety backup is listed first', list[0] && list[0].name, r.body.safety);
+      const saved = await call(r.body.download, { token: admin });
+      eq(mode + ': the safety backup downloads', saved.status, 200);
+      same(mode + ': the safety backup is everything that was there', saved.body.collections, before.collections);
+
+      // The same token still works: the admin was not signed out.
+      eq(mode + ': the admin stays signed in', (await call('/me', { token: admin })).status, 200);
+      const after = await backupNow();
+      for (const c of BACKUP_COLLECTIONS) {
+        if (c === 'meta') continue;
+        if (ERASE_KEEPS[c][mode]) same(mode + ': keeps ' + c, after.collections[c], before.collections[c]);
+        else eq(mode + ': clears ' + c, after.collections[c].length, 0);
+      }
+      const metaIds = (m) => m.map((d) => d.id).sort();
+      same(mode + ': keeps the settings, learned words and link status', metaIds(after.collections.meta), metaIds(before.collections.meta.filter((d) => d.id !== 'lowAlerts' && d.id !== 'eraseCursor').concat([{ id: 'eraseCursor' }])));
+      for (const m of before.collections.meta.filter((d) => d.id !== 'lowAlerts' && d.id !== 'eraseCursor')) {
+        same(mode + ': meta ' + m.id + ' unchanged', after.collections.meta.find((d) => d.id === m.id), m);
+      }
+      const cur = after.collections.meta.find((d) => d.id === 'eraseCursor');
+      check(mode + ': the sync cursor is set', cur && cur.billNo === maxBill && cur.mode === mode, JSON.stringify(cur));
+      check(mode + ': the learned word is still there', after.collections.meta.some((m) => m.id === 'translit' && m.words && m.words.backupword));
+
+      // Everyone can still sign in, with the same PINs.
+      eq(mode + ': the admin signs in with the PIN', (await call('/auth/login', { method: 'POST', body: { phone: '9000000001', pin: '1111' } })).status, 200);
+      eq(mode + ': the worker signs in with the PIN', (await call('/auth/login', { method: 'POST', body: { phone: '9555555555', pin: '2468' } })).status, 200);
+      const stockNow = (await call('/stock', { token: admin })).body;
+      check(mode + ': no stock left anywhere', (Array.isArray(stockNow) ? stockNow : []).every((s) => !s.qty), JSON.stringify(stockNow).slice(0, 200));
+      eq(mode + ': no purchase orders', (await call('/admin/pos', { token: admin })).body.total, 0);
+      const itemsNow = (await call('/items?all=1', { token: admin })).body;
+      eq(mode + ': items ' + (mode === 'stock' ? 'kept' : 'gone'), itemsNow.length, mode === 'stock' ? before.collections.items.length : 0);
+
+      // Numbering starts again: the next purchase order is number 1.
+      eq(mode + ': counters reset', after.collections.counters.length, 0);
+
+      // And the safety backup brings everything back exactly.
+      const back = await restore(saved.body);
+      eq(mode + ': the safety backup restores', back.status, 200);
+      admin = await asAdmin();
+      same(mode + ': restored identically, every collection', (await backupNow()).collections, before.collections);
+    }
+    same('after both erases and restores: identical to the start', (await backupNow()).collections, full.collections);
+
+    // ------------------------------------------------ the billing sync after an erase: old bills are not read again
+    {
+      const { syncOnce } = require(path.join(out, 'billing', 'sync.js'));
+      const { createFileRepo } = require(path.join(out, 'store', 'file.js'));
+      const { erasedData, ERASE_CURSOR_ID } = require(path.join(out, 'backup.js'));
+      const sdir = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-erase-sync-'));
+      try {
+        const repo = await createFileRepo(sdir);
+        const at = new Date().toISOString();
+        await repo.saveLocation({ id: 'loc_shop', name: 'Shop', nameKn: '', kind: 'shop', active: true });
+        await repo.saveItem({ id: 'it_sugar', nameEn: 'Sugar', nameKn: '', units: [{ code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price: 46 }], aliases: [], racks: {}, active: true, updatedAt: at });
+        const bills = [
+          { no: 1, at, total: 92, paid: 92, balance: 0, lines: [{ nameEn: 'Sugar', qty: 2, rate: 46 }] },
+          { no: 2, at, total: 46, paid: 46, balance: 0, lines: [{ nameEn: 'Sugar', qty: 1, rate: 46 }] },
+        ];
+        const billing = { get: async (p) => (p === '/api/customers' ? [] : JSON.parse(JSON.stringify(bills))) };
+        const r1 = await syncOnce(repo, billing, { mode: 'full', limit: 30 });
+        eq('sync: before the erase both bills are read', r1.newBills, 2);
+        const data = await repo.dumpAll();
+        await repo.restoreAll(erasedData(data, 'stock', { id: ERASE_CURSOR_ID, billNo: 2, at, mode: 'stock', by: 'test' }));
+        eq('sync: the erase cleared the bills mirror', (await repo.listDocs('bills')).length, 0);
+        const r2 = await syncOnce(repo, billing, { mode: 'full', limit: 30 });
+        eq('sync: after the erase the old bills are not read again', r2.newBills, 0);
+        eq('sync: and no sale is taken off the fresh stock', r2.posted, 0);
+        eq('sync: the ledger stays empty', (await repo.listMoves({})).length, 0);
+        bills.push({ no: 3, at, total: 46, paid: 46, balance: 0, lines: [{ nameEn: 'Sugar', qty: 1, rate: 46 }] });
+        const r3 = await syncOnce(repo, billing, { mode: 'full', limit: 30 });
+        eq('sync: a bill made after the erase is read', r3.newBills, 1);
+        eq('sync: and its sale is posted', r3.posted, 1);
+        same('sync: only the new bill is in stock', (await repo.listDocs('bills')).map((b) => b.no), [3]);
+        await repo.close();
+      } finally {
+        fs.rmSync(sdir, { recursive: true, force: true });
+      }
+    }
   } catch (err) {
     failed++;
     console.log('FAIL ' + err.stack);

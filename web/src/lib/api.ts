@@ -182,6 +182,9 @@ export const api = {
   /** Replaces everything with a backup file's contents. `text` is the file, already checked to be JSON. */
   restore: (text: string) =>
     request<{ ok: true; safety: string; counts: Record<string, number> }>('/admin/restore', { method: 'POST', body: '{"confirm":"RESTORE","backup":' + text + '}' }),
+  /** Erases the stock data (`everything`, or `stock` keeping the items). A safety backup is saved first; `download` is its address. */
+  erase: (mode: 'everything' | 'stock', pin: string, confirm: string) =>
+    request<{ ok: true; mode: string; safety: string; download: string; billsFrom: number; counts: Record<string, number> }>('/admin/erase', { method: 'POST', body: JSON.stringify({ mode, pin, confirm }) }),
 
   importItems: (csv: string, dry: boolean) => request<ImportReport>('/import/items', send('POST', { csv, dry })),
 };

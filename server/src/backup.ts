@@ -149,3 +149,66 @@ export async function listSafetyBackups(): Promise<{ name: string; size: number;
 export function safetyPath(name: string): string | null {
   return SAFETY_NAME.test(name) ? path.join(backupsDir(), name) : null;
 }
+
+// ---------------------------------------------------------------- erasing
+
+/**
+ * Setup → Settings → "Erasing everything". Two ways to start again:
+ *
+ * - `everything`: only the people (logins and PINs), the places and the shop's settings stay, so
+ *   the admin can still sign in and set the shop up again.
+ * - `stock`: the items (with their units, prices, names and supplier links), suppliers, carriers
+ *   and vehicles stay too; every number and every record of what happened goes.
+ *
+ * Every collection is listed for both, on purpose: a collection added later does not compile until
+ * someone decides whether an erase keeps it.
+ */
+export const ERASE_MODES = ['everything', 'stock'] as const;
+export type EraseMode = (typeof ERASE_MODES)[number];
+
+export const ERASE_KEEPS: Record<BackupCollection, Record<EraseMode, boolean>> = {
+  people: { everything: true, stock: true },
+  locations: { everything: true, stock: true },
+  meta: { everything: true, stock: true }, // settings, learned words, link status (low alerts are dropped below)
+  items: { everything: false, stock: true },
+  suppliers: { everything: false, stock: true },
+  carriers: { everything: false, stock: true },
+  vehicles: { everything: false, stock: true },
+  unitChanges: { everything: false, stock: true }, // the record of an item's unit changes goes with the item
+  stockmoves: { everything: false, stock: false },
+  stock: { everything: false, stock: false },
+  counters: { everything: false, stock: false },
+  bills: { everything: false, stock: false },
+  customers: { everything: false, stock: false },
+  transfers: { everything: false, stock: false },
+  pos: { everything: false, stock: false },
+  deliveries: { everything: false, stock: false },
+  deliveryPhotos: { everything: false, stock: false },
+  orders: { everything: false, stock: false },
+  trips: { everything: false, stock: false },
+  lots: { everything: false, stock: false },
+  loads: { everything: false, stock: false },
+  orderDrafts: { everything: false, stock: false },
+};
+
+/** Meta records that describe stock, not settings: they go with the stock. */
+const META_DROPPED = new Set(['lowAlerts']);
+/** The meta record that tells the billing sync to skip bills made before an erase. */
+export const ERASE_CURSOR_ID = 'eraseCursor';
+
+export interface EraseCursor {
+  id: typeof ERASE_CURSOR_ID;
+  /** Bills numbered up to this were made before the erase: the sync never reads them again. */
+  billNo: number;
+  at: string;
+  mode: EraseMode;
+  by: string;
+}
+
+/** What is left of `data` after an erase in `mode`, with the sync cursor written into meta. */
+export function erasedData(data: BackupData, mode: EraseMode, cursor: EraseCursor): BackupData {
+  const out = {} as BackupData;
+  for (const name of BACKUP_COLLECTIONS) out[name] = ERASE_KEEPS[name][mode] ? data[name] : [];
+  out.meta = [...out.meta.filter((m) => !META_DROPPED.has(String(m.id)) && m.id !== ERASE_CURSOR_ID), cursor as unknown as Record<string, unknown>];
+  return out;
+}

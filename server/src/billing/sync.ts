@@ -271,13 +271,17 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limitOrOpt
   const mode = opts.mode ?? 'full';
   const limit = opts.limit ?? (mode === 'full' ? 30 : 100);
   const wantCustomers = opts.customers ?? mode === 'full';
-  const [{ bills: listed, lite }, items, locs] = await Promise.all([
+  const [{ bills: listedAll, lite }, items, locs] = await Promise.all([
     readBills(billing, { mode, since: opts.since ?? 0, limit }),
     repo.listItems(),
     repo.listLocations(),
   ]);
   const shop = locs.find((l) => l.kind === 'shop');
   if (!shop) throw new Error('No shop place');
+  // After an erase (Setup → Settings), bills made before it are never read again: their sales
+  // belong to the stock that was erased, and would take the fresh stock below zero.
+  const floor = await eraseFloor(repo);
+  const listed = floor ? listedAll.filter((b) => b.no > floor) : listedAll;
   const result: SyncResult = { bills: listed.length, newBills: 0, posted: 0, reversed: 0, toConfirm: 0, customers: 0, sendGiven: [], lite, fullFetched: 0 };
 
   if (wantCustomers) result.customers = await syncCustomers(repo, billing);
@@ -415,6 +419,12 @@ export async function backfillMoreInk(repo: InvRepo, billing: BillingClient, bat
     done++;
   }
   return done;
+}
+
+/** The newest bill number made before the last erase; 0 when stock was never erased. */
+export async function eraseFloor(repo: InvRepo): Promise<number> {
+  const c = await repo.getDoc<{ id: string; billNo?: number }>('meta', 'eraseCursor');
+  return typeof c?.billNo === 'number' && c.billNo > 0 ? c.billNo : 0;
 }
 
 /** The link's health, for the admin's screens. */

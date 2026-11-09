@@ -3,7 +3,7 @@ import { getRepo } from '../store';
 import { billingClient, type BillingClient } from './client';
 import { emit } from '../events';
 import { pushGiven } from './push';
-import { backfillMoreInk, syncCustomers, pollDelay, recordLink, syncOnce, POLL_ACTIVE_WINDOW_MS, type SyncResult } from './sync';
+import { backfillMoreInk, eraseFloor, syncCustomers, pollDelay, recordLink, syncOnce, POLL_ACTIVE_WINDOW_MS, type SyncResult } from './sync';
 
 let running: Promise<SyncResult | null> | null = null;
 let last: SyncResult | null = null;
@@ -33,7 +33,10 @@ export function syncNow(force = false): Promise<SyncResult | null> {
   if (running) return running;
   const repo = getRepo();
   running = (async () => {
-    const [newest] = await repo.listDocs<{ id: string; no: number }>('bills', { sort: { no: -1 }, limit: 1, fields: ['no'] });
+    const [last] = await repo.listDocs<{ id: string; no: number }>('bills', { sort: { no: -1 }, limit: 1, fields: ['no'] });
+    // After an erase the bills before it are skipped, so the newest stock has is at least that one.
+    const floor = await eraseFloor(repo);
+    const newest = last || floor ? { no: Math.max(last?.no ?? 0, floor) } : undefined;
     // An older billing server has no light list: its latest 100, in full, every time, as before.
     if (liteServer === false) {
       const r = await syncOnce(repo, billing(), { mode: 'full', limit: 100, customers: true });
@@ -100,6 +103,33 @@ function mergeResults(a: SyncResult, b: SyncResult): SyncResult {
     lite: a.lite,
     fullFetched: (a.fullFetched ?? 0) + (b.fullFetched ?? 0),
   };
+}
+
+/**
+ * Runs `fn` with the link held still: waits for a read in progress to finish, and no read starts
+ * until `fn` is done. The erase uses it, so no bill is half-written across it.
+ */
+export async function withLinkPaused<T>(fn: () => Promise<T>): Promise<T> {
+  while (running) await running.catch(() => null);
+  let release: (v: null) => void = () => undefined;
+  running = new Promise<null>((r) => (release = r));
+  try {
+    return await fn();
+  } finally {
+    release(null);
+    running = null;
+  }
+}
+
+/** Billing's newest bill number, or 0 when the link is off or billing does not answer in time. */
+export async function billingNewestNo(waitMs = 5000): Promise<number> {
+  if (!linkConfigured()) return 0;
+  const read = billing()
+    .get<{ no: number }[]>('/api/bills?lite=1&limit=1')
+    .then((list) => list.reduce((m, b) => Math.max(m, Number(b.no) || 0), 0))
+    .catch(() => 0);
+  const timeout = new Promise<number>((r) => setTimeout(() => r(0), waitMs).unref());
+  return Promise.race([read, timeout]);
 }
 
 export function lastSync(): SyncResult | null {
