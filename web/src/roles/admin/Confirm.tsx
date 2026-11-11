@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { formatRate, formatRupees, itemMatches, pickName, priceFor, searchKey, type Ink, type Item, type MirrorLine } from '@stock/core';
+import { formatRate, formatRupees, itemMatches, pickName, priceFor, searchKey, sellUnitOf, type Ink, type Item, type MirrorLine } from '@stock/core';
 import { http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { itemName, useCatalog } from '../../lib/catalog';
@@ -343,6 +343,29 @@ function BillCard({ g, items, onDone, onRemove }: { g: BillGroup; items: Map<str
   );
 }
 
+/** The item's own price in the unit it is sold in, for a chip: "₹55/kg". Empty when it has none. */
+function priceTag(item: Item | undefined, lang: string): string {
+  if (!item) return '';
+  try {
+    const u = sellUnitOf(item);
+    return formatRate(u.price) + '/' + ((lang === 'kn' && u.labelKn) || u.label || u.code);
+  } catch {
+    return '';
+  }
+}
+
+/** What the picked item, unit and quantity come to at the shop's price; null when it cannot be worked out. */
+function pickedPrice(item: Item | undefined, unit: string, qty: string): { rate: number; amount: number } | null {
+  const n = Number(qty);
+  if (!item || !unit || !(n > 0)) return null;
+  try {
+    const p = priceFor(item, unit, n);
+    return { rate: p.rate, amount: p.amount };
+  } catch {
+    return null;
+  }
+}
+
 function why(line: ListLine, item: Item | undefined, bi: (en: string, kn: string) => string): string {
   if (!line.ink && !line.hasInk) return bi('Typed name matches no item', 'ಟೈಪ್ ಮಾಡಿದ ಹೆಸರು ಯಾವ ಸಾಮಾನಿಗೂ ಹೊಂದುತ್ತಿಲ್ಲ');
   if (!line.reading) return bi('Written by hand: pick the item', 'ಕೈಯಲ್ಲಿ ಬರೆದದ್ದು: ಸಾಮಾನು ಆರಿಸಿ');
@@ -461,7 +484,8 @@ function ConfirmLine({
         <div className="chips">
           {choices.map((id) => (
             <button key={id} className={'chip ' + (id === answer.itemId ? 'on' : '')} onClick={() => pick(id)}>
-              {itemName(items, id, lang)} <span className="muted">{Math.round(conf(id) * 100)}%</span>
+              {itemName(items, id, lang)} {priceTag(items.get(id), lang) && <span className="num">{priceTag(items.get(id), lang)}</span>}{' '}
+              <span className="muted">{Math.round(conf(id) * 100)}%</span>
             </button>
           ))}
         </div>
@@ -473,7 +497,7 @@ function ConfirmLine({
         <div className="chips mt-6">
           {found.map((i) => (
             <button key={i.id} className="chip" onClick={() => pick(i.id)}>
-              {pickName(i.nameEn, i.nameKn, lang)}
+              {pickName(i.nameEn, i.nameKn, lang)} {priceTag(i, lang) && <span className="muted num">{priceTag(i, lang)}</span>}
             </button>
           ))}
         </div>
@@ -491,6 +515,21 @@ function ConfirmLine({
           <input inputMode="decimal" value={answer.qty} onChange={(e) => onAnswer({ ...answer, qty: e.target.value })} className="in-qty" aria-label={bi('Quantity', 'ಪ್ರಮಾಣ')} />
         </div>
       )}
+      {item && (() => {
+        // The shop's own price for what was picked, beside what the bill charged, so a wrong
+        // item or unit shows itself before it is digitised.
+        const pp = pickedPrice(item, answer.unit, answer.qty);
+        if (!pp) return null;
+        const off = Math.abs(pp.amount - line.amount) > Math.max(1, line.amount * 0.15);
+        return (
+          <p className={'num mt-6 ' + (off ? 'confirm-price-off' : 'muted')}>
+            {bi('Shop price', 'ಅಂಗಡಿ ಬೆಲೆ')}: {answer.qty} × {formatRate(pp.rate)} = <b>{formatRupees(pp.amount)}</b>
+            {' · '}
+            {bi('billed', 'ಬಿಲ್')} {formatRupees(line.amount)}
+            {off ? ' · ' + bi('does not fit, check the item or unit', 'ಹೊಂದುತ್ತಿಲ್ಲ, ಸಾಮಾನು ಅಥವಾ ಘಟಕ ನೋಡಿ') : ''}
+          </p>
+        );
+      })()}
       <div className="bar mt-10">
         <button className="btn" data-tour="confirm-line-ok" disabled={busy || blank} onClick={() => send(false)}>
           ✓ {bi('Digitise', 'ಡಿಜಿಟೈಸ್ ಮಾಡಿ')}

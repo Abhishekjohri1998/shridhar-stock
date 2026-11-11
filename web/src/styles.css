@@ -445,6 +445,7 @@ ul.lines li { margin: 3px 0; }
 .confirm-ink { display: flex; align-items: center; justify-content: space-between; gap: var(--gap); padding: 12px; margin: 8px 0; background: var(--receipt); border: 1px dashed var(--line-strong); border-radius: 12px; flex-wrap: wrap; }
 .confirm-ink .typed { font-size: 1.15rem; color: var(--ink-900); }
 .confirm-price { color: var(--ink-700); }
+.confirm-price-off { color: var(--danger-600); }
 
 /* worker pick list */
 .rack { font-weight: 700; color: var(--brand-700); margin-bottom: 6px; }
