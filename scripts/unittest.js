@@ -1040,6 +1040,31 @@ async function ledger() {
   const mon = C.salesSeries(bills, 'month', 'a', now);
   check('F series month: 12 months Dec..Nov', mon.length === 12 && mon[0].key === '2025-12' && mon[11].key === '2026-11', mon.map((p) => p.key).join(','));
   check('F series month: Sep and Nov', mon[9].amount === 999 && mon[11].amount === 130 && mon[11].qty === 2100, JSON.stringify(mon.slice(9)));
+  // Range windows, like a bank statement.
+  const k1 = C.seriesKeys('day', now, '2026-10-01');
+  check('F window: 30 days from 1 Oct is 1-30 Oct', k1.length === 30 && k1[0] === '2026-10-01' && k1[29] === '2026-10-30', k1[0] + '..' + k1[29]);
+  check('F window: a start too late ends today', C.seriesKeys('day', now, '2026-11-10')[29] === '2026-11-15' && C.seriesKeys('day', now, '2027-01-01')[29] === '2026-11-15');
+  const m1 = C.seriesKeys('month', now, '2025-03');
+  check('F window: 12 months from Mar 2025', m1[0] === '2025-03' && m1[11] === '2026-02', m1.join(','));
+  check('F window: a day as month start uses its month', C.seriesKeys('month', now, '2025-03-17')[0] === '2025-03');
+  check('F window: bad start -> latest', C.seriesKeys('day', now, 'junk')[29] === '2026-11-15');
+  check('F step: back 30 days', C.stepWindow('day', '2026-10-01', -1, now) === '2026-09-01');
+  check('F step: forward stops at the latest window, then null', C.stepWindow('day', '2026-10-01', 1, now) === '2026-10-17' && C.stepWindow('day', '2026-10-17', 1, now) === null);
+  check('F step: months', C.stepWindow('month', '2024-01', 1, now) === '2025-01' && C.stepWindow('month', '2025-12', 1, now) === null);
+  check('F series with start: Sep window has the Sep bill', C.salesSeries(bills, 'month', 'a', now, '2026-01').find((p) => p.key === '2026-09').amount === 999);
+  // Several bars together.
+  const bills2 = bills.map((b, n) => ({ ...b, no: n + 1 }));
+  const d2 = C.salesDetails(bills2, 'day', ['2026-11-14', '2026-11-15']);
+  check('F details all: two days combined', d2.amount === 220 && d2.bills === 3 && d2.rows.length === 3, JSON.stringify(d2));
+  check('F details all: items biggest first, linked only', d2.items[0].itemId === 'a' && d2.items[0].amount === 130 && d2.items[0].qty === 2100 && d2.items[1].itemId === 'b', JSON.stringify(d2.items));
+  const d1 = C.salesDetails(bills2, 'day', ['2026-11-15']);
+  check('F details all: one day', d1.amount === 170 && d1.bills === 2);
+  const da = C.salesDetails(bills2, 'day', ['2026-11-14', '2026-11-15'], 'a');
+  check('F details item: its lines only, newest first', da.amount === 130 && da.qty === 2100 && da.rows.length === 3 && da.bills === 3 && da.rows[0].billNo === 4, JSON.stringify(da.rows));
+  const dm = C.salesDetails(bills2, 'month', ['2026-09', '2026-11'], 'a');
+  check('F details months combined', dm.amount === 1129 && dm.qty === 11100, JSON.stringify(dm));
+  check('F details: junk keys ignored', C.salesDetails(bills2, 'day', ['x', '2026-11']).amount === 0);
+  check('F keyRange: IST', C.keyRange('day', '2026-11-15').from === '2026-11-14T18:30:00.000Z' && C.keyRange('month', '2026-11').to === '2026-11-30T18:30:00.000Z');
 }
 
 ledger()

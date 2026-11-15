@@ -204,6 +204,13 @@ async function main() {
     check('stock value file: BOM, header, Kannada', svCsv.charCodeAt(0) === 0xfeff && svCsv.includes('value_at_cost') && svCsv.includes('ಪಾರ್ಲೆ'), svCsv.slice(0, 300));
     const seCsv = (await call('/reports/sales-series.csv?by=day&itemId=' + parleId, { token: admin })).text;
     check('item sales file: BOM and 30 days', seCsv.charCodeAt(0) === 0xfeff && seCsv.trim().split('\r\n').length === 31, seCsv.slice(0, 200));
+    const win = (await call('/admin/sales-series?by=day&start=2026-01-01', { token: admin })).body;
+    check('sales series window from a start date', win.start === '2026-01-01' && win.points[29].key === '2026-01-30' && win.latest > win.start, JSON.stringify(win).slice(0, 200));
+    const istNow = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+    const det = await call('/admin/sales-details?by=day&keys=' + istNow + ',2026-01-01', { token: admin });
+    check('sales details for picked days', det.status === 200 && det.body.keys.length === 2 && Array.isArray(det.body.items) && typeof det.body.amount === 'number', JSON.stringify(det.body).slice(0, 200));
+    eq('sales details needs a day', (await call('/admin/sales-details?by=day', { token: admin })).status, 400);
+    check('sales details file has a BOM', (await call('/reports/sales-details.csv?by=month&keys=2026-11&itemId=' + parleId, { token: admin })).text.charCodeAt(0) === 0xfeff);
     eq('an unknown item has no sales file', (await call('/reports/sales-series.csv?itemId=nope', { token: admin })).status, 404);
 
     // ------------------------------------------------ files

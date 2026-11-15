@@ -46,11 +46,11 @@ export const homeTour = tour('home', ['Home', 'ಮುಖಪುಟ'], [
     ['That item’s page opens, with its stock in every place.', 'ಆ ಸಾಮಾನಿನ ಪುಟ ತೆರೆಯುತ್ತದೆ, ಎಲ್ಲಾ ಕಡೆಯ ಸ್ಟಾಕ್ ಜೊತೆ.'],
   ),
   step(
-    'home-week',
-    ['The last 7 days', 'ಕಳೆದ 7 ದಿನ'],
-    ['Sales for each day, today in the darker colour.', 'ಪ್ರತಿ ದಿನದ ಮಾರಾಟ, ಇಂದು ಗಾಢ ಬಣ್ಣದಲ್ಲಿ.'],
-    ['A quick look at how the week is going.', 'ವಾರ ಹೇಗೆ ಸಾಗುತ್ತಿದೆ ಎಂದು ಒಮ್ಮೆ ನೋಡಲು.'],
-    ['Pointing at a day shows its total and number of bills.', 'ಒಂದು ದಿನದ ಮೇಲೆ ಇಟ್ಟರೆ ಅದರ ಮೊತ್ತ ಮತ್ತು ಬಿಲ್ ಸಂಖ್ಯೆ ಕಾಣುತ್ತದೆ.'],
+    'home-sales-chart',
+    ['Sales over time', 'ಮಾರಾಟದ ಏರಿಳಿತ'],
+    ['Sales for each day or month, 30 days or 12 months at a time; step back with ‹ Earlier.', 'ಪ್ರತಿ ದಿನ ಅಥವಾ ತಿಂಗಳ ಮಾರಾಟ, ಒಮ್ಮೆಗೆ 30 ದಿನ ಅಥವಾ 12 ತಿಂಗಳು; ‹ ಹಿಂದೆ ಒತ್ತಿ ಹಿಂದಿನದನ್ನು ನೋಡಿ.'],
+    ['See how sales are going and what sold on a given day.', 'ಮಾರಾಟ ಹೇಗೆ ಸಾಗುತ್ತಿದೆ, ಒಂದು ದಿನ ಏನು ಮಾರಿದೆ ಎಂದು ನೋಡಲು.'],
+    ['Tapping bars adds them up below, with the items and bills; Download gives it in Excel.', 'ಕಂಬಗಳನ್ನು ಒತ್ತಿದರೆ ಕೆಳಗೆ ಸೇರಿಸಿ, ಸಾಮಾನು ಮತ್ತು ಬಿಲ್ ಜೊತೆ ಕಾಣುತ್ತದೆ; ಡೌನ್‌ಲೋಡ್ ಎಕ್ಸೆಲ್‌ನಲ್ಲಿ ಕೊಡುತ್ತದೆ.'],
   ),
   step(
     'home-moving',

@@ -926,3 +926,10 @@ img, svg.ink { max-width: 100%; }
 .hint-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; font-size: 0.85rem; }
 .msg.warn { background: var(--gold-wash); color: var(--gold-600); border: 1px solid var(--line-strong); }
 .pack-note { display: block; margin: 6px 0 0; padding: 8px 10px; font-size: 0.85rem; }
+
+/* sales chart: tappable bars (the whole column is the target), picked bars, the details panel */
+.chart .bar-hit { cursor: pointer; outline: none; }
+.chart .bar-pad { fill: transparent; }
+.chart .bar-hit:focus-visible .bar-pad { fill: var(--brand-wash); }
+.chart .bar-picked { fill: var(--brand-700); }
+.sel-panel { margin-top: var(--gap); padding-top: var(--gap); border-top: 1px solid var(--line); }

@@ -4,7 +4,7 @@ import { http } from '../../lib/api';
 import { useLive, useSettled } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
 import { Link } from 'react-router-dom';
-import { Greeting, Loading, Money, Tile, useBi, WeekChart, when, type WeekDay } from '../../components/ui';
+import { Greeting, Loading, Money, Tile, useBi, when, type WeekDay } from '../../components/ui';
 import { Icon } from '../../components/Icon';
 import { useState } from 'react';
 import { ExplainerCard, ExplainerModal } from '../../explainer/entry';
@@ -38,7 +38,6 @@ export function AdminHome() {
   // Re-read on a change, but not more than once every 2 s while the counter is busy.
   const live = useSettled(useLive('bills', 'stock', 'transfers', 'pos', 'link', 'low'), 2000);
   const { value: s, error } = useLoad(() => http.get<HomeData>('/admin/home'), [live]);
-  const week = s?.week;
   const [watch, setWatch] = useState(false);
   if (error) return <div className="msg err">{error}</div>;
   if (!s) return <Loading />;
@@ -90,11 +89,7 @@ export function AdminHome() {
 
       <ExpiringSoon />
 
-      {week && (
-        <div data-tour="home-week">
-          <WeekChart days={week} />
-        </div>
-      )}
+      <SalesChart tour="home-sales-chart" />
 
       <h2 className="subtitle">{bi('Moving now', 'ಈಗ ನಡೆಯುತ್ತಿರುವುದು')}</h2>
       <div className="tiles" data-tour="home-moving">
@@ -109,8 +104,6 @@ export function AdminHome() {
         <Tile icon="receipt" n={<Money v={s.due} />} label={bi('Money still due', 'ಬರಬೇಕಾದ ಹಣ')} />
         <Tile icon="box" n={<Money v={s.stockValue} />} label={<>{bi('Stock value at cost', 'ಖರೀದಿ ಬೆಲೆಯಲ್ಲಿ ಸ್ಟಾಕ್')} · {bi('see each item', 'ಪ್ರತಿ ಸಾಮಾನು ನೋಡಿ')}</>} to="/admin/stock-value" />
       </div>
-      <SalesChart tour="home-sales-chart" />
-
     </>
   );
 }

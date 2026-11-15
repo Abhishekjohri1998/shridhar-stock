@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { findUnit, priceFor, rateRange, roundOff, salesSeries, seriesKeys, stockValueRows, toCsv, type BillMirror, type SeriesBy, type Delivery, type Item, type StockLevel, type Transfer, type Vehicle } from '@stock/core';
+import { findUnit, priceFor, rateRange, roundOff, keyRange, salesDetails, salesSeries, sellUnitOf, seriesKeys, stockValueRows, toCsv, type BillMirror, type SeriesBy, type Delivery, type Item, type StockLevel, type Transfer, type Vehicle } from '@stock/core';
 import { requireRole } from '../auth';
 import { handler, HttpError } from '../http';
 import { getRepo } from '../store';
@@ -217,10 +217,46 @@ reportRoutes.get(
 );
 
 /** Bills from the start of a series on, without the handwriting. */
-async function seriesBills(by: SeriesBy) {
-  const first = seriesKeys(by)[0]!;
-  const start = new Date(Date.parse((by === 'day' ? first : first + '-01') + 'T00:00:00+05:30')).toISOString();
-  return getRepo().listDocs<BillMirror>('bills', { filter: { at: { gte: start } }, omit: ['lines.ink', 'lines.moreInk'] });
+async function seriesBills(by: SeriesBy, keys: string[]) {
+  const sorted = [...keys].sort();
+  const from = keyRange(by, sorted[0]!).from;
+  const to = keyRange(by, sorted[sorted.length - 1]!).to;
+  return getRepo().listDocs<BillMirror>('bills', { filter: { at: { gte: from, lt: to } }, omit: ['lines.ink', 'lines.moreInk'] });
+}
+
+const startOf = (q: Record<string, unknown>) => String(q.start ?? '') || undefined;
+
+/** ?keys=2026-11-14,2026-11-15: the chart bars picked, at most a few hundred. */
+function keysOf(q: Record<string, unknown>, by: SeriesBy): string[] {
+  const keys = String(q.keys ?? '')
+    .split(',')
+    .map((k) => k.trim())
+    .filter((k) => (by === 'day' ? /^\d{4}-\d{2}-\d{2}$/ : /^\d{4}-\d{2}$/).test(k));
+  if (!keys.length) throw new HttpError(400, 'Pick at least one day or month');
+  if (keys.length > 400) throw new HttpError(400, 'Too many periods');
+  return keys;
+}
+
+/** The details of several bars together, with names and each item's quantity in its selling unit. */
+async function detailsFor(q: Record<string, unknown>) {
+  const by = seriesBy(q);
+  const keys = keysOf(q, by);
+  const itemId = String(q.itemId ?? '') || undefined;
+  const repo = getRepo();
+  const [bills, items] = await Promise.all([seriesBills(by, keys), repo.listItems()]);
+  const byId = new Map(items.map((i) => [i.id, i]));
+  if (itemId && !byId.has(itemId)) throw new HttpError(404, 'No such item');
+  const d = salesDetails(bills, by, keys, itemId);
+  return {
+    ...d,
+    by,
+    itemId: itemId ?? null,
+    items: d.items.map((r) => {
+      const it = byId.get(r.itemId);
+      const u = it ? sellUnitOf(it) : undefined;
+      return { ...r, nameEn: it?.nameEn || r.itemId, nameKn: it?.nameKn ?? '', unit: u?.code ?? '', unitQty: u ? round2(r.qty / u.perBase) : r.qty, baseUnit: it?.units[0]?.code ?? '' };
+    }),
+  };
 }
 
 const seriesBy = (q: Record<string, unknown>): SeriesBy => (q.by === 'month' ? 'month' : 'day');
@@ -245,7 +281,18 @@ reportRoutes.get(
   handler(async (req, res) => {
     const by = seriesBy(req.query);
     const itemId = String(req.query.itemId ?? '') || undefined;
-    res.json({ by, itemId: itemId ?? null, points: salesSeries(await seriesBills(by), by, itemId) });
+    const start = startOf(req.query);
+    const keys = seriesKeys(by, Date.now(), start);
+    res.json({ by, itemId: itemId ?? null, start: keys[0], latest: seriesKeys(by)[0], points: salesSeries(await seriesBills(by, keys), by, itemId, Date.now(), start) });
+  }),
+);
+
+/** The chart bars picked, together: ?by=&keys=a,b&itemId=. */
+reportRoutes.get(
+  '/admin/sales-details',
+  readers,
+  handler(async (req, res) => {
+    res.json(await detailsFor(req.query));
   }),
 );
 
@@ -313,11 +360,23 @@ reportRoutes.get(
         const itemId = String(req.query.itemId ?? '') || undefined;
         const it = itemId ? d.byId.get(itemId) : undefined;
         if (itemId && !it) throw new HttpError(404, 'No such item');
-        const pts = salesSeries(await seriesBills(by), by, itemId);
+        const start = startOf(req.query);
+        const pts = salesSeries(await seriesBills(by, seriesKeys(by, Date.now(), start)), by, itemId, Date.now(), start);
         const label = it ? (it.nameEn || it.id).replace(/[^A-Za-z0-9]+/g, '-') : 'all';
         const header = it ? [by, 'name_en', 'name_kn', 'sales', 'qty_base', 'base_unit', 'lines'] : [by, 'sales', 'bills'];
         const rows = pts.map((p) => (it ? [p.key, it.nameEn, it.nameKn, p.amount, p.qty, it.units[0]?.code ?? '', p.count] : [p.key, p.amount, p.count]));
         return sendCsv(res, 'sales-by-' + by + '-' + label + '.csv', toCsv(header, rows));
+      }
+      case 'sales-details': {
+        const x = await detailsFor(req.query);
+        const span = x.keys.length === 1 ? x.keys[0]! : x.keys[0] + '_and_' + (x.keys.length - 1) + '_more';
+        const rows: (string | number)[][] = [['Periods', x.keys.join(' + ')], ['Total sales', x.amount], ['Bills', x.bills]];
+        if (x.itemId) rows.push(['Quantity (base)', x.qty]);
+        rows.push([], ['item_id', 'name_en', 'name_kn', 'qty', 'unit', 'qty_base', 'base_unit', 'lines', 'sales']);
+        for (const r of x.items) rows.push([r.itemId, r.nameEn, r.nameKn, r.unitQty, r.unit, r.qty, r.baseUnit, r.lines, r.amount]);
+        rows.push([], x.itemId ? ['bill', 'at', 'qty', 'unit', 'rate', 'amount'] : ['bill', 'at', 'bill_total']);
+        for (const r of x.rows) rows.push(x.itemId ? [r.billNo, r.at, r.qty, r.unit, r.rate, r.amount] : [r.billNo, r.at, r.total]);
+        return sendCsv(res, 'sales-details-' + span + '.csv', toCsv(['what', 'value'], rows));
       }
       default:
         throw new HttpError(404, 'No such report');

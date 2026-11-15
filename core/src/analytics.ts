@@ -71,22 +71,42 @@ const IST = 5.5 * 3600_000;
 /** The shop day (IST) of an instant, YYYY-MM-DD. */
 export const istDayOf = (iso: string | number) => new Date((typeof iso === 'number' ? iso : Date.parse(iso)) + IST).toISOString().slice(0, 10);
 
-/** The buckets, oldest first: the last 30 shop days, or the last 12 months, to now. */
-export function seriesKeys(by: SeriesBy, now = Date.now()): string[] {
+/** How many buckets a window holds: 30 days or 12 months. */
+export const seriesSpan = (by: SeriesBy) => (by === 'day' ? 30 : 12);
+
+/** One bucket key moved by n buckets (days or months). */
+export function shiftKey(by: SeriesBy, key: string, n: number): string {
+  if (by === 'day') return new Date(Date.parse(key + 'T00:00:00Z') + n * 86_400_000).toISOString().slice(0, 10);
+  const y = Number(key.slice(0, 4));
+  const m = Number(key.slice(5, 7)) - 1;
+  return new Date(Date.UTC(y, m + n, 1)).toISOString().slice(0, 7);
+}
+
+const validKey = (by: SeriesBy, k: string) => (by === 'day' ? /^\d{4}-\d{2}-\d{2}$/ : /^\d{4}-\d{2}$/).test(k) && !Number.isNaN(Date.parse((by === 'day' ? k : k + '-01') + 'T00:00:00Z'));
+
+/**
+ * The buckets, oldest first, like a bank statement window: 30 shop days or 12 months starting at
+ * `start` (a day, or a month; a day given for months uses its month). With no start, or a start so
+ * late the window would pass today, the window ends today: it never shows the future.
+ */
+export function seriesKeys(by: SeriesBy, now = Date.now(), start?: string): string[] {
   const today = istDayOf(now);
+  const last = by === 'day' ? today : today.slice(0, 7);
+  const n = seriesSpan(by);
+  let first = shiftKey(by, last, -(n - 1));
+  const st = start && by === 'month' && start.length === 10 ? start.slice(0, 7) : start;
+  if (st && validKey(by, st) && st < first) first = st;
   const keys: string[] = [];
-  if (by === 'day') {
-    const t = Date.parse(today + 'T00:00:00Z');
-    for (let i = 29; i >= 0; i--) keys.push(new Date(t - i * 86_400_000).toISOString().slice(0, 10));
-  } else {
-    const y = Number(today.slice(0, 4));
-    const m = Number(today.slice(5, 7)) - 1;
-    for (let i = 11; i >= 0; i--) {
-      const d = new Date(Date.UTC(y, m - i, 1));
-      keys.push(d.toISOString().slice(0, 7));
-    }
-  }
+  for (let i = 0; i < n; i++) keys.push(shiftKey(by, first, i));
   return keys;
+}
+
+/** The window before or after one (`dir` -1 or 1), as its start key; null when it would pass today. */
+export function stepWindow(by: SeriesBy, start: string, dir: -1 | 1, now = Date.now()): string | null {
+  const next = shiftKey(by, start, dir * seriesSpan(by));
+  const latest = seriesKeys(by, now)[0]!;
+  if (dir > 0 && next > latest) return start >= latest ? null : latest;
+  return next;
 }
 
 /**
@@ -94,8 +114,8 @@ export function seriesKeys(by: SeriesBy, now = Date.now()): string[] {
  * (amount and base quantity), leaving out lines still to confirm or not stock, as the reports do.
  * Cancelled bills never count.
  */
-export function salesSeries(bills: Pick<BillMirror, 'at' | 'total' | 'cancelled' | 'lines'>[], by: SeriesBy, itemId?: string, now = Date.now()): SeriesPoint[] {
-  const pts = seriesKeys(by, now).map((key) => ({ key, amount: 0, qty: 0, count: 0 }));
+export function salesSeries(bills: Pick<BillMirror, 'at' | 'total' | 'cancelled' | 'lines'>[], by: SeriesBy, itemId?: string, now = Date.now(), start?: string): SeriesPoint[] {
+  const pts = seriesKeys(by, now, start).map((key) => ({ key, amount: 0, qty: 0, count: 0 }));
   const slot = new Map(pts.map((p) => [p.key, p]));
   const len = by === 'day' ? 10 : 7;
   for (const b of bills) {
@@ -119,4 +139,64 @@ export function salesSeries(bills: Pick<BillMirror, 'at' | 'total' | 'cancelled'
     p.qty = r2(p.qty);
   }
   return pts;
+}
+
+/** The first instant (ISO) of a bucket key in IST, and of the one after it. */
+export function keyRange(by: SeriesBy, key: string): { from: string; to: string } {
+  const at = (k: string) => new Date(Date.parse((by === 'day' ? k : k + '-01') + 'T00:00:00+05:30')).toISOString();
+  return { from: at(key), to: at(shiftKey(by, key, 1)) };
+}
+
+export interface SalesDetails {
+  keys: string[];
+  amount: number;
+  /** Bills with something counted. */
+  bills: number;
+  /** Base units (one item only). */
+  qty: number;
+  /** Per item: base quantity and amount, biggest amount first (linked lines only). */
+  items: { itemId: string; qty: number; amount: number; lines: number }[];
+  /** All sales: each bill; one item: each of its lines. Newest first. */
+  rows: { billNo: number; at: string; total: number; qty: number; unit: string; rate: number; amount: number }[];
+}
+
+/**
+ * What was sold in several buckets together (days or months, any mix of the chart's bars), the
+ * same rules as salesSeries: cancelled bills never count; for one item only its linked lines.
+ */
+export function salesDetails(bills: Pick<BillMirror, 'no' | 'at' | 'total' | 'cancelled' | 'lines'>[], by: SeriesBy, keys: string[], itemId?: string): SalesDetails {
+  const want = new Set(keys.filter((k) => validKey(by, k)));
+  const len = by === 'day' ? 10 : 7;
+  const items = new Map<string, { itemId: string; qty: number; amount: number; lines: number }>();
+  const out: SalesDetails = { keys: [...want].sort(), amount: 0, bills: 0, qty: 0, items: [], rows: [] };
+  for (const b of bills) {
+    if (b.cancelled || !want.has(istDayOf(b.at).slice(0, len))) continue;
+    let counted = false;
+    for (const l of b.lines ?? []) {
+      if (!l.itemId || !l.baseQty || l.state === 'to-confirm' || l.state === 'not-item') continue;
+      if (itemId && l.itemId !== itemId) continue;
+      const r = items.get(l.itemId) ?? { itemId: l.itemId, qty: 0, amount: 0, lines: 0 };
+      r.qty = r2(r.qty + l.baseQty);
+      r.amount = r2(r.amount + l.amount);
+      r.lines++;
+      items.set(l.itemId, r);
+      if (itemId) {
+        out.amount += l.amount;
+        out.qty += l.baseQty;
+        out.rows.push({ billNo: b.no, at: b.at, total: b.total, qty: l.qty, unit: l.unit ?? '', rate: l.rate, amount: l.amount });
+        counted = true;
+      }
+    }
+    if (!itemId) {
+      out.amount += b.total;
+      out.rows.push({ billNo: b.no, at: b.at, total: b.total, qty: 0, unit: '', rate: 0, amount: b.total });
+      counted = true;
+    }
+    if (counted) out.bills++;
+  }
+  out.amount = r2(out.amount);
+  out.qty = r2(out.qty);
+  out.items = [...items.values()].sort((a, b) => b.amount - a.amount);
+  out.rows.sort((a, b) => b.at.localeCompare(a.at));
+  return out;
 }
