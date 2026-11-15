@@ -1065,6 +1065,34 @@ async function ledger() {
   check('F details months combined', dm.amount === 1129 && dm.qty === 11100, JSON.stringify(dm));
   check('F details: junk keys ignored', C.salesDetails(bills2, 'day', ['x', '2026-11']).amount === 0);
   check('F keyRange: IST', C.keyRange('day', '2026-11-15').from === '2026-11-14T18:30:00.000Z' && C.keyRange('month', '2026-11').to === '2026-11-30T18:30:00.000Z');
+  // Profit and loss: cost = the line's unit cost (or base cost x size) x qty, as salesByItem.
+  const cat = new Map([
+    ['a', { units: [{ code: 'g', perBase: 1, cost: 0.05 }, { code: 'kg', perBase: 1000, cost: 52 }] }],
+    ['b', { units: [{ code: 'pc', perBase: 1 }] }],
+    ['l', { units: [{ code: 'pc', perBase: 1, cost: 15 }] }],
+  ]);
+  check('F lineCost: unit cost x qty', C.lineCost(cat.get('a'), { unit: 'kg', qty: 2, baseQty: 2000 }) === 104);
+  check('F lineCost: base cost x base qty without a unit', C.lineCost(cat.get('a'), { qty: 1, baseQty: 300 }) === 15);
+  check('F lineCost: no cost -> null', C.lineCost(cat.get('b'), { unit: 'pc', qty: 4, baseQty: 4 }) === null && C.lineCost(undefined, { qty: 1, baseQty: 1 }) === null);
+  check('F profitOf: margin %', JSON.stringify(C.profitOf(200, 150)) === '{"profit":50,"margin":25}' && C.profitOf(0, 0).margin === null);
+  check('F profitOf: loss', C.profitOf(100, 130).profit === -30 && C.profitOf(100, 130).margin === -30);
+  const pb = [
+    { no: 1, at: '2026-11-15T05:00:00.000Z', total: 210, lines: [line('a', 120, 2000), line('b', 40, 4), line('', 50, 0, 'not-item')] },
+    { no: 2, at: '2026-11-15T06:00:00.000Z', total: 30, lines: [{ ...line('l', 30, 3), unit: 'pc', qty: 3 }] },
+  ];
+  pb[0].lines[0] = { ...pb[0].lines[0], unit: 'kg', qty: 2 };
+  const pd = C.salesDetails(pb, 'day', ['2026-11-15'], undefined, cat);
+  check('F profit all: sales cover the bills, profit only costed lines', pd.amount === 240 && pd.linkedSales === 190 && pd.costedSales === 150 && pd.cost === 149 && pd.profit === 1, JSON.stringify(pd));
+  check('F profit all: no-cost item counted and flagged', pd.noCostItems === 1 && pd.items.find((r) => r.itemId === 'b').cost === null && pd.items.find((r) => r.itemId === 'b').profit === null);
+  check('F profit all: per item profit and loss', pd.items.find((r) => r.itemId === 'a').profit === 16 && pd.items.find((r) => r.itemId === 'l').profit === -15, JSON.stringify(pd.items));
+  check('F profit all: margin of costed sales', pd.margin === 0.7, String(pd.margin));
+  const pl = C.salesDetails(pb, 'day', ['2026-11-15'], 'l', cat);
+  check('F loss item: line cost, loss, negative margin', pl.cost === 45 && pl.profit === -15 && pl.margin === -50 && pl.rows[0].cost === 45 && pl.rows[0].profit === -15, JSON.stringify(pl));
+  const pn = C.salesDetails(pb, 'day', ['2026-11-15'], 'b', cat);
+  check('F no-cost item: profit 0 of nothing, flagged', pn.costedSales === 0 && pn.margin === null && pn.noCostItems === 1 && pn.rows[0].cost === null);
+  const ps = C.salesSeries(pb, 'day', undefined, now, undefined, cat);
+  check('F series profit per bar', ps[29].profit === 1 && ps[29].cost === 149 && ps[29].costedSales === 150, JSON.stringify(ps[29]));
+  check('F series without a catalogue: no profit', C.salesSeries(pb, 'day', undefined, now)[29].profit === 0);
 }
 
 ledger()

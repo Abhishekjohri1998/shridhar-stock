@@ -6,16 +6,22 @@ import { useLive, useSettled } from '../lib/live';
 import { useLoad, useSession } from '../lib/session';
 import { Table, Tabs, useBi } from './ui';
 
-type Metric = 'amount' | 'qty';
+type Metric = 'amount' | 'qty' | 'profit';
 
 interface Details {
   keys: string[];
   amount: number;
   bills: number;
   qty: number;
+  linkedSales: number;
+  costedSales: number;
+  cost: number;
+  profit: number;
+  margin: number | null;
+  noCostItems: number;
   itemId: string | null;
-  items: { itemId: string; nameEn: string; nameKn: string; unit: string; unitQty: number; qty: number; baseUnit: string; amount: number; lines: number }[];
-  rows: { billNo: number; at: string; total: number; qty: number; unit: string; rate: number; amount: number }[];
+  items: { itemId: string; nameEn: string; nameKn: string; unit: string; unitQty: number; qty: number; baseUnit: string; amount: number; lines: number; cost: number | null; profit: number | null }[];
+  rows: { billNo: number; at: string; total: number; qty: number; unit: string; rate: number; amount: number; cost: number | null; profit: number | null }[];
 }
 
 /**
@@ -45,10 +51,11 @@ export function SalesChart({ item, tour }: { item?: Item; tour?: string }) {
   const pts = value?.points ?? [];
   const winStart = value?.start ?? seriesKeys(by)[0]!;
   const isLatest = !value || value.start === value.latest;
-  const valueOf = (p: SeriesPoint) => (metric === 'amount' ? p.amount : item && unit ? round2(p.qty / unit.perBase) : p.count);
-  const show = (v: number) => (metric === 'amount' ? formatRupees(v) : item && unit ? v + ' ' + unit.code : v + ' ' + bi('bills', 'ಬಿಲ್‌ಗಳು'));
+  const valueOf = (p: SeriesPoint) => (metric === 'amount' ? p.amount : metric === 'profit' ? p.profit : item && unit ? round2(p.qty / unit.perBase) : p.count);
+  const show = (v: number) => (metric === 'amount' ? formatRupees(v) : metric === 'profit' ? (v < 0 ? bi('Loss', 'ನಷ್ಟ') + ' ' + formatRupees(-v) : formatRupees(v)) : item && unit ? v + ' ' + unit.code : v + ' ' + bi('bills', 'ಬಿಲ್‌ಗಳು'));
   const total = pts.reduce((s, p) => s + valueOf(p), 0);
-  const max = Math.max(1e-9, ...pts.map(valueOf));
+  // A loss is drawn as a bar of its size in the loss colour; the scale is the biggest size either way.
+  const max = Math.max(1e-9, ...pts.map((p) => Math.abs(valueOf(p))));
   const W = 360;
   const H = 120;
   const gap = by === 'day' ? 2 : 6;
@@ -96,6 +103,7 @@ export function SalesChart({ item, tour }: { item?: Item; tour?: string }) {
           tabs={[
             { key: 'amount', label: bi('₹ Amount', '₹ ಮೊತ್ತ') },
             { key: 'qty', label: item ? bi('Quantity', 'ಪ್ರಮಾಣ') : bi('Bills', 'ಬಿಲ್‌ಗಳು') },
+            { key: 'profit', label: bi('Profit', 'ಲಾಭ') },
           ]}
         />
       </div>
@@ -125,11 +133,17 @@ export function SalesChart({ item, tour }: { item?: Item; tour?: string }) {
       <svg className="chart" viewBox={'0 0 ' + W + ' ' + (H + 22)} role="group" aria-label={title + ', ' + range + ': ' + show(round2(total))}>
         {pts.map((p, i) => {
           const v = valueOf(p);
-          const h = v ? Math.max(3, (v / max) * H) : 2;
+          const h = v ? Math.max(3, (Math.abs(v) / max) * H) : 2;
           const x = i * (bw + gap);
           const l = label(p, i);
           const on = picked.includes(p.key);
-          const tip = name(p.key) + ': ' + formatRupees(p.amount) + (item && unit ? ' · ' + round2(p.qty / unit.perBase) + ' ' + unit.code : ' · ' + p.count + ' ' + bi('bills', 'ಬಿಲ್‌ಗಳು'));
+          const tip =
+            name(p.key) +
+            ': ' +
+            formatRupees(p.amount) +
+            (item && unit ? ' · ' + round2(p.qty / unit.perBase) + ' ' + unit.code : ' · ' + p.count + ' ' + bi('bills', 'ಬಿಲ್‌ಗಳು')) +
+            ' · ' +
+            (p.profit < 0 ? bi('loss', 'ನಷ್ಟ') + ' ' + formatRupees(-p.profit) : bi('profit', 'ಲಾಭ') + ' ' + formatRupees(p.profit));
           return (
             <g
               key={p.key}
@@ -148,7 +162,7 @@ export function SalesChart({ item, tour }: { item?: Item; tour?: string }) {
             >
               {/* The whole column is the tap target, not just the bar, so a short bar is easy to hit. */}
               <rect className="bar-pad" x={x - gap / 2} y={0} width={bw + gap} height={H + 22} />
-              <rect className={on ? 'bar-picked' : i === pts.length - 1 && isLatest ? 'bar-today' : 'bar-day'} x={x} y={H - h} width={bw} height={h} rx={by === 'day' ? 2 : 4}>
+              <rect className={on ? 'bar-picked' : v < 0 ? 'bar-loss' : i === pts.length - 1 && isLatest ? 'bar-today' : 'bar-day'} x={x} y={H - h} width={bw} height={h} rx={by === 'day' ? 2 : 4}>
                 <title>{tip}</title>
               </rect>
               {l && (
@@ -195,7 +209,26 @@ export function SalesChart({ item, tour }: { item?: Item; tour?: string }) {
                     {bi('Quantity', 'ಪ್ರಮಾಣ')}
                   </div>
                 )}
+                <div className="tile">
+                  <b>{formatRupees(d.cost)}</b>
+                  {bi('Cost', 'ಖರೀದಿ ಬೆಲೆ')}
+                </div>
+                <div className={'tile ' + (d.profit < 0 ? 'bad' : 'ok')}>
+                  <b className={d.profit < 0 ? 'loss' : 'gain'}>{formatRupees(Math.abs(d.profit))}</b>
+                  {d.profit < 0 ? bi('Loss', 'ನಷ್ಟ') : bi('Profit', 'ಲಾಭ')}
+                  {d.margin != null && ' · ' + d.margin + '% ' + bi('margin', 'ಲಾಭಾಂಶ')}
+                </div>
               </div>
+              {!item && d.costedSales > 0 && (
+                <p className="muted mb-0">
+                  {bi('Profit is of ' + formatRupees(d.costedSales) + ' sales linked to items with a cost (of ' + formatRupees(d.amount) + ' in all).', 'ಲಾಭ ಖರೀದಿ ಬೆಲೆ ಇರುವ ಸಾಮಾನಿನ ' + formatRupees(d.costedSales) + ' ಮಾರಾಟದ ಮೇಲೆ (ಒಟ್ಟು ' + formatRupees(d.amount) + ').')}
+                </p>
+              )}
+              {d.noCostItems > 0 && (
+                <div className="msg warn mt-10">
+                  {bi('Cost not set for ' + d.noCostItems + (d.noCostItems === 1 ? ' item' : ' items') + '; profit leaves them out.', d.noCostItems + ' ಸಾಮಾನಿಗೆ ಖರೀದಿ ಬೆಲೆ ಇಲ್ಲ; ಲಾಭದಲ್ಲಿ ಅವನ್ನು ಸೇರಿಸಿಲ್ಲ.')}
+                </div>
+              )}
               {!item && d.items.length > 0 && (
                 <div className="scroll mt-10">
                   <Table className="list">
@@ -204,6 +237,8 @@ export function SalesChart({ item, tour }: { item?: Item; tour?: string }) {
                         <th>{bi('Item', 'ಸಾಮಾನು')}</th>
                         <th className="num">{bi('Sold', 'ಮಾರಿದ್ದು')}</th>
                         <th className="num">{bi('Amount', 'ಮೊತ್ತ')}</th>
+                        <th className="num">{bi('Cost', 'ಖರೀದಿ ಬೆಲೆ')}</th>
+                        <th className="num">{bi('Profit', 'ಲಾಭ')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -216,6 +251,7 @@ export function SalesChart({ item, tour }: { item?: Item; tour?: string }) {
                             {r.unitQty} {r.unit}
                           </td>
                           <td className="num">{formatRupees(r.amount)}</td>
+                          <CostCells cost={r.cost} profit={r.profit} />
                         </tr>
                       ))}
                     </tbody>
@@ -233,6 +269,8 @@ export function SalesChart({ item, tour }: { item?: Item; tour?: string }) {
                         {item && <th className="num">{bi('Qty', 'ಪ್ರಮಾಣ')}</th>}
                         {item && <th className="num">{bi('Rate', 'ದರ')}</th>}
                         <th className="num">{bi('Amount', 'ಮೊತ್ತ')}</th>
+                        {item && <th className="num">{bi('Cost', 'ಖರೀದಿ ಬೆಲೆ')}</th>}
+                        {item && <th className="num">{bi('Profit', 'ಲಾಭ')}</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -247,6 +285,7 @@ export function SalesChart({ item, tour }: { item?: Item; tour?: string }) {
                           )}
                           {item && <td className="num">{formatRate(r.rate)}</td>}
                           <td className="num">{formatRupees(r.amount)}</td>
+                          {item && <CostCells cost={r.cost} profit={r.profit} />}
                         </tr>
                       ))}
                     </tbody>
@@ -260,5 +299,23 @@ export function SalesChart({ item, tour }: { item?: Item; tour?: string }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** Cost and profit cells: "no cost" when the item has none; a loss in the loss colour, marked as one. */
+function CostCells({ cost, profit }: { cost: number | null; profit: number | null }) {
+  const bi = useBi();
+  if (cost == null || profit == null)
+    return (
+      <>
+        <td className="num muted">{bi('no cost', 'ಖರೀದಿ ಬೆಲೆ ಇಲ್ಲ')}</td>
+        <td className="num muted">—</td>
+      </>
+    );
+  return (
+    <>
+      <td className="num">{formatRupees(cost)}</td>
+      <td className={'num ' + (profit < 0 ? 'loss' : 'gain')}>{profit < 0 ? bi('Loss', 'ನಷ್ಟ') + ' ' + formatRupees(-profit) : formatRupees(profit)}</td>
+    </>
   );
 }

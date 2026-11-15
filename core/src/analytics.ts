@@ -1,5 +1,27 @@
-import { defaultUnitOf } from './units';
-import type { BillMirror, Item } from './types';
+import { defaultUnitOf, findUnit } from './units';
+import type { BillMirror, Item, MirrorLine } from './types';
+
+/**
+ * What one bill line cost the shop: the line's unit cost (or the base cost times the unit's size)
+ * times its quantity. The one cost basis for sales reports, charts and their profit. Null when the
+ * item has no cost set, so profit can leave the line out instead of counting it as free.
+ */
+export function lineCost(item: Pick<Item, 'units'> | undefined, l: Pick<MirrorLine, 'unit' | 'qty' | 'baseQty'>): number | null {
+  if (!item) return null;
+  const unit = l.unit ? findUnit(item, l.unit) : undefined;
+  if (unit?.cost != null) return unit.cost * l.qty;
+  const base = item.units[0]?.cost;
+  if (base == null) return null;
+  return unit ? base * unit.perBase * l.qty : base * (l.baseQty ?? 0);
+}
+
+/** Profit and margin from sales and cost of the same lines; margin is a % of those sales. */
+export function profitOf(sales: number, cost: number): { profit: number; margin: number | null } {
+  const profit = r2(sales - cost);
+  return { profit, margin: sales > 0 ? Math.round((profit / sales) * 1000) / 10 : null };
+}
+
+type Items = Map<string, Pick<Item, 'units'>>;
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -65,6 +87,10 @@ export interface SeriesPoint {
   qty: number;
   /** Bills (all sales) or bill lines (one item). */
   count: number;
+  /** Sales of the linked item lines whose cost is known, their cost, and the profit on them. */
+  costedSales: number;
+  cost: number;
+  profit: number;
 }
 
 const IST = 5.5 * 3600_000;
@@ -114,8 +140,14 @@ export function stepWindow(by: SeriesBy, start: string, dir: -1 | 1, now = Date.
  * (amount and base quantity), leaving out lines still to confirm or not stock, as the reports do.
  * Cancelled bills never count.
  */
-export function salesSeries(bills: Pick<BillMirror, 'at' | 'total' | 'cancelled' | 'lines'>[], by: SeriesBy, itemId?: string, now = Date.now(), start?: string): SeriesPoint[] {
-  const pts = seriesKeys(by, now, start).map((key) => ({ key, amount: 0, qty: 0, count: 0 }));
+export function salesSeries(bills: Pick<BillMirror, 'at' | 'total' | 'cancelled' | 'lines'>[], by: SeriesBy, itemId?: string, now = Date.now(), start?: string, items?: Items): SeriesPoint[] {
+  const pts: SeriesPoint[] = seriesKeys(by, now, start).map((key) => ({ key, amount: 0, qty: 0, count: 0, costedSales: 0, cost: 0, profit: 0 }));
+  const addCost = (p: SeriesPoint, l: MirrorLine) => {
+    const c = lineCost(items?.get(l.itemId!), l);
+    if (c == null) return;
+    p.costedSales += l.amount;
+    p.cost += c;
+  };
   const slot = new Map(pts.map((p) => [p.key, p]));
   const len = by === 'day' ? 10 : 7;
   for (const b of bills) {
@@ -125,6 +157,7 @@ export function salesSeries(bills: Pick<BillMirror, 'at' | 'total' | 'cancelled'
     if (!itemId) {
       p.amount += b.total;
       p.count++;
+      for (const l of b.lines ?? []) if (l.itemId && l.baseQty && l.state !== 'to-confirm' && l.state !== 'not-item') addCost(p, l);
       continue;
     }
     for (const l of b.lines ?? []) {
@@ -132,11 +165,15 @@ export function salesSeries(bills: Pick<BillMirror, 'at' | 'total' | 'cancelled'
       p.amount += l.amount;
       p.qty += l.baseQty;
       p.count++;
+      addCost(p, l);
     }
   }
   for (const p of pts) {
     p.amount = r2(p.amount);
     p.qty = r2(p.qty);
+    p.costedSales = r2(p.costedSales);
+    p.cost = r2(p.cost);
+    p.profit = r2(p.costedSales - p.cost);
   }
   return pts;
 }
@@ -154,49 +191,76 @@ export interface SalesDetails {
   bills: number;
   /** Base units (one item only). */
   qty: number;
-  /** Per item: base quantity and amount, biggest amount first (linked lines only). */
-  items: { itemId: string; qty: number; amount: number; lines: number }[];
+  /** Sales of linked item lines, and of those whose cost is known: profit covers only those. */
+  linkedSales: number;
+  costedSales: number;
+  cost: number;
+  profit: number;
+  /** Profit as a % of costedSales; null with nothing costed. */
+  margin: number | null;
+  /** Items sold in the period that have no cost set (left out of the profit). */
+  noCostItems: number;
+  /** Per item: base quantity and amount, biggest amount first (linked lines only); cost and profit null without a cost. */
+  items: { itemId: string; qty: number; amount: number; lines: number; cost: number | null; profit: number | null }[];
   /** All sales: each bill; one item: each of its lines. Newest first. */
-  rows: { billNo: number; at: string; total: number; qty: number; unit: string; rate: number; amount: number }[];
+  rows: { billNo: number; at: string; total: number; qty: number; unit: string; rate: number; amount: number; cost: number | null; profit: number | null }[];
 }
 
 /**
  * What was sold in several buckets together (days or months, any mix of the chart's bars), the
  * same rules as salesSeries: cancelled bills never count; for one item only its linked lines.
  */
-export function salesDetails(bills: Pick<BillMirror, 'no' | 'at' | 'total' | 'cancelled' | 'lines'>[], by: SeriesBy, keys: string[], itemId?: string): SalesDetails {
+export function salesDetails(bills: Pick<BillMirror, 'no' | 'at' | 'total' | 'cancelled' | 'lines'>[], by: SeriesBy, keys: string[], itemId?: string, catalogue?: Items): SalesDetails {
   const want = new Set(keys.filter((k) => validKey(by, k)));
   const len = by === 'day' ? 10 : 7;
-  const items = new Map<string, { itemId: string; qty: number; amount: number; lines: number }>();
-  const out: SalesDetails = { keys: [...want].sort(), amount: 0, bills: 0, qty: 0, items: [], rows: [] };
+  const items = new Map<string, { itemId: string; qty: number; amount: number; lines: number; cost: number | null; profit: number | null }>();
+  const out: SalesDetails = { keys: [...want].sort(), amount: 0, bills: 0, qty: 0, linkedSales: 0, costedSales: 0, cost: 0, profit: 0, margin: null, noCostItems: 0, items: [], rows: [] };
+  const noCost = new Set<string>();
   for (const b of bills) {
     if (b.cancelled || !want.has(istDayOf(b.at).slice(0, len))) continue;
     let counted = false;
     for (const l of b.lines ?? []) {
       if (!l.itemId || !l.baseQty || l.state === 'to-confirm' || l.state === 'not-item') continue;
       if (itemId && l.itemId !== itemId) continue;
-      const r = items.get(l.itemId) ?? { itemId: l.itemId, qty: 0, amount: 0, lines: 0 };
+      const c = lineCost(catalogue?.get(l.itemId), l);
+      const r = items.get(l.itemId) ?? { itemId: l.itemId, qty: 0, amount: 0, lines: 0, cost: 0, profit: 0 };
       r.qty = r2(r.qty + l.baseQty);
       r.amount = r2(r.amount + l.amount);
       r.lines++;
+      if (c == null) {
+        r.cost = null;
+        noCost.add(l.itemId);
+      } else if (r.cost != null) r.cost += c;
       items.set(l.itemId, r);
+      out.linkedSales += l.amount;
+      if (c != null) {
+        out.costedSales += l.amount;
+        out.cost += c;
+      }
       if (itemId) {
         out.amount += l.amount;
         out.qty += l.baseQty;
-        out.rows.push({ billNo: b.no, at: b.at, total: b.total, qty: l.qty, unit: l.unit ?? '', rate: l.rate, amount: l.amount });
+        out.rows.push({ billNo: b.no, at: b.at, total: b.total, qty: l.qty, unit: l.unit ?? '', rate: l.rate, amount: l.amount, cost: c == null ? null : r2(c), profit: c == null ? null : r2(l.amount - c) });
         counted = true;
       }
     }
     if (!itemId) {
       out.amount += b.total;
-      out.rows.push({ billNo: b.no, at: b.at, total: b.total, qty: 0, unit: '', rate: 0, amount: b.total });
+      out.rows.push({ billNo: b.no, at: b.at, total: b.total, qty: 0, unit: '', rate: 0, amount: b.total, cost: null, profit: null });
       counted = true;
     }
     if (counted) out.bills++;
   }
   out.amount = r2(out.amount);
   out.qty = r2(out.qty);
-  out.items = [...items.values()].sort((a, b) => b.amount - a.amount);
+  out.linkedSales = r2(out.linkedSales);
+  out.costedSales = r2(out.costedSales);
+  out.cost = r2(out.cost);
+  Object.assign(out, profitOf(out.costedSales, out.cost));
+  out.noCostItems = noCost.size;
+  out.items = [...items.values()]
+    .map((r) => (r.cost == null ? { ...r, profit: null } : { ...r, cost: r2(r.cost), profit: r2(r.amount - r.cost) }))
+    .sort((a, b) => b.amount - a.amount);
   out.rows.sort((a, b) => b.at.localeCompare(a.at));
   return out;
 }

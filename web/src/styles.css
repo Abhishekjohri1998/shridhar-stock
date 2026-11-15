@@ -933,3 +933,8 @@ img, svg.ink { max-width: 100%; }
 .chart .bar-hit:focus-visible .bar-pad { fill: var(--brand-wash); }
 .chart .bar-picked { fill: var(--brand-700); }
 .sel-panel { margin-top: var(--gap); padding-top: var(--gap); border-top: 1px solid var(--line); }
+
+/* profit and loss in the sales details */
+.gain { color: var(--ok-700); }
+.loss { color: var(--danger-600); }
+.chart .bar-loss { fill: var(--danger-600); }
