@@ -273,3 +273,76 @@ export function biggestUnitIndex(f: ItemForm): number {
   });
   return best;
 }
+
+/**
+ * Suggested prices (or costs) for the units with nothing typed, from one per-base rate.
+ *
+ * The rate comes from the unit whose value was typed most recently (`lastIndex`): Sugar's Bag of
+ * 50000 g at ₹2850 is ₹0.057 a g, so 1 kg suggests ₹57. Type 58 for the kg and the rate is 0.058,
+ * so 500 g suggests ₹29. When the last typed unit has no usable value (or none is known), the
+ * biggest unit with one is used, as the cost helper does. A unit with a value typed gets no
+ * suggestion: a typed value is never replaced.
+ */
+export interface UnitSuggestions {
+  /** Rupees per base unit, or null when no unit has a usable value and size. */
+  rate: number | null;
+  /** The unit the rate came from. */
+  from: number | null;
+  /** Per unit: the suggested value (round2), or null when it has a value or no size. */
+  suggest: (number | null)[];
+}
+
+const sizeOf = (f: ItemForm, i: number) => (i === 0 ? 1 : numOf(f.units[i]?.perBase ?? ''));
+
+export function unitSuggestions(f: ItemForm, lastIndex: number | null, field: 'price' | 'cost' = 'price'): UnitSuggestions {
+  const usable = (i: number) => {
+    const u = f.units[i];
+    if (!u) return false;
+    const v = numOf(u[field]);
+    return v >= 0 && sizeOf(f, i) > 0;
+  };
+  let from: number | null = lastIndex != null && usable(lastIndex) ? lastIndex : null;
+  if (from == null) {
+    let best = -1;
+    f.units.forEach((_, i) => {
+      if (usable(i) && (best < 0 || sizeOf(f, i) > sizeOf(f, best))) best = i;
+    });
+    from = best >= 0 ? best : null;
+  }
+  const rate = from == null ? null : numOf(f.units[from]![field]) / sizeOf(f, from);
+  const suggest = f.units.map((u, i) => {
+    if (rate == null || u[field].trim() !== '') return null;
+    const n = sizeOf(f, i);
+    return n > 0 ? round2(n * rate) : null;
+  });
+  return { rate: rate == null ? null : round4(rate), from, suggest };
+}
+
+/**
+ * A unit whose size changed in the editor: a Box was 60 pc and is now 72. Stock is kept in base
+ * units, so nothing moves; this only says what the same stock now reads as. Null when the unit is
+ * new, unchanged, or the new size is not a number yet.
+ */
+export interface PackChange {
+  code: string;
+  was: number;
+  now: number;
+  /** Stock in base units, when known, and how many of the unit it made before and makes now. */
+  stock?: number;
+  wasPacks?: number;
+  nowPacks?: number;
+}
+
+export function packChange(item: Pick<Item, 'units'> | null, u: UnitForm, totalBase?: number): PackChange | null {
+  if (!item || !u.code.trim()) return null;
+  const old = item.units.find((x) => x.code === u.code);
+  const now = numOf(u.perBase);
+  if (!old || !(now > 0) || old.perBase === now) return null;
+  const out: PackChange = { code: u.code, was: old.perBase, now };
+  if (totalBase != null && Number.isFinite(totalBase)) {
+    out.stock = totalBase;
+    out.wasPacks = round2(totalBase / old.perBase);
+    out.nowPacks = round2(totalBase / now);
+  }
+  return out;
+}

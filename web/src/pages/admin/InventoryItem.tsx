@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ADJUST_REASONS,
@@ -44,7 +44,10 @@ import {
   type UnitForm,
   type UsedUnit,
   usedUnits,
+  unitSuggestions,
+  packChange,
 } from '@stock/core';
+import { SalesChart } from '../../components/SalesChart';
 import { api, http } from '../../lib/api';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
@@ -78,6 +81,7 @@ export function InventoryItemPage({ readOnly = false }: { readOnly?: boolean }) 
     ]);
     return { locs: locs.filter((l) => l.active), item, stock: stock.filter((s) => s.itemId === id), cats, sups, about, racks };
   }, [id, live]);
+  const headRef = useHeadHeight();
 
   if (error) return <div className="msg err">{error}</div>;
   if (!value) return <Loading />;
@@ -87,7 +91,7 @@ export function InventoryItemPage({ readOnly = false }: { readOnly?: boolean }) 
   return (
     <>
       {/* The name, its stock line and the tabs stay pinned under the top bar while the page scrolls. */}
-      <div className="item-head">
+      <div className="item-head" ref={headRef}>
       <h1 className="title">{pickName(item.nameEn, item.nameKn, lang)}</h1>
       <p className="muted">
         {bi('In all places', 'ಎಲ್ಲಾ ಕಡೆ ಸೇರಿ')}: <b className={total < 0 ? 'qty-neg' : isLow(item, total) ? 'qty-low' : ''}>{qtyInUnit(item, defaultUnitOf(item).code, total, lang)}</b>
@@ -107,10 +111,11 @@ export function InventoryItemPage({ readOnly = false }: { readOnly?: boolean }) 
       </div>
       </div>
       {tab === 'details' ? (
-        <ItemDetails item={item} locs={locs} cats={cats} racks={racks} sups={sups} found={about.suppliers} readOnly={readOnly} onSaved={reload} />
+        <ItemDetails item={item} locs={locs} cats={cats} racks={racks} sups={sups} found={about.suppliers} readOnly={readOnly} onSaved={reload} stockTotal={total} />
       ) : (
         <>
           {about.info && <StockSummary item={item} locs={locs} stock={stock} info={about.info} sups={sups} />}
+          {!readOnly && <SalesChart item={item} tour="item-sales-chart" />}
           <ItemStock item={item} locs={locs} stock={stock} readOnly={readOnly} onChanged={reload} />
           <ItemLots item={item} locs={locs} stock={stock} readOnly={readOnly} />
         </>
@@ -119,8 +124,27 @@ export function InventoryItemPage({ readOnly = false }: { readOnly?: boolean }) 
   );
 }
 
+/**
+ * A ref for the pinned item head that keeps --item-head-h (on the page root) at its height, so the
+ * editor's Save bar can pin itself just under it at any width.
+ */
+function useHeadHeight() {
+  const obs = useRef<ResizeObserver | null>(null);
+  useEffect(() => () => {
+    obs.current?.disconnect();
+    document.documentElement.style.removeProperty('--item-head-h');
+  }, []);
+  return useCallback((el: HTMLDivElement | null) => {
+    obs.current?.disconnect();
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    obs.current = new ResizeObserver(() => document.documentElement.style.setProperty('--item-head-h', el.offsetHeight + 'px'));
+    obs.current.observe(el);
+  }, []);
+}
+
 function ItemDetails({
   item,
+  stockTotal,
   locs,
   cats,
   racks = {},
@@ -140,6 +164,8 @@ function ItemDetails({
   found: ItemSupplierRow[];
   readOnly?: boolean;
   onSaved?: () => void;
+  /** The item's stock in all places, in base units, for the note when a pack size changes. */
+  stockTotal?: number;
 }) {
   const { t, lang } = useSession();
   const bi = useBi();
@@ -236,14 +262,35 @@ function ItemDetails({
   const [costFrom, setCostFrom] = useState<number | null>(null);
   const costIdx = costFrom != null && form.units[costFrom] ? costFrom : biggestUnitIndex(form);
   const costPreview = costsFromUnit(form, costIdx);
+  // The unit whose price (and cost) was typed last: its rate per base unit suggests the others.
+  const [lastPrice, setLastPrice] = useState<number | null>(null);
+  const [lastCost, setLastCost] = useState<number | null>(null);
+  const priceHints = unitSuggestions(form, lastPrice, 'price');
+  const costHints = unitSuggestions(form, lastCost, 'cost');
+  const actions = !readOnly && (
+    <div className="bar form-actions" data-tour="item-actions">
+      <button className="btn primary" disabled={busy}>
+        {t('common.save')}
+      </button>
+      <button type="button" className="btn" onClick={() => nav('/admin/inventory')}>
+        {item ? bi('Back to the list', 'ಪಟ್ಟಿಗೆ ಹಿಂದೆ') : t('common.cancel')}
+      </button>
+      {item && (
+        <button type="button" className={item.active ? 'btn danger' : 'btn'} disabled={busy} onClick={() => save(null, !item.active)}>
+          {item.active ? t('items.deactivate') : t('items.activate')}
+        </button>
+      )}
+    </div>
+  );
   return (
     <form onSubmit={(e) => save(e)}>
       {!item && <h1 className="title">{t('items.new')}</h1>}
+      {actions}
       {error && <div className="msg err">{error}</div>}
       {saved && <div className="msg ok">{saved}</div>}
       <fieldset className="plain-fieldset" disabled={readOnly}>
-        {/* A new item has no pinned title above, so its name card pins itself; one Save, at the bottom. */}
-        <div className={'card' + (item ? '' : ' item-sticky')}>
+        {/* Save, Back and Stop selling are pinned at the top of the form (above), at every width. */}
+        <div className="card">
           <div className="grid2">
             <label className="field">
               <span>{t('items.nameKn')}</span>
@@ -362,11 +409,21 @@ function ItemDetails({
                   <label className="field">
                     <span>{'1 ' + (u.code || bi('of these', 'ಇದು')) + ' = ? ' + base}</span>
                     <input inputMode="numeric" value={u.perBase} onChange={(e) => setUnit(i, { perBase: e.target.value })} aria-label={t('items.perBase')} />
+                    <PackChangeNote change={packChange(item, u, stockTotal)} base={base} />
                   </label>
                 )}
                 <label className="field">
                   <span>{t('items.price')} ₹</span>
-                  <input inputMode="decimal" value={u.price} onChange={(e) => setUnit(i, { price: e.target.value })} />
+                  <input
+                    inputMode="decimal"
+                    value={u.price}
+                    placeholder={priceHints.suggest[i] != null ? String(priceHints.suggest[i]) : undefined}
+                    onChange={(e) => {
+                      setUnit(i, { price: e.target.value });
+                      setLastPrice(i);
+                    }}
+                  />
+                  {!readOnly && <Suggestion v={priceHints.suggest[i]} rate={priceHints.rate} base={base} onUse={(v) => setUnit(i, { price: String(v) })} />}
                 </label>
                 <label className="field">
                   <span>{t('items.min')} ₹</span>
@@ -378,7 +435,16 @@ function ItemDetails({
                 </label>
                 <label className="field">
                   <span>{t('items.cost')} ₹</span>
-                  <input inputMode="decimal" value={u.cost} onChange={(e) => setUnit(i, { cost: e.target.value })} />
+                  <input
+                    inputMode="decimal"
+                    value={u.cost}
+                    placeholder={costHints.suggest[i] != null ? String(costHints.suggest[i]) : undefined}
+                    onChange={(e) => {
+                      setUnit(i, { cost: e.target.value });
+                      setLastCost(i);
+                    }}
+                  />
+                  {!readOnly && <Suggestion v={costHints.suggest[i]} rate={costHints.rate} base={base} onUse={(v) => setUnit(i, { cost: String(v) })} />}
                 </label>
               </div>
               <div className="muted mb-4" data-tour={i === 0 ? 'item-slabs' : undefined}>
@@ -516,23 +582,44 @@ function ItemDetails({
           </div>
         </div>
       </fieldset>
-
-      {!readOnly && (
-        <div className="bar">
-          <button className="btn primary" disabled={busy}>
-            {t('common.save')}
-          </button>
-          <button type="button" className="btn" onClick={() => nav('/admin/inventory')}>
-            {item ? bi('Back to the list', 'ಪಟ್ಟಿಗೆ ಹಿಂದೆ') : t('common.cancel')}
-          </button>
-          {item && (
-            <button type="button" className={item.active ? 'btn danger' : 'btn'} disabled={busy} onClick={() => save(null, !item.active)}>
-              {item.active ? t('items.deactivate') : t('items.activate')}
-            </button>
-          )}
-        </div>
-      )}
     </form>
+  );
+}
+
+/** "Suggested ₹29 — use": the price at the rate of the unit typed last, filled in with one tap. */
+function Suggestion({ v, rate, base, onUse }: { v: number | null | undefined; rate: number | null; base: string; onUse: (v: number) => void }) {
+  const bi = useBi();
+  if (v == null) return null;
+  return (
+    <span className="hint-row">
+      <span className="muted">
+        {bi('Suggested', 'ಸಲಹೆ')} {formatRupees(v)}
+        {rate != null && base ? ' (' + formatRate(rate) + ' / ' + base + ')' : ''}
+      </span>
+      <button type="button" className="btn ghost small" onClick={() => onUse(v)} aria-label={bi('Use the suggested ' + formatRupees(v), 'ಸಲಹೆಯ ' + formatRupees(v) + ' ಬಳಸಿ')}>
+        {bi('Use', 'ಬಳಸಿ')}
+      </button>
+    </span>
+  );
+}
+
+/** A unit's size changed: stock is kept in base units, so nothing is lost; say what it reads as now. */
+function PackChangeNote({ change: c, base }: { change: ReturnType<typeof packChange>; base: string }) {
+  const bi = useBi();
+  if (!c) return null;
+  return (
+    <span className="msg warn pack-note">
+      {bi(
+        c.code + ' was ' + c.was + ' ' + base + ', now ' + c.now + ' ' + base + '.',
+        c.code + ' ಮೊದಲು ' + c.was + ' ' + base + ' ಇತ್ತು, ಈಗ ' + c.now + ' ' + base + '.',
+      )}
+      {c.stock != null &&
+        ' ' +
+          bi(
+            'Stock stays ' + c.stock + ' ' + base + ' (was ' + c.wasPacks + ' ' + c.code + ', now ' + c.nowPacks + ' ' + c.code + ').',
+            'ಸ್ಟಾಕ್ ' + c.stock + ' ' + base + ' ಹಾಗೆಯೇ ಇರುತ್ತದೆ (ಮೊದಲು ' + c.wasPacks + ' ' + c.code + ', ಈಗ ' + c.nowPacks + ' ' + c.code + ').',
+          )}
+    </span>
   );
 }
 

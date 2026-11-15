@@ -19,3 +19,4 @@ export * from './itemInfo';
 export * from './delivery';
 export * from './layout';
 export * from './purchasing';
+export * from './analytics';

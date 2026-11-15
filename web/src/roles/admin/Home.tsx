@@ -8,6 +8,7 @@ import { Greeting, Loading, Money, Tile, useBi, WeekChart, when, type WeekDay } 
 import { Icon } from '../../components/Icon';
 import { useState } from 'react';
 import { ExplainerCard, ExplainerModal } from '../../explainer/entry';
+import { SalesChart } from '../../components/SalesChart';
 
 export interface Summary {
   toConfirm: number;
@@ -106,8 +107,9 @@ export function AdminHome() {
       <div className="tiles" data-tour="home-today">
         <Tile icon="rupee" n={<Money v={s.salesToday} />} label={<>{bi('Sales from', 'ಮಾರಾಟ,')} {s.billsToday} {bi('bills', 'ಬಿಲ್‌ಗಳು')}</>} />
         <Tile icon="receipt" n={<Money v={s.due} />} label={bi('Money still due', 'ಬರಬೇಕಾದ ಹಣ')} />
-        <Tile icon="box" n={<Money v={s.stockValue} />} label={bi('Stock value at cost', 'ಖರೀದಿ ಬೆಲೆಯಲ್ಲಿ ಸ್ಟಾಕ್')} />
+        <Tile icon="box" n={<Money v={s.stockValue} />} label={<>{bi('Stock value at cost', 'ಖರೀದಿ ಬೆಲೆಯಲ್ಲಿ ಸ್ಟಾಕ್')} · {bi('see each item', 'ಪ್ರತಿ ಸಾಮಾನು ನೋಡಿ')}</>} to="/admin/stock-value" />
       </div>
+      <SalesChart tour="home-sales-chart" />
 
     </>
   );

@@ -915,3 +915,14 @@ img, svg.ink { max-width: 100%; }
 .tick { width: var(--tap); height: var(--tap); border: 2px solid var(--line-strong); border-radius: var(--r-sm); background: var(--paper-1); color: var(--on-brand); font-weight: 700; cursor: pointer; transition: background var(--t-fast) var(--ease); }
 .tick.on { background: var(--brand-600); border-color: var(--brand-700); }
 .tick:focus-visible { outline: none; box-shadow: var(--focus); }
+
+/* item editor: Save / Back / Stop selling pinned at the top of the form, under the pinned item head */
+.form-actions {
+  position: sticky; top: calc(60px + var(--item-head-h, 0px)); z-index: 9;
+  margin: 0 0 var(--gap); padding: 10px var(--pad);
+  background: var(--paper-1); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--sh-1);
+}
+.form-actions .btn { flex: 1 1 auto; }
+.hint-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; font-size: 0.85rem; }
+.msg.warn { background: var(--gold-wash); color: var(--gold-600); border: 1px solid var(--line-strong); }
+.pack-note { display: block; margin: 6px 0 0; padding: 8px 10px; font-size: 0.85rem; }

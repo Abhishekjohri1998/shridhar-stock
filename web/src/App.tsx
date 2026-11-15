@@ -31,6 +31,7 @@ const named = <K extends string>(load: () => Promise<Record<K, ComponentType>>, 
   lazy(() => load().then((m) => ({ default: m[name] })));
 const HelpPage = named(() => import('./pages/Help'), 'HelpPage');
 const ReportsPage = named(() => import('./roles/Reports'), 'ReportsPage');
+const StockValuePage = named(() => import('./roles/admin/StockValue'), 'StockValuePage');
 const PurchasesPage = named(() => import('./roles/admin/Buying'), 'PurchasesPage');
 const ArrivingPage = named(() => import('./roles/admin/Arrivals'), 'ArrivingPage');
 const CarriersPage = named(() => import('./roles/admin/Carriers'), 'CarriersPage');
@@ -535,6 +536,7 @@ function Shell() {
               <>
                 <Route path="/admin" element={<AdminHome />} />
                 <Route path="/admin/reports" element={<ReportsPage />} />
+                <Route path="/admin/stock-value" element={<StockValuePage />} />
                 <Route path="/admin/bills" element={<BillsPage />} />
                 <Route path="/admin/confirm" element={<ConfirmPage />} />
                 <Route path="/admin/inventory" element={<InventoryPage />} />

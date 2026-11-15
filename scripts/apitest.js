@@ -191,6 +191,21 @@ async function main() {
     check('the correction keeps its reason and note', moves[0].ref === 'damaged' && moves[0].note === 'wet');
     eq('recount finds nothing wrong', (await call('/stock/recount', { method: 'POST', token: admin })).body.fixed.length, 0);
 
+    // ------------------------------------------------ stock value breakdown and sales series
+    const home = (await call('/admin/home', { token: admin })).body;
+    const sv = (await call('/admin/stock-value', { token: admin })).body;
+    check('stock value rows add up to the Home tile', Math.abs(sv.total - home.stockValue) < 0.005 && Math.abs(sv.rows.reduce((a, r) => a + r.value, 0) - home.stockValue) < 0.01, sv.total + ' vs ' + home.stockValue);
+    check('stock value lists what is held, per place too', sv.rows.some((r) => r.itemId === parleId && r.baseQty === 378) && (await call('/admin/stock-value?place=' + shop, { token: admin })).body.rows.find((r) => r.itemId === parleId)?.baseQty === 90);
+    const ss = (await call('/admin/sales-series?by=month&itemId=' + parleId, { token: admin })).body;
+    check('sales series: 12 months', ss.points.length === 12 && ss.by === 'month', JSON.stringify(ss).slice(0, 200));
+    eq('sales series: 30 days by default', (await call('/admin/sales-series', { token: admin })).body.points.length, 30);
+    eq('sales series needs a sign-in', (await call('/admin/sales-series')).status, 401);
+    const svCsv = (await call('/reports/stock-value-items.csv', { token: admin })).text;
+    check('stock value file: BOM, header, Kannada', svCsv.charCodeAt(0) === 0xfeff && svCsv.includes('value_at_cost') && svCsv.includes('ಪಾರ್ಲೆ'), svCsv.slice(0, 300));
+    const seCsv = (await call('/reports/sales-series.csv?by=day&itemId=' + parleId, { token: admin })).text;
+    check('item sales file: BOM and 30 days', seCsv.charCodeAt(0) === 0xfeff && seCsv.trim().split('\r\n').length === 31, seCsv.slice(0, 200));
+    eq('an unknown item has no sales file', (await call('/reports/sales-series.csv?itemId=nope', { token: admin })).status, 404);
+
     // ------------------------------------------------ files
     const itemsCsv = await call('/export/items.csv', { token: admin });
     check('the items file starts with the Excel byte-order mark', itemsCsv.text.charCodeAt(0) === 0xfeff);

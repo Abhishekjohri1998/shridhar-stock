@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { findUnit, priceFor, rateRange, roundOff, toCsv, type BillMirror, type Delivery, type Item, type StockLevel, type Transfer, type Vehicle } from '@stock/core';
+import { findUnit, priceFor, rateRange, roundOff, salesSeries, seriesKeys, stockValueRows, toCsv, type BillMirror, type SeriesBy, type Delivery, type Item, type StockLevel, type Transfer, type Vehicle } from '@stock/core';
 import { requireRole } from '../auth';
 import { handler, HttpError } from '../http';
 import { getRepo } from '../store';
@@ -216,6 +216,39 @@ reportRoutes.get(
   }),
 );
 
+/** Bills from the start of a series on, without the handwriting. */
+async function seriesBills(by: SeriesBy) {
+  const first = seriesKeys(by)[0]!;
+  const start = new Date(Date.parse((by === 'day' ? first : first + '-01') + 'T00:00:00+05:30')).toISOString();
+  return getRepo().listDocs<BillMirror>('bills', { filter: { at: { gte: start } }, omit: ['lines.ink', 'lines.moreInk'] });
+}
+
+const seriesBy = (q: Record<string, unknown>): SeriesBy => (q.by === 'month' ? 'month' : 'day');
+
+/** Stock value at cost, item by item: the rows add up to Home's "Stock value at cost". ?place= keeps one place. */
+reportRoutes.get(
+  '/admin/stock-value',
+  readers,
+  handler(async (req, res) => {
+    const repo = getRepo();
+    const [items, stock, locs] = await Promise.all([repo.listItems(), repo.listStock(), repo.listLocations()]);
+    const place = String(req.query.place ?? '') || undefined;
+    const v = stockValueRows(items, stock, place);
+    res.json({ ...v, total: round2(v.total), place: place ?? null, places: locs.filter((l) => l.active).map((l) => ({ id: l.id, name: l.name, nameKn: l.nameKn })) });
+  }),
+);
+
+/** Sales over time: ?by=day (last 30 days) or month (last 12), ?itemId= for one item. Shop days in IST. */
+reportRoutes.get(
+  '/admin/sales-series',
+  readers,
+  handler(async (req, res) => {
+    const by = seriesBy(req.query);
+    const itemId = String(req.query.itemId ?? '') || undefined;
+    res.json({ by, itemId: itemId ?? null, points: salesSeries(await seriesBills(by), by, itemId) });
+  }),
+);
+
 function sendCsv(res: import('express').Response, file: string, body: string) {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="' + file + '"');
@@ -266,6 +299,25 @@ reportRoutes.get(
         const [vehicles, transfers, deliveries] = await Promise.all([repo.listDocs<Vehicle>('vehicles'), repo.listDocs<Transfer>('transfers'), repo.listDocs<Delivery>('deliveries')]);
         const t = tripsByVehicle(vehicles, transfers, deliveries, p.from, p.to);
         return sendCsv(res, 'trips-by-vehicle-' + span + '.csv', toCsv(['vehicle', 'type', 'driver', 'transfers', 'deliveries', 'trips'], t.map((r) => [r.vehicle, r.type, r.driver, r.transfers, r.deliveries, r.transfers + r.deliveries])));
+      }
+      case 'stock-value-items': {
+        const place = String(req.query.place ?? '') || undefined;
+        const v = stockValueRows(d.items, d.stock, place);
+        const rows: (string | number)[][] = v.rows.map((r) => [r.itemId, r.nameEn, r.nameKn, r.qty, r.unit, r.baseQty, r.baseUnit, r.unitCost ?? '', r.value, r.noCost ? 'no cost' : '']);
+        rows.push(['', 'Total', '', '', '', '', '', '', round2(v.total), '']);
+        const at = place ? d.locs.find((l) => l.id === place)?.name ?? place : 'all-places';
+        return sendCsv(res, 'stock-value-items-' + at + '.csv', toCsv(['item_id', 'name_en', 'name_kn', 'qty', 'unit', 'qty_base', 'base_unit', 'cost_per_unit', 'value_at_cost', 'flag'], rows));
+      }
+      case 'sales-series': {
+        const by = seriesBy(req.query);
+        const itemId = String(req.query.itemId ?? '') || undefined;
+        const it = itemId ? d.byId.get(itemId) : undefined;
+        if (itemId && !it) throw new HttpError(404, 'No such item');
+        const pts = salesSeries(await seriesBills(by), by, itemId);
+        const label = it ? (it.nameEn || it.id).replace(/[^A-Za-z0-9]+/g, '-') : 'all';
+        const header = it ? [by, 'name_en', 'name_kn', 'sales', 'qty_base', 'base_unit', 'lines'] : [by, 'sales', 'bills'];
+        const rows = pts.map((p) => (it ? [p.key, it.nameEn, it.nameKn, p.amount, p.qty, it.units[0]?.code ?? '', p.count] : [p.key, p.amount, p.count]));
+        return sendCsv(res, 'sales-by-' + by + '-' + label + '.csv', toCsv(header, rows));
       }
       default:
         throw new HttpError(404, 'No such report');

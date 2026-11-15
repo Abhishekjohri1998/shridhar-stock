@@ -966,6 +966,82 @@ async function ledger() {
 }
 // ================================================================ end purchasing (agent B)
 
+// ================================================================ client feedback: price suggestions, pack change, stock value rows, sales series
+{
+  const u = (code, perBase, price) => ({ ...C.blankUnit(false), code, label: code, perBase, price });
+  // Sugar: base g, Bag = 50000 g at 2850.
+  let f = { ...C.blankItemForm(), units: [u('g', '1', ''), u('bag', '50000', '2850'), u('kg', '1000', '')] };
+  let s = C.unitSuggestions(f, 1);
+  check('F sugar: bag 2850/50000 -> rate 0.057', s.rate === 0.057 && s.from === 1, JSON.stringify(s));
+  check('F sugar: 1 kg suggests 57', s.suggest[2] === 57, JSON.stringify(s.suggest));
+  check('F sugar: g suggests 0.06 (round2), bag (typed) none', s.suggest[0] === 0.06 && s.suggest[1] === null, JSON.stringify(s.suggest));
+  check('F sugar: no last index -> biggest priced unit', C.unitSuggestions(f, null).rate === 0.057);
+  // Enter 58 for the kg, then add 500 g.
+  f = { ...f, units: [...f.units.slice(0, 2), u('kg', '1000', '58'), u('500g', '500', '')] };
+  s = C.unitSuggestions(f, 2);
+  check('F sugar: kg 58 -> rate 0.058', s.rate === 0.058, String(s.rate));
+  check('F sugar: then 500 g suggests 29', s.suggest[3] === 29, JSON.stringify(s.suggest));
+  check('F sugar: typed prices never suggested over', s.suggest[1] === null && s.suggest[2] === null);
+  f = { ...f, units: [...f.units.slice(0, 3), u('500g', '500', '30')] };
+  s = C.unitSuggestions(f, 3);
+  check('F sugar: 500 g at 30 -> rate 0.06', s.rate === 0.06, String(s.rate));
+  check('F sugar: g now suggests 0.06', s.suggest[0] === 0.06);
+  check('F sugar: last typed empty -> falls back to biggest', C.unitSuggestions({ ...f, units: [...f.units.slice(0, 3), u('500g', '500', '')] }, 3).from === 1);
+  const fc = { ...C.blankItemForm(), units: [{ ...u('g', '1', ''), cost: '' }, { ...u('bag', '50000', ''), cost: '2700' }, { ...u('kg', '1000', ''), cost: '' }] };
+  const sc = C.unitSuggestions(fc, null, 'cost');
+  check('F cost: bag 2700 -> kg cost 54 (same as costsFromUnit)', sc.suggest[2] === 54 && C.costsFromUnit(fc, 1).units[2].cost === '54', JSON.stringify(sc));
+  check('F no price anywhere -> no suggestion', C.unitSuggestions({ ...C.blankItemForm(), units: [u('g', '1', ''), u('kg', '1000', '')] }, null).rate === null);
+
+  // Pack size change: Box was 60 pc, now 72; 360 pc in stock.
+  const wheel = { units: [{ code: 'pc', perBase: 1 }, { code: 'box', perBase: 60 }] };
+  const pc = C.packChange(wheel, u('box', '72', '600'), 360);
+  check('F pack change: 60 -> 72, 6 Box -> 5 Box', pc && pc.was === 60 && pc.now === 72 && pc.stock === 360 && pc.wasPacks === 6 && pc.nowPacks === 5, JSON.stringify(pc));
+  check('F pack change: unchanged / new / blank -> null', C.packChange(wheel, u('box', '60', ''), 360) === null && C.packChange(wheel, u('crate', '10', ''), 1) === null && C.packChange(wheel, u('box', '', ''), 1) === null);
+  check('F pack change: no stock known -> was/now only', (() => { const x = C.packChange(wheel, u('box', '72', ''), undefined); return x && x.stock === undefined && x.now === 72; })());
+
+  // Stock value rows add up to the Home tile's sum.
+  const items = [
+    { id: 'a', nameEn: 'Sugar', nameKn: 'ಸಕ್ಕರೆ', active: true, units: [{ code: 'g', perBase: 1, price: 0.06, cost: 0.054 }, { code: 'kg', perBase: 1000, price: 60 }], defaultUnit: 'kg' },
+    { id: 'b', nameEn: 'Soap', nameKn: 'ಸೋಪ್', active: true, units: [{ code: 'pc', perBase: 1, price: 10, cost: 9.1 }] },
+    { id: 'c', nameEn: 'Salt', nameKn: 'ಉಪ್ಪು', active: true, units: [{ code: 'pc', perBase: 1, price: 20 }] },
+    { id: 'd', nameEn: 'Old', nameKn: '', active: false, units: [{ code: 'pc', perBase: 1, price: 1, cost: 0.33 }] },
+  ];
+  const stock = [
+    { itemId: 'a', locationId: 'shop', qty: 12500 },
+    { itemId: 'a', locationId: 'g1', qty: 50000 },
+    { itemId: 'b', locationId: 'shop', qty: 37 },
+    { itemId: 'b', locationId: 'g1', qty: -3 },
+    { itemId: 'c', locationId: 'shop', qty: 5 },
+    { itemId: 'd', locationId: 'g1', qty: 7 },
+  ];
+  const tile = (() => { const held = new Map(); for (const x of stock) if (x.qty > 0) held.set(x.itemId, (held.get(x.itemId) ?? 0) + x.qty); let sum = 0; for (const i of items) sum += (i.units[0]?.cost ?? 0) * (held.get(i.id) ?? 0); return sum; })();
+  const v = C.stockValueRows(items, stock);
+  check('F stock value: total equals the tile exactly', v.total === tile, v.total + ' vs ' + tile);
+  check('F stock value: rows add up to the tile (to paise)', Math.abs(v.rows.reduce((a, r) => a + r.value, 0) - tile) < 0.01);
+  check('F stock value: sugar 62.5 kg at 54 = 3375, first', v.rows[0].itemId === 'a' && v.rows[0].qty === 62.5 && v.rows[0].unit === 'kg' && v.rows[0].unitCost === 54 && v.rows[0].value === 3375, JSON.stringify(v.rows[0]));
+  check('F stock value: salt flagged no cost', v.noCost === 1 && v.rows.find((r) => r.itemId === 'c').noCost);
+  check('F stock value: one place only', C.stockValueRows(items, stock, 'shop').rows.length === 3 && C.stockValueRows(items, stock, 'shop').total === 12500 * 0.054 + 37 * 9.1);
+
+  // Sales series: buckets in IST.
+  const now = Date.parse('2026-11-15T12:00:00+05:30');
+  const line = (itemId, amount, baseQty, state = 'typed') => ({ i: 0, name: '', qty: 1, rate: amount, amount, state, itemId, baseQty });
+  const bills = [
+    { at: '2026-11-14T18:40:00.000Z', total: 100, lines: [line('a', 60, 1000), line('b', 40, 4)] }, // 15 Nov 00:10 IST
+    { at: '2026-11-14T18:20:00.000Z', total: 50, lines: [line('a', 50, 800)] }, // 14 Nov 23:50 IST
+    { at: '2026-11-15T05:00:00.000Z', total: 30, cancelled: true, lines: [line('a', 30, 500)] },
+    { at: '2026-11-15T06:00:00.000Z', total: 70, lines: [line('a', 20, 0, 'to-confirm'), line('', 30, 0, 'not-item'), line('a', 20, 300)] },
+    { at: '2026-09-02T06:00:00.000Z', total: 999, lines: [line('a', 999, 9000)] },
+  ];
+  const day = C.salesSeries(bills, 'day', undefined, now);
+  check('F series day: 30 buckets ending today', day.length === 30 && day[29].key === '2026-11-15' && day[0].key === '2026-10-17', day[0].key + '..' + day[29].key);
+  check('F series day: IST midnight split, cancelled left out', day[29].amount === 170 && day[29].count === 2 && day[28].amount === 50, JSON.stringify(day.slice(28)));
+  const dayA = C.salesSeries(bills, 'day', 'a', now);
+  check('F series item: linked lines only', dayA[29].amount === 80 && dayA[29].qty === 1300 && dayA[29].count === 2 && dayA[28].qty === 800, JSON.stringify(dayA.slice(28)));
+  const mon = C.salesSeries(bills, 'month', 'a', now);
+  check('F series month: 12 months Dec..Nov', mon.length === 12 && mon[0].key === '2025-12' && mon[11].key === '2026-11', mon.map((p) => p.key).join(','));
+  check('F series month: Sep and Nov', mon[9].amount === 999 && mon[11].amount === 130 && mon[11].qty === 2100, JSON.stringify(mon.slice(9)));
+}
+
 ledger()
   .catch((err) => {
     failed++;
