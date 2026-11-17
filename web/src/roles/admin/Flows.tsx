@@ -20,6 +20,7 @@ import { statusWord } from '../../lib/words';
 import { Empty, InkView, Loading, Money, Status, useBi, when, Table } from '../../components/ui';
 import { PinPicker } from '../../components/PinPicker';
 import { BackupCard } from './Backup';
+import { inApp, tellApp } from '../../lib/inApp';
 
 // ---------------------------------------------------------------- bills from billing
 
@@ -178,7 +179,18 @@ export function SettingsPage() {
         </button>
       </div>
       {settings && <DeliverySettings s={settings} save={saveSettings} />}
-      <BackupCard />
+      {/* Inside the app, backup, restore and erase cover billing and stock together, in its Settings. */}
+      {inApp() ? (
+        <div className="card">
+          <h2 className="subtitle mt-0">{bi('Backup and restore', 'ಬ್ಯಾಕಪ್ ಮತ್ತು ಮರುಸ್ಥಾಪನೆ')}</h2>
+          <p className="muted">{bi('Backup, restore and erase for the whole shop are in Settings of the app.', 'ಇಡೀ ಅಂಗಡಿಯ ಬ್ಯಾಕಪ್, ಮರುಸ್ಥಾಪನೆ ಮತ್ತು ಅಳಿಸುವಿಕೆ ಆ್ಯಪ್‌ನ ಸೆಟ್ಟಿಂಗ್ಸ್‌ನಲ್ಲಿವೆ.')}</p>
+          <button className="btn" onClick={() => tellApp({ type: 'open-settings' })}>
+            {bi('Open Settings of the app', 'ಆ್ಯಪ್‌ನ ಸೆಟ್ಟಿಂಗ್ಸ್ ತೆರೆಯಿರಿ')}
+          </button>
+        </div>
+      ) : (
+        <BackupCard />
+      )}
     </>
   );
 }

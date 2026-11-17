@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../lib/api';
 import { useSession } from '../lib/session';
+import { inApp } from '../lib/inApp';
 
 /** Changing your own PIN signs you out everywhere, so this ends by going back to sign-in. */
 export function PinPage() {
-  const { t, signOut } = useSession();
+  const { t, me, signIn, signOut } = useSession();
   const [oldPin, setOld] = useState('');
   const [newPin, setNew] = useState('');
   const [error, setError] = useState('');
@@ -16,7 +17,9 @@ export function PinPage() {
     try {
       await api.changePin(oldPin, newPin);
       setDone(true);
-      setTimeout(signOut, 1500);
+      // Inside the app there is no sign-in page to go back to: sign in again with the new PIN.
+      if (inApp() && me) setTimeout(() => void signIn(me.phone, newPin).catch(signOut), 1500);
+      else setTimeout(signOut, 1500);
     } catch (err) {
       setError((err as Error).message);
     }

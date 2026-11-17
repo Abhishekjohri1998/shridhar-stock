@@ -22,6 +22,8 @@ import { FIRST_TOUR, tourForPath } from './tours';
 import { ExplainerModal, explainerOffered, markExplainerOffered } from './explainer/entry';
 import { Loading } from './components/ui';
 import { CalculatorButton } from './components/Calculator';
+import { inApp, tellApp } from './lib/inApp';
+import { SigningInPage } from './pages/SigningIn';
 
 /*
  * Screens opened now and then load when first opened, so the first screen downloads much less:
@@ -94,7 +96,8 @@ const ADMIN: Place[] = [
       tab('/admin/vehicles', 'Vehicles', 'ವಾಹನಗಳು'),
       tab('/admin/units', 'Units', 'ಘಟಕಗಳು'),
       tab('/admin/files', 'Excel', 'ಎಕ್ಸೆಲ್'),
-      tab('/admin/settings', 'Settings', 'ಸೆಟ್ಟಿಂಗ್ಸ್'),
+      // Inside the app its own Settings tab is the whole shop's; this one holds stock's alone.
+      inApp() ? tab('/admin/settings', 'Stock settings', 'ಸ್ಟಾಕ್ ಸೆಟ್ಟಿಂಗ್ಸ್') : tab('/admin/settings', 'Settings', 'ಸೆಟ್ಟಿಂಗ್ಸ್'),
     ],
   },
 ];
@@ -195,7 +198,13 @@ function UserMenu() {
           <NavLink to="/pin" role="menuitem" className="menu-item">
             <Icon name="key" /> {t('login.changePin')}
           </NavLink>
-          <a href="#" role="menuitem" className="menu-item" onClick={(e) => (e.preventDefault(), stopLive(), signOut())}>
+          {inApp() && me.role === 'admin' && (
+            <a href="#" role="menuitem" className="menu-item" onClick={(e) => (e.preventDefault(), setOpen(false), tellApp({ type: 'open-settings' }))}>
+              <Icon name="settings" /> {lang === 'kn' ? 'ಆ್ಯಪ್ ಸೆಟ್ಟಿಂಗ್ಸ್ (ಬ್ಯಾಕಪ್, ಮರುಸ್ಥಾಪನೆ)' : 'App settings (backup, restore)'}
+            </a>
+          )}
+          {/* Inside the app, Sign out is the app's: it signs out of billing and stock together. */}
+          <a href="#" role="menuitem" className="menu-item" onClick={(e) => (e.preventDefault(), stopLive(), inApp() ? tellApp({ type: 'sign-out' }) : signOut())}>
             <Icon name="logout" /> {t('common.signOut')}
           </a>
         </div>
@@ -492,7 +501,8 @@ function Shell() {
       <>
         <Top />
         <main className="plain-col">
-          <LoginPage />
+          {/* Inside the app there is no second sign-in: the app hands over a session. */}
+          {inApp() ? <SigningInPage /> : <LoginPage />}
         </main>
       </>
     );

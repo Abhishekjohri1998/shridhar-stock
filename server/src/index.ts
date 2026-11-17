@@ -9,7 +9,7 @@ import { actionRoutes } from './routes/actions';
 import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
 import { backupRoutes, RESTORE_PATH, restoreBody } from './routes/backup';
-import { billingLinkRoutes } from './routes/billingLink';
+import { billingLinkRoutes, LINK_RESTORE_PATH, linkRestoreBody } from './routes/billingLink';
 import { demoRoutes } from './routes/demo';
 import { deliveryRoutes } from './routes/deliveries';
 import { liveRoutes } from './routes/live';
@@ -48,6 +48,8 @@ async function main(): Promise<void> {
   app.use(gzip());
   // A restore carries the whole store: its own large limit, for the admin only, before the general one.
   app.use(RESTORE_PATH, ...restoreBody);
+  // Billing's whole-shop restore: the link key first, then the same large limit.
+  app.use(LINK_RESTORE_PATH, ...linkRestoreBody);
   app.use(express.json({ limit: '3mb' }));
   app.use(cors({ origin: env.corsOrigins.length ? env.corsOrigins : true }));
 

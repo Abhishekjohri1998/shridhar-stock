@@ -2,13 +2,14 @@ import fs from 'node:fs';
 import express, { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { requireRole } from '../auth';
-import { ERASE_CURSOR_ID, ERASE_MODES, erasedData, listSafetyBackups, makeBackup, safetyPath, saveSafetyBackup, validateBackup, type EraseCursor } from '../backup';
+import { ERASE_CURSOR_ID, ERASE_MODES, erasedData, type EraseMode, listSafetyBackups, makeBackup, safetyPath, saveSafetyBackup, validateBackup, type EraseCursor } from '../backup';
 import { billingNewestNo, withLinkPaused } from '../billing/link';
 import { verifyPin } from '../pin';
 import { lockedFor, recordFailure, recordSuccess } from '../ratelimit';
 import { emit } from '../events';
 import { handler, HttpError } from '../http';
 import { getRepo } from '../store';
+import type { BackupData } from '../store/types';
 
 /**
  * Download a backup of everything, restore one, and erase. Admin only.
@@ -51,6 +52,61 @@ backupRoutes.get(
 
 let restoring = false;
 
+const ALL_KINDS = ['items', 'stock', 'bills', 'transfers', 'pos', 'delivery', 'low'] as const;
+const countsOf = (data: Record<string, unknown[]>) => Object.fromEntries(Object.entries(data).map(([k, v]) => [k, v.length]));
+
+/**
+ * Puts a checked backup back over the store, after saving what is there now on the server. Used by
+ * the admin's own restore and by billing's whole-shop restore (the billing link), so both take the
+ * same lock and the same safety backup.
+ */
+export async function restoreStock(data: BackupData): Promise<{ safety: string; counts: Record<string, number> }> {
+  if (restoring) throw new HttpError(409, 'A restore or erase is already running. Wait for it to finish.');
+  restoring = true;
+  try {
+    const repo = getRepo();
+    // What is there now, saved on the server first: if this fails, nothing is replaced.
+    const safety = await saveSafetyBackup(await makeBackup(repo));
+    await repo.restoreAll(data);
+    for (const kind of ALL_KINDS) emit(kind);
+    return { safety, counts: countsOf(data) };
+  } finally {
+    restoring = false;
+  }
+}
+
+/**
+ * Empties the stock data in one of the ERASE_MODES, after a safety backup, with the billing link
+ * held still. `by` is who asked: an admin's id, or 'billing-link' for the app's whole-shop erase.
+ */
+export async function eraseStock(mode: EraseMode, by: string) {
+  if (restoring) throw new HttpError(409, 'A restore or erase is already running. Wait for it to finish.');
+  restoring = true;
+  try {
+    const out = await withLinkPaused(async () => {
+      const repo = getRepo();
+      const before = await makeBackup(repo);
+      // What is there now, saved on the server first: if this fails, nothing is erased.
+      const safety = await saveSafetyBackup(before);
+      const mirrored = before.collections.bills.reduce((m, b) => Math.max(m, Number(b.no) || 0), 0);
+      const cursor: EraseCursor = {
+        id: ERASE_CURSOR_ID,
+        billNo: Math.max(mirrored, await billingNewestNo()),
+        at: new Date().toISOString(),
+        mode,
+        by,
+      };
+      const next = erasedData(before.collections, mode, cursor);
+      await repo.restoreAll(next);
+      return { safety, cursor, counts: countsOf(next) };
+    });
+    for (const kind of ALL_KINDS) emit(kind);
+    return { mode, safety: out.safety, download: '/admin/backups/' + out.safety, billsFrom: out.cursor.billNo + 1, counts: out.counts };
+  } finally {
+    restoring = false;
+  }
+}
+
 backupRoutes.post(
   '/admin/restore',
   admin,
@@ -58,18 +114,7 @@ backupRoutes.post(
     const body = (req.body ?? {}) as { confirm?: unknown; backup?: unknown };
     if (body.confirm !== 'RESTORE') throw new HttpError(400, 'Type RESTORE to confirm. Nothing was changed.');
     const data = validateBackup(body.backup);
-    if (restoring) throw new HttpError(409, 'A restore is already running. Wait for it to finish.');
-    restoring = true;
-    try {
-      const repo = getRepo();
-      // What is there now, saved on the server first: if this fails, nothing is replaced.
-      const safety = await saveSafetyBackup(await makeBackup(repo));
-      await repo.restoreAll(data);
-      for (const kind of ['items', 'stock', 'bills', 'transfers', 'pos', 'delivery', 'low'] as const) emit(kind);
-      res.json({ ok: true, safety, counts: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, v.length])) });
-    } finally {
-      restoring = false;
-    }
+    res.json({ ok: true, ...(await restoreStock(data)) });
   }),
 );
 
@@ -124,30 +169,6 @@ backupRoutes.post(
       throw new HttpError(400, 'That is not your PIN. Nothing was changed.');
     }
     recordSuccess(ip, key);
-    if (restoring) throw new HttpError(409, 'A restore or erase is already running. Wait for it to finish.');
-    restoring = true;
-    try {
-      const out = await withLinkPaused(async () => {
-        const repo = getRepo();
-        const before = await makeBackup(repo);
-        // What is there now, saved on the server first: if this fails, nothing is erased.
-        const safety = await saveSafetyBackup(before);
-        const mirrored = before.collections.bills.reduce((m, b) => Math.max(m, Number(b.no) || 0), 0);
-        const cursor: EraseCursor = {
-          id: ERASE_CURSOR_ID,
-          billNo: Math.max(mirrored, await billingNewestNo()),
-          at: new Date().toISOString(),
-          mode,
-          by: me.id,
-        };
-        const next = erasedData(before.collections, mode, cursor);
-        await repo.restoreAll(next);
-        return { safety, cursor, counts: Object.fromEntries(Object.entries(next).map(([k, v]) => [k, v.length])) };
-      });
-      for (const kind of ['items', 'stock', 'bills', 'transfers', 'pos', 'delivery', 'low'] as const) emit(kind);
-      res.json({ ok: true, mode, safety: out.safety, download: '/admin/backups/' + out.safety, billsFrom: out.cursor.billNo + 1, counts: out.counts });
-    } finally {
-      restoring = false;
-    }
+    res.json({ ok: true, ...(await eraseStock(mode, me.id)) });
   }),
 );

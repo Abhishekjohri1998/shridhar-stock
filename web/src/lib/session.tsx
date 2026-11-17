@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { makeT, type Lang, type Person, type T } from '@stock/core';
 import { api, hasToken, setToken, whenSignedOut } from './api';
+import { APP_SESSION_EVENT } from './inApp';
 
 interface Session {
   ready: boolean;
@@ -38,6 +39,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       .then(setMe)
       .catch(() => setMe(null))
       .finally(() => setReady(true));
+  }, []);
+
+  // Inside the billing app: the app answers a need-session with a fresh session (lib/inApp.ts).
+  useEffect(() => {
+    const take = (e: Event) => {
+      const token = (e as CustomEvent<{ token?: unknown }>).detail?.token;
+      if (typeof token !== 'string' || !token) return;
+      setToken(token);
+      api
+        .me()
+        .then(setMe)
+        .catch(() => setMe(null))
+        .finally(() => setReady(true));
+    };
+    window.addEventListener(APP_SESSION_EVENT, take);
+    return () => window.removeEventListener(APP_SESSION_EVENT, take);
   }, []);
 
   const setLang = useCallback((l: Lang) => {

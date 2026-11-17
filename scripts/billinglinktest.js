@@ -238,6 +238,52 @@ async function main() {
     eq('a bad draft is 400', (await link('/draft', { lines: [] })).status, 400);
     eq('a closed draft goes', (await link('/draft', { draftId: 'd_x', closed: true, lines: [] })).status, 200);
     eq('from the worker screen too', (await call('/worker/bills')).body.length, 0);
+
+    // ---- one sign-in for the app: a fresh session without a PIN
+    const jwt = require(require.resolve('jsonwebtoken', { paths: [path.join(root, 'server')] }));
+    eq('session: no key 401', (await link('/session', { token: a2.body.token }, null)).status, 401);
+    eq('session: no door when stock has no key', (await link('/session', { token: a2.body.token }, KEY, off.base)).status, 404);
+    const rn1 = await link('/session', { token: a2.body.token });
+    check('session renews a worker from their own session', rn1.status === 200 && rn1.body.role === 'worker' && typeof rn1.body.token === 'string', JSON.stringify(rn1));
+    eq('which opens the worker screen', (await fetch(on.base + '/api/worker/bills', { headers: { Authorization: 'Bearer ' + rn1.body.token } })).status, 200);
+    const old = jwt.sign({ pid: 'p_w', role: 'worker', tv: 1, iat: Math.floor(Date.now() / 1000) - 40 * 86400, exp: Math.floor(Date.now() / 1000) - 10 * 86400 }, 'blinktest');
+    eq('an expired session (40 days old) still renews', (await link('/session', { token: old })).status, 200);
+    const ancient = jwt.sign({ pid: 'p_w', role: 'worker', tv: 1, iat: Math.floor(Date.now() / 1000) - 400 * 86400 }, 'blinktest');
+    eq('one older than 180 days does not', (await link('/session', { token: ancient })).status, 401);
+    eq('a session signed elsewhere does not', (await link('/session', { token: jwt.sign({ pid: 'p_w', role: 'worker', tv: 1 }, 'other') })).status, 401);
+    eq('nothing to renew is 401', (await link('/session', {})).status, 401);
+    const byPhone = await link('/session', { phone: '+91 90000 00001' });
+    check('an admin by phone (billing signed them in)', byPhone.status === 200 && byPhone.body.role === 'admin', JSON.stringify(byPhone));
+    eq('a worker is never renewed by phone alone', (await link('/session', { phone: '9111100021' })).status, 401);
+    // A PIN change bumps the token version: the old session must not come back by renewing.
+    const pinCh = await fetch(on.base + '/api/auth/pin', { method: 'POST', headers: { Authorization: 'Bearer ' + a2.body.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ oldPin: '2468', newPin: '1357' }) });
+    eq('the worker changes their PIN', pinCh.status, 200);
+    eq('after which their old session does not renew', (await link('/session', { token: a2.body.token })).status, 401);
+
+    // ---- the whole-shop backup, restore and erase, from billing's server
+    eq('backup: no key 401', (await link('/backup', null, null)).status, 401);
+    eq('backup: no door when stock has no key', (await link('/backup', null, KEY, off.base)).status, 404);
+    const bk = await link('/backup');
+    check('backup through the link is stock\'s own file', bk.status === 200 && bk.body.format === 'shridhar-stock-backup' && bk.body.collections.items.length >= 3, JSON.stringify(bk.body && bk.body.counts));
+    const itemsBefore = bk.body.collections.items.length;
+    eq('restore: no key 401', (await link('/restore', { backup: bk.body }, null)).status, 401);
+    eq('restore: wrong key 401', (await link('/restore', { backup: bk.body }, 'nope')).status, 401);
+    eq('restore: a file that is not a backup is 400', (await link('/restore', { backup: { hello: 1 } })).status, 400);
+    const chk = await link('/restore', { backup: bk.body, check: true });
+    check('restore check answers counts and changes nothing', chk.status === 200 && chk.body.checked === true && chk.body.counts.items === itemsBefore, JSON.stringify(chk.body));
+    eq('erase: a bad mode is 400', (await link('/erase', { mode: 'all' })).status, 400);
+    eq('erase: no key 401', (await link('/erase', { mode: 'stock' }, null)).status, 401);
+    const er = await link('/erase', { mode: 'everything' });
+    check('erase everything through the link, with a safety backup', er.status === 200 && er.body.mode === 'everything' && /^safety-/.test(er.body.safety) && er.body.counts.items === 0, JSON.stringify(er.body));
+    const rs = await link('/restore', { backup: bk.body });
+    check('restore through the link puts it back, with a safety backup', rs.status === 200 && rs.body.counts.items === itemsBefore && /^safety-/.test(rs.body.safety), JSON.stringify(rs.body));
+    check('the items are back', (await call('/items')).body.length === itemsBefore);
+    const ek = await link('/erase', { mode: 'stock' });
+    check('erase stock keeps the items', ek.status === 200 && ek.body.counts.items === itemsBefore, JSON.stringify(ek.body));
+    const big = await fetch(on.base + '/api/billing-link/restore', { method: 'POST', headers: { 'X-Link-Key': KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ backup: bk.body, pad: 'x'.repeat(4 * 1024 * 1024) }) });
+    eq('the link restore takes more than the 3 MB the rest get', big.status, 200);
+    const bigNoKey = await fetch(on.base + '/api/billing-link/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pad: 'x'.repeat(4 * 1024 * 1024) }) });
+    eq('but never reads a big body without the key', bigNoKey.status, 401);
   } catch (err) {
     failed++;
     console.log('FAIL threw: ' + err.stack + '\n' + on.log());

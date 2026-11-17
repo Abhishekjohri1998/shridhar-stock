@@ -99,3 +99,25 @@ export function requireRole(...roles: Role[]) {
 }
 
 export const anyone = requireRole();
+
+/** How old a session may be and still be renewed by the billing app (it ran out unseen on a tablet). */
+export const RENEW_WITHIN_DAYS = 180;
+
+/**
+ * The person a session was issued to, when it may be renewed: signed by this server, issued at most
+ * RENEW_WITHIN_DAYS ago (an expired one is fine), and the person still switched on, in an active
+ * role, with the same token version. A PIN reset or a switch-off bumps or blocks it, so renewing
+ * never undoes a sign-out the admin forced. Null otherwise.
+ */
+export async function renewablePerson(token: string): Promise<PersonRecord | null> {
+  let body: TokenBody & { iat?: number };
+  try {
+    body = jwt.verify(token, env.jwtSecret, { ignoreExpiration: true }) as TokenBody & { iat?: number };
+  } catch {
+    return null;
+  }
+  if (typeof body.iat !== 'number' || Date.now() / 1000 - body.iat > RENEW_WITHIN_DAYS * 86400) return null;
+  const p = await getRepo().getPerson(body.pid);
+  if (!p || !p.active || p.tv !== body.tv || !isActiveRole(p.role)) return null;
+  return p;
+}

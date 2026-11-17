@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { Router, type NextFunction, type Request, type Response } from 'express';
+import express, { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import {
   findUnit,
@@ -16,7 +16,9 @@ import {
   unitsSellFirst,
   unitRate1,
 } from '@stock/core';
-import { issueToken, publicPerson } from '../auth';
+import { issueToken, publicPerson, renewablePerson } from '../auth';
+import { ERASE_MODES, makeBackup, validateBackup } from '../backup';
+import { eraseStock, RESTORE_LIMIT, restoreStock } from './backup';
 import { verifyPin } from '../pin';
 import { lockedFor, recordFailure, recordSuccess } from '../ratelimit';
 import { env } from '../env';
@@ -36,7 +38,8 @@ export const billingLinkRoutes = Router();
 
 const digest = (s: string) => createHash('sha256').update(s).digest();
 
-billingLinkRoutes.use((req: Request, res: Response, next: NextFunction) => {
+/** The shared key, checked first on every link address (and before the restore's large body). */
+export function linkKeyCheck(req: Request, res: Response, next: NextFunction): void {
   if (!env.linkKey) {
     res.status(404).json({ error: 'No such address' });
     return;
@@ -47,7 +50,9 @@ billingLinkRoutes.use((req: Request, res: Response, next: NextFunction) => {
     return;
   }
   next();
-});
+}
+
+billingLinkRoutes.use(linkKeyCheck);
 
 billingLinkRoutes.get(
   '/items',
@@ -215,5 +220,79 @@ billingLinkRoutes.post(
       : admins.sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
     if (!p) throw new HttpError(409, want ? 'SHOP_ADMIN_PHONE is not an active admin' : 'Stock has no active admin');
     res.json({ token: issueToken(p), person: publicPerson(p) });
+  }),
+);
+
+const sessionBody = z.object({ token: z.string().max(4000).optional(), phone: z.string().max(20).optional() });
+
+/**
+ * One sign-in for the whole app: a fresh stock session for someone already signed in to the app,
+ * so the Stock tab never shows stock's own sign-in. Either the session the app held (`token`, even
+ * expired, see renewablePerson: a PIN reset or a switch-off still ends it), or the phone of an
+ * admin billing has signed in (billing's own token carries it). 401 when neither is good.
+ */
+billingLinkRoutes.post(
+  '/session',
+  handler(async (req, res) => {
+    const { token, phone } = sessionBody.parse(req.body ?? {});
+    let p = token ? await renewablePerson(token) : null;
+    if (!p && phone) {
+      const found = await getRepo().findPersonByPhone(normalisePhone(phone));
+      if (found && found.active && found.role === 'admin' && isActiveRole(found.role)) p = found;
+    }
+    if (!p) throw new HttpError(401, 'No session to renew. Sign in again.');
+    res.json({ role: p.role, name: p.name, token: issueToken(p) });
+  }),
+);
+
+/*
+ * The whole-shop backup, restore and erase, asked by billing's server for the app's Settings
+ * (billing has already checked the owner's PIN and the typed word). The device never sees the key.
+ */
+
+billingLinkRoutes.get(
+  '/backup',
+  handler(async (_req, res) => {
+    const b = await makeBackup(getRepo());
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(JSON.stringify(b));
+  }),
+);
+
+/** The large body for /restore, mounted in index.ts before the general parser, after the key. */
+export const LINK_RESTORE_PATH = '/api/billing-link/restore';
+export const linkRestoreBody = [
+  linkKeyCheck,
+  express.json({ limit: RESTORE_LIMIT }),
+  (err: { type?: string } | undefined, _req: Request, _res: Response, next: NextFunction) => {
+    if (err?.type === 'entity.parse.failed') return next(new HttpError(400, 'The stock backup is damaged (not readable JSON). Nothing was changed.'));
+    if (err?.type === 'entity.too.large') return next(new HttpError(413, 'The stock backup is too big to restore (over ' + RESTORE_LIMIT + '). Nothing was changed.'));
+    next(err);
+  },
+];
+
+/** `check: true` only checks the file and answers its counts; nothing changes. */
+billingLinkRoutes.post(
+  '/restore',
+  handler(async (req, res) => {
+    const body = (req.body ?? {}) as { backup?: unknown; check?: unknown };
+    const data = validateBackup(body.backup);
+    if (body.check === true) {
+      res.json({ ok: true, checked: true, counts: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, v.length])) });
+      return;
+    }
+    res.json({ ok: true, ...(await restoreStock(data)) });
+  }),
+);
+
+const linkEraseBody = z.object({ mode: z.enum(ERASE_MODES) });
+
+billingLinkRoutes.post(
+  '/erase',
+  handler(async (req, res) => {
+    const parsed = linkEraseBody.safeParse(req.body ?? {});
+    if (!parsed.success) throw new HttpError(400, 'Choose what to erase in stock. Nothing was changed.');
+    res.json({ ok: true, ...(await eraseStock(parsed.data.mode, 'billing-link')) });
   }),
 );
