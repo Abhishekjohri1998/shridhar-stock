@@ -22,18 +22,36 @@ function setStatus(s: typeof status) {
   statusListeners.forEach((f) => f(s));
 }
 
+/**
+ * True while a ticket is being fetched. Several screens mount in the same moment and each calls
+ * connect(); without this they would all fetch a ticket before any of them set `source`, and open
+ * one stream each, of which only the last could ever be closed.
+ */
+let connecting = false;
+/**
+ * Bumped by disconnect(), so a ticket that arrives after the stream was stopped is not used, and
+ * a screen that mounts meanwhile (React's development double mount does exactly this) can start
+ * its own connect without waiting for the stale one.
+ */
+let generation = 0;
+
 async function connect() {
-  if (source || !hasToken()) return;
+  if (source || connecting || !hasToken()) return;
+  connecting = true;
+  const mine = generation;
   setStatus('connecting');
   try {
     const { ticket } = await http.post<{ ticket: string }>('/events/ticket', {});
+    if (mine !== generation || listeners.size === 0) return;
     const es = new EventSource('/api/events?ticket=' + encodeURIComponent(ticket));
     source = es;
     es.addEventListener('hello', () => {
+      if (source !== es) return;
       setStatus('live');
       listeners.forEach((f) => f('reconnect'));
     });
     es.addEventListener('change', (e) => {
+      if (source !== es) return;
       try {
         const { kind, id, what } = JSON.parse((e as MessageEvent).data) as { kind: LiveKind; id?: string; what?: string };
         listeners.forEach((f) => f(kind, id, what));
@@ -44,13 +62,15 @@ async function connect() {
     es.onerror = () => {
       // Tickets are single-use, so the browser's own retry cannot work: start again.
       es.close();
+      if (source !== es) return;
       source = null;
       setStatus('connecting');
       scheduleRetry();
     };
   } catch {
-    source = null;
-    scheduleRetry();
+    if (mine === generation) scheduleRetry();
+  } finally {
+    if (mine === generation) connecting = false;
   }
 }
 
@@ -63,6 +83,8 @@ function scheduleRetry() {
 }
 
 function disconnect() {
+  generation += 1;
+  connecting = false;
   source?.close();
   source = null;
   if (retry) clearTimeout(retry);

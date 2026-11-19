@@ -9,6 +9,8 @@
 # What it does:
 #   - installs the code in /opt/shridhar-stock (billing lives in /opt/shridhar; not touched)
 #   - writes /opt/shridhar-stock/server/.env, mode 600, asking for the secrets
+#   - makes sure stock's .env has the LINK_KEY billing's server uses for the one-app link (it
+#     reads billing's .env for it, never writes it)
 #   - adds a systemd service, shridhar-stock, on port 4200 (billing's is on 4000; not touched)
 #   - ADDS one site block for the stock address to /etc/caddy/Caddyfile, after backing it up.
 #     The billing block is left exactly as it is.
@@ -45,6 +47,16 @@ sudo chown "$USER:$USER" "$APP_DIR"
 # Everything except the secrets and data already there.
 rsync -a --delete --exclude server/.env --exclude 'server/.data*' --exclude node_modules --exclude scripts/demo-ink.json "$SRC/" "$APP_DIR/"
 
+# The key billing's server sends on every call to /api/billing-link/* (sign-in, sessions, whole-shop
+# backup, restore, erase). Both .env files must hold the same one. Billing's is read if it is
+# there, so the two match without anyone copying a secret by hand; otherwise a new one is made
+# and the summary at the end says how to give it to billing.
+BILLING_ENV=/opt/shridhar/server/.env
+link_key_from_billing() {
+  [ -r "$BILLING_ENV" ] && sed -n 's/^LINK_KEY=//p' "$BILLING_ENV" | tail -1 || true
+}
+LINK_KEY_NEW=""
+
 if [ ! -f "$APP_DIR/server/.env" ]; then
   say "The secrets (written straight to $APP_DIR/server/.env, nothing is echoed)"
   read -r -s -p "MongoDB connection string (the same cluster as billing is fine): " MONGO_IN; echo
@@ -56,6 +68,8 @@ if [ ! -f "$APP_DIR/server/.env" ]; then
   read -r -s -p "First admin's PIN (4 to 6 digits): " ADMIN_PIN; echo
   echo "    The link to billing reads bills from the billing server on this same box."
   read -r -s -p "The shop's billing PIN (the one the counter types; empty to leave the link off for now): " BILLING_PIN_IN; echo
+  LINK_KEY_IN="$(link_key_from_billing)"
+  [ -n "$LINK_KEY_IN" ] || { LINK_KEY_IN="$(openssl rand -hex 32)"; LINK_KEY_NEW=1; }
   umask 077
   cat > "$APP_DIR/server/.env" <<ENV
 MONGO_URI=$MONGO_IN
@@ -70,10 +84,18 @@ SEED_ADMIN_NAME=Admin
 BILLING_URL=${BILLING_PIN_IN:+http://127.0.0.1:4000}
 BILLING_PIN=$BILLING_PIN_IN
 BILLING_EVERY_MS=15000
+LINK_KEY=$LINK_KEY_IN
+SHOP_ADMIN_PHONE=$ADMIN_PHONE
 ENV
   echo "    Written. The first admin is made on first start; this script removes the seed after."
 else
   echo "    $APP_DIR/server/.env already there, kept."
+  if ! grep -q '^LINK_KEY=.' "$APP_DIR/server/.env"; then
+    LINK_KEY_IN="$(link_key_from_billing)"
+    [ -n "$LINK_KEY_IN" ] || { LINK_KEY_IN="$(openssl rand -hex 32)"; LINK_KEY_NEW=1; }
+    printf '\nLINK_KEY=%s\n' "$LINK_KEY_IN" >> "$APP_DIR/server/.env"
+    echo "    LINK_KEY was missing; added."
+  fi
 fi
 
 say "Installing and building (a few minutes)"
@@ -127,7 +149,14 @@ $HOST {
 	reverse_proxy 127.0.0.1:$PORT {
 		flush_interval -1
 	}
-	request_body {
+	# A restore from the website is the one big upload: the server takes up to 300 MB there
+	# (RESTORE_LIMIT in routes/backup.ts). Everything else stays small. The matchers never overlap.
+	@restore path /api/admin/restore /api/admin/restore/
+	@notRestore not path /api/admin/restore /api/admin/restore/
+	request_body @restore {
+		max_size 310MB
+	}
+	request_body @notRestore {
 		max_size 4MB
 	}
 	encode gzip
@@ -136,6 +165,15 @@ CADDY
   sudo caddy validate --config /etc/caddy/Caddyfile >/dev/null || die "Caddy says the file is not valid. The backup is next to it."
   sudo systemctl reload caddy
   echo "    Added, and Caddy reloaded. The billing block was not changed."
+fi
+
+if [ -n "$LINK_KEY_NEW" ]; then
+  say "One more step for the one-app link"
+  echo "    Billing's .env has no LINK_KEY yet, so a new one was made for stock. Give billing the"
+  echo "    same key and stock's address, then restart billing (nothing secret is printed):"
+  echo "      grep '^LINK_KEY=' $APP_DIR/server/.env | sudo tee -a $BILLING_ENV >/dev/null"
+  echo "      echo 'STOCK_URL=http://127.0.0.1:$PORT' | sudo tee -a $BILLING_ENV >/dev/null"
+  echo "      sudo systemctl restart shridhar"
 fi
 
 sleep 5

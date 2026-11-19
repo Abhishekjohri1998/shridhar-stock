@@ -107,6 +107,13 @@ BILLING_PIN=<the shop's PIN>
 
 An old `ANTHROPIC_API_KEY` or `READER_*` line from before is simply ignored.
 
+For the one-app link (the tablet's Stock tab signed in by billing, whole-shop backup, restore and
+erase), stock's `.env` also needs `LINK_KEY`, the same value as `LINK_KEY` in billing's
+`/opt/shridhar/server/.env`, and billing's needs `STOCK_URL=http://127.0.0.1:4200`.
+`setup-stock.sh` takes billing's key when billing has one, or makes one and prints the commands
+that copy it across. `SHOP_ADMIN_PHONE` picks the admin the shop PIN opens; empty means the
+oldest admin.
+
 Then restart:
 
 ```bash
