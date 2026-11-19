@@ -314,7 +314,8 @@ a.tile:hover { border-color: var(--line-strong); box-shadow: var(--sh-2); transf
 .chart .bar-day { fill: var(--brand-edge); }
 .chart .bar-today { fill: var(--brand-600); }
 .chart rect { transition: fill var(--t-fast) var(--ease); }
-.chart rect:hover { fill: var(--brand-700); }
+/* Hover only on the bar itself, and only where there is a real mouse: a phone keeps a tapped column "hovered", which painted the whole tap area as one tall dark bar. */
+@media (hover: hover) { .chart rect:not(.bar-pad):hover { fill: var(--brand-700); } }
 .chart .bar-label { fill: var(--ink-500); font-size: 11px; font-family: var(--font-ui); }
 
 /* ---- controls --------------------------------------------------------- */
@@ -930,6 +931,7 @@ img, svg.ink { max-width: 100%; }
 /* sales chart: tappable bars (the whole column is the target), picked bars, the details panel */
 .chart .bar-hit { cursor: pointer; outline: none; }
 .chart .bar-pad { fill: transparent; }
+.chart .bar-hit[aria-pressed="true"] .bar-pad { fill: var(--brand-wash); }
 .chart .bar-hit:focus-visible .bar-pad { fill: var(--brand-wash); }
 .chart .bar-picked { fill: var(--brand-700); }
 .sel-panel { margin-top: var(--gap); padding-top: var(--gap); border-top: 1px solid var(--line); }
