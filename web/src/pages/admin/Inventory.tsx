@@ -6,6 +6,7 @@ import { Select } from '../../components/Select';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
 import { Loading, Table, useBi } from '../../components/ui';
+import { UnknownScans } from '../../components/UnknownScans';
 
 /** "5 box", the way the running-out level was typed, in the shop's words. */
 export function lowWords(item: Item, lang: Lang): string {
@@ -163,6 +164,7 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
     <>
       <h1 className="title">{bi('Inventory', 'ಸಾಮಾನು ಮತ್ತು ಸ್ಟಾಕ್')}</h1>
       {note && <div className="msg ok">{note}</div>}
+      {!readOnly && value && <UnknownScans items={value.items} />}
       <div className="bar">
         <input className="grow" data-tour="inventory-search" placeholder={t('common.search')} value={q} onChange={(e) => setQ(e.target.value)} />
         {!readOnly && (

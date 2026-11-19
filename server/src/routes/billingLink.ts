@@ -2,8 +2,12 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import express, { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import {
+  cleanBarcode,
+  findBarcode,
   findUnit,
   hasInk,
+  isBarcode,
+  type Item,
   type Ink,
   isActiveRole,
   itemMatches,
@@ -26,6 +30,7 @@ import { handler, HttpError } from '../http';
 import { getRepo } from '../store';
 import { settingsOf } from '../setup';
 import { putDraft } from '../billing/drafts';
+import { noteUnknownScan } from '../barcodes';
 
 /**
  * What the billing server asks stock while a bill is written: items as the counter types, the
@@ -64,28 +69,52 @@ billingLinkRoutes.get(
       items: items.map((i) => {
         // Typed through an other name tied to a unit ("HG box" -> Box): billing picks that unit.
         const au = matchedAliasUnit(i, q);
-        const matchedUnit = au ? findUnit(i, au)?.code : undefined;
-        return {
-        id: i.id,
-        nameEn: i.nameEn,
-        nameKn: i.nameKn,
-        // The base rate before slabs; cost never leaves stock.
-        // The unit it is sold in first (else the default unit), so billing's chips lead with it.
-        sellUnit: sellUnitOf(i).code,
-        units: unitsSellFirst(i).map((u) => ({
-          code: u.code,
-          label: u.label,
-          labelKn: u.labelKn,
-          // The rate for one of this unit: a slab that starts at 1 sets it, else the unit's price.
-          price: unitRate1(u),
-          ...(u.slabs?.length ? { basePrice: u.price, slabs: u.slabs.map((x) => ({ minQty: x.minQty, rate: x.rate })) } : {}),
-          ...(u.min != null ? { min: u.min } : {}),
-          ...(u.max != null ? { max: u.max } : {}),
-        })),
-        ...(matchedUnit ? { matchedUnit } : {}),
-        };
+        return linkItem(i, au ? findUnit(i, au)?.code : undefined);
       }),
     });
+  }),
+);
+
+/** An item as billing sees it: names, units sell-first with their rates, never the cost. */
+function linkItem(i: Item, matchedUnit?: string) {
+  return {
+    id: i.id,
+    nameEn: i.nameEn,
+    nameKn: i.nameKn,
+    // The unit it is sold in first (else the default unit), so billing's chips lead with it.
+    sellUnit: sellUnitOf(i).code,
+    units: unitsSellFirst(i).map((u) => ({
+      code: u.code,
+      label: u.label,
+      labelKn: u.labelKn,
+      // The rate for one of this unit: a slab that starts at 1 sets it, else the unit's price.
+      // The base rate before slabs goes as basePrice; cost never leaves stock.
+      price: unitRate1(u),
+      ...(u.slabs?.length ? { basePrice: u.price, slabs: u.slabs.map((x) => ({ minQty: x.minQty, rate: x.rate })) } : {}),
+      ...(u.min != null ? { min: u.min } : {}),
+      ...(u.max != null ? { max: u.max } : {}),
+    })),
+    ...(matchedUnit ? { matchedUnit } : {}),
+  };
+}
+
+/**
+ * A code the counter's scanner read. Found: the item, in the unit that carries the code, exactly
+ * as /items sends it with `matchedUnit` set. Not found: 404, and the code waits in Inventory under
+ * "Scanned, not linked" for the admin to say what it is.
+ */
+billingLinkRoutes.get(
+  '/barcode',
+  handler(async (req, res) => {
+    const code = cleanBarcode(req.query.code);
+    if (!isBarcode(code)) throw new HttpError(400, 'That is not a barcode');
+    const hit = findBarcode(await getRepo().listItems(), code);
+    if (!hit) {
+      await noteUnknownScan(code);
+      res.status(404).json({ unknown: true, error: 'No item has that barcode yet' });
+      return;
+    }
+    res.json({ item: linkItem(hit.item, findUnit(hit.item, hit.unit)?.code ?? hit.unit) });
   }),
 );
 

@@ -152,6 +152,34 @@ async function main() {
     const hgName = (await link('/items?q=hide')).body.items.find((i) => i.id === hg.id);
     check('its own name has no matched unit', hgName && !('matchedUnit' in hgName), JSON.stringify(hgName));
 
+    // ---- barcodes: a scan at the counter
+    {
+      const bingo = (await call('/items', { nameEn: 'Bingo Mad Angles', nameKn: 'ಬಿಂಗೋ', units: [{ code: 'pkt', label: 'Packet', labelKn: 'ಪ್ಯಾಕೆಟ್', perBase: 1, price: 5, barcodes: ['8909081 007804'] }, { code: 'box', label: 'Box', labelKn: 'ಬಾಕ್ಸ್', perBase: 30, price: 140, barcodes: ['18909081007801'] }], aliases: [], racks: {}, reorderAt: {} })).body;
+      check('an item with barcodes is made, codes tidied', bingo && bingo.units[0].barcodes.join() === '8909081007804', JSON.stringify(bingo));
+      const pkt = await link('/barcode?code=8909081007804');
+      check('a scanned code finds its item, in the packet', pkt.status === 200 && pkt.body.item.id === bingo.id && pkt.body.item.matchedUnit === 'pkt' && pkt.body.item.units.some((u) => u.code === 'pkt' && u.price === 5), JSON.stringify(pkt));
+      check('with no cost and no codes sent', !JSON.stringify(pkt.body).includes('cost') && !JSON.stringify(pkt.body).includes('barcodes'), JSON.stringify(pkt.body));
+      eq('the carton code bills the box', (await link('/barcode?code=18909081007801')).body.item.matchedUnit, 'box');
+      eq('the code finds it in billing search too', (await names('8909081007804')).includes(bingo.id), true);
+      eq('the start of a code finds nothing', (await names('8909081')).includes(bingo.id), false);
+      eq('no key, no barcode', (await link('/barcode?code=8909081007804', null, null)).status, 401);
+      eq('a bad code is 400', (await link('/barcode?code=' + encodeURIComponent('<x>'))).status, 400);
+      const un = await link('/barcode?code=8901234567890');
+      check('an unknown code is 404 unknown', un.status === 404 && un.body.unknown === true, JSON.stringify(un));
+      await link('/barcode?code=8901234567890');
+      const list = (await call('/admin/unknown-scans')).body.scans;
+      check('and waits for the admin, counted', list.length === 1 && list[0].code === '8901234567890' && list[0].count === 2, JSON.stringify(list));
+      const clash = await call('/items', { nameEn: 'Copy', nameKn: '', units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 1, barcodes: ['8909081007804'] }], aliases: [], racks: {}, reorderAt: {} });
+      check('a code already on another item is refused, naming it', clash.status === 409 && /Bingo/.test(clash.body.error), JSON.stringify(clash));
+      const linked = await call('/admin/unknown-scans/8901234567890/link', { itemId: rice.id, unit: 'kg' });
+      check('linking puts the code on the unit', linked.status === 200 && linked.body.units[0].barcodes.includes('8901234567890'), JSON.stringify(linked));
+      eq('and off the list', (await call('/admin/unknown-scans')).body.scans.length, 0);
+      eq('and the next scan bills it', (await link('/barcode?code=8901234567890')).body.item.id, rice.id);
+      await link('/barcode?code=4000000000001');
+      const del = await fetch(on.base + '/api/admin/unknown-scans/4000000000001', { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
+      eq('dismissing takes it off', del.status === 204 && (await call('/admin/unknown-scans')).body.scans.length, 0);
+    }
+
     // ---- quote
     const q1 = (await link('/quote?item=' + rice.id + '&unit=kg&qty=2')).body;
     check('the plain rate', q1.rate === 60 && q1.amount === 120 && q1.unit === 'kg' && q1.slab === false && q1.warn === null, JSON.stringify(q1));

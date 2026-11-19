@@ -20,3 +20,4 @@ export * from './delivery';
 export * from './layout';
 export * from './purchasing';
 export * from './analytics';
+export * from './barcode';

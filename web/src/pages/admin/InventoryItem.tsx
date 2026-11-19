@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ADJUST_REASONS,
+  cleanBarcode,
+  isBarcode,
+  MAX_BARCODES_PER_UNIT,
   addAliasChip,
   aliasChips,
   aliasesFromChips,
@@ -170,7 +173,13 @@ function ItemDetails({
   const { t, lang } = useSession();
   const bi = useBi();
   const nav = useNavigate();
-  const [form, setForm] = useState<ItemForm>(() => (item ? itemToForm(item) : blankItemForm()));
+  const [form, setForm] = useState<ItemForm>(() => {
+    if (item) return itemToForm(item);
+    // "New item" from Inventory's scanned-not-linked list: the code goes on the base unit.
+    const blank = blankItemForm();
+    const code = cleanBarcode(new URLSearchParams(window.location.search).get('barcode'));
+    return isBarcode(code) ? { ...blank, units: blank.units.map((u, i) => (i === 0 ? { ...u, barcodes: [code] } : u)) } : blank;
+  });
   const [error, setError] = useState('');
   const [saved, setSaved] = useState('');
   const [busy, setBusy] = useState(false);
@@ -476,6 +485,13 @@ function ItemDetails({
                   + {bi('Price from a quantity', 'ಪ್ರಮಾಣದಿಂದ ಬೆಲೆ')}
                 </button>
               )}
+              <BarcodeChips
+                codes={u.barcodes ?? []}
+                unit={u.code}
+                readOnly={readOnly}
+                tour={i === 0 ? 'item-barcode' : undefined}
+                onChange={(barcodes) => setUnit(i, { barcodes })}
+              />
               {i === 0 && !readOnly && (
                 <PackPricer
                   base={u.code || base}
@@ -1026,6 +1042,95 @@ function PackPricer({ base, form, setForm }: { base: string; form: ItemForm; set
  * Other names as chips. A name goes in with the "+ Add" button, so it never needs the keyboard's
  * Enter key (the tablet's WebView keyboard does not add a line in a textarea). Enter in the box adds too.
  */
+/**
+ * The barcodes on one unit, as chips. The scanner types the code and presses Enter, so Enter adds
+ * it here and never submits the form: scan the packet with this box focused and it is on. A code
+ * still in the box when it loses focus (Save tapped) is added too.
+ */
+function BarcodeChips({
+  codes,
+  unit,
+  readOnly,
+  tour,
+  onChange,
+}: {
+  codes: string[];
+  unit: string;
+  readOnly?: boolean;
+  tour?: string;
+  onChange: (codes: string[]) => void;
+}) {
+  const bi = useBi();
+  const [text, setText] = useState('');
+  const [note, setNote] = useState('');
+  const full = codes.length >= MAX_BARCODES_PER_UNIT;
+  const add = () => {
+    const code = cleanBarcode(text);
+    if (!code) return;
+    if (!isBarcode(code)) {
+      setNote(bi('Not a barcode: 4 to 32 letters or digits', 'ಬಾರ್‌ಕೋಡ್ ಅಲ್ಲ: 4 ರಿಂದ 32 ಅಕ್ಷರ ಅಥವಾ ಅಂಕಿ'));
+      return;
+    }
+    setNote('');
+    setText('');
+    if (!codes.includes(code) && !full) onChange([...codes, code]);
+  };
+  if (readOnly && !codes.length) return null;
+  return (
+    <div className="field mb-4" data-tour={tour}>
+      <span>
+        {bi('Barcode', 'ಬಾರ್‌ಕೋಡ್')}
+        {unit ? ' (' + unit + ')' : ''}
+      </span>
+      {codes.length > 0 && (
+        <div className="bar">
+          {codes.map((c) => (
+            <span key={c} className="chip on">
+              {c}
+              {!readOnly && (
+                <button
+                  type="button"
+                  className="btn ghost small"
+                  aria-label={bi('Remove', 'ತೆಗೆಯಿರಿ') + ' ' + c}
+                  onClick={() => onChange(codes.filter((x) => x !== c))}
+                >
+                  ×
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+      {!readOnly && (
+        <div className="bar mb-0">
+          <input
+            value={text}
+            disabled={full}
+            inputMode="numeric"
+            enterKeyHint="done"
+            autoComplete="off"
+            placeholder={bi('Scan the packet, or type the code', 'ಪ್ಯಾಕೆಟ್ ಸ್ಕ್ಯಾನ್ ಮಾಡಿ, ಅಥವಾ ಕೋಡ್ ಬರೆಯಿರಿ')}
+            aria-label={bi('Barcode', 'ಬಾರ್‌ಕೋಡ್')}
+            onChange={(e) => setText(e.target.value)}
+            onBlur={add}
+            onKeyDown={(e) => {
+              // keyCode 13: some Android WebView keyboards send key "Unidentified" for Enter.
+              if (e.key === 'Enter' || e.keyCode === 13) {
+                e.preventDefault();
+                add();
+              }
+            }}
+          />
+          <button type="button" className="btn" disabled={full || !text.trim()} onClick={add}>
+            + {bi('Add', 'ಸೇರಿಸಿ')}
+          </button>
+        </div>
+      )}
+      {note && <p className="muted mb-0">{note}</p>}
+    </div>
+  );
+}
+
 function AliasEditor({
   aliases,
   onChange,

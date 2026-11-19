@@ -242,6 +242,22 @@ async function main() {
     check('and the new item', (await call('/items?q=sakkare', { token: admin })).body.length === 1);
     check('the godown rack survived the shop-only file', (await call('/items/' + parleId, { token: admin })).body.racks[shop] === 'Rack 3');
 
+    // Barcodes in the items file: written out, kept when a file has no column, never on two items.
+    {
+      const p0 = (await call('/items/' + parleId, { token: admin })).body;
+      const withCode = { ...p0, units: p0.units.map((u, i) => (i === 0 ? { ...u, barcodes: ['8901063010017'] } : u)) };
+      eq('a barcode is saved on the piece', (await call('/items/' + parleId, { method: 'PUT', token: admin, body: withCode })).status, 200);
+      const out = (await call('/export/items.csv', { token: admin })).text;
+      check('the items file carries it', out.includes('barcodes') && out.includes('8901063010017'));
+      const plain = 'item_id,name_en,unit_code,per_base,price' + String.fromCharCode(10) + parleId + ',Parle G,pc,1,5' + String.fromCharCode(10) + parleId + ',,pack,24,113';
+      const kept = (await call('/import/items', { method: 'POST', token: admin, body: { csv: plain, dry: false } })).body;
+      check('a file without the column comes in', kept.applied, JSON.stringify(kept));
+      check('and the code stays on the piece', ((await call('/items/' + parleId, { token: admin })).body.units[0].barcodes || []).includes('8901063010017'));
+      const twice = 'name_en,unit_code,price,barcodes' + String.fromCharCode(10) + 'Copy biscuit,pc,5,8901063010017';
+      const clash = (await call('/import/items', { method: 'POST', token: admin, body: { csv: twice, dry: true } })).body;
+      check('a file giving the code to a second item is refused', clash.errors.some((e) => /8901063010017/.test(e.message) && e.row === 2), JSON.stringify(clash));
+    }
+
 
     // Other names: the item form's own path (chips -> form -> input), on add and on edit.
     {

@@ -50,6 +50,8 @@ const unitSchema = new Schema(
     min: { type: Number, required: false },
     max: { type: Number, required: false },
     cost: { type: Number, required: false },
+    // The barcodes on this unit. Looked up through the cached item list, so no index is needed.
+    barcodes: { type: [String], required: false, default: undefined },
   },
   { _id: false },
 );

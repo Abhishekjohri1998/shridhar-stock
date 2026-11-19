@@ -3,6 +3,10 @@ import { z } from 'zod';
 import {
   ADJUST_REASONS,
   checkItem,
+  cleanBarcode,
+  findUnit,
+  isBarcode,
+  sellUnitOf,
   checkPin,
   describeQty,
   isLow,
@@ -42,6 +46,7 @@ import { getRepo } from '../store';
 import { newId } from '../store/types';
 import { placeOrder, settingsOf, shopOf } from '../setup';
 import { dropPerson, emit } from '../events';
+import { barcodeClash, dropUnknownScans, listUnknownScans } from '../barcodes';
 
 export const adminRoutes = Router();
 
@@ -323,13 +328,28 @@ function checked(body: unknown): ItemInput {
   return r.value;
 }
 
+/**
+ * Refuses a barcode another active item already has (409, naming it), and once saved takes the
+ * item's codes off the "Scanned, not linked" list.
+ */
+async function barcodesFree(item: Item): Promise<void> {
+  if (!item.active) return;
+  const clash = barcodeClash(await getRepo().listItems(), item);
+  if (clash) {
+    throw new HttpError(409, 'The barcode ' + clash.code + ' is already on ' + (clash.other.nameEn || clash.other.nameKn));
+  }
+}
+const unitCodes = (item: Item) => item.units.flatMap((u) => u.barcodes ?? []);
+
 adminRoutes.post(
   '/items',
   admin,
   handler(async (req, res) => {
     const input = await dropUnknownPlaces(checked(req.body));
     const item: Item = { ...input, id: newId('it'), active: true, updatedAt: new Date().toISOString() };
+    await barcodesFree(item);
     await getRepo().saveItem(item);
+    await dropUnknownScans(unitCodes(item));
     emit('items');
     res.status(201).json(item);
   }),
@@ -344,9 +364,57 @@ adminRoutes.put(
     if (!old) throw new HttpError(404, 'No such item');
     const input = await dropUnknownPlaces(checked(req.body));
     const item = keepOld({ ...input, id: old.id, active: input.active ?? old.active, updatedAt: new Date().toISOString() }, old);
+    await barcodesFree(item);
     await repo.saveItem(item);
+    await dropUnknownScans(unitCodes(item));
     emit('items');
     res.json(item);
+  }),
+);
+
+// ---------------------------------------------------------------- scanned, not linked
+
+/** Barcodes the counter scanned that no item has yet, newest first. */
+adminRoutes.get(
+  '/admin/unknown-scans',
+  admin,
+  handler(async (_req, res) => {
+    res.json({ scans: await listUnknownScans() });
+  }),
+);
+
+/** "This code is that item, in that unit": the code goes on the unit, and off the list. */
+adminRoutes.post(
+  '/admin/unknown-scans/:code/link',
+  admin,
+  handler(async (req, res) => {
+    const code = cleanBarcode(req.params.code);
+    if (!isBarcode(code)) throw new HttpError(400, 'That is not a barcode');
+    const body = z.object({ itemId: z.string().min(1).max(60), unit: z.string().max(16).optional() }).parse(req.body);
+    const repo = getRepo();
+    const old = await repo.getItem(body.itemId);
+    if (!old) throw new HttpError(404, 'No such item');
+    const unit = findUnit(old, body.unit || sellUnitOf(old).code) ?? old.units[0]!;
+    const input = checked({
+      ...old,
+      units: old.units.map((u) => (u.code === unit.code ? { ...u, barcodes: [...(u.barcodes ?? []), code] } : u)),
+    });
+    const item = keepOld({ ...input, id: old.id, active: old.active, updatedAt: new Date().toISOString() }, old);
+    await barcodesFree(item);
+    await repo.saveItem(item);
+    await dropUnknownScans([code]);
+    emit('items');
+    res.json(item);
+  }),
+);
+
+/** Not a product the shop sells: off the list. Scanned again, it comes back. */
+adminRoutes.delete(
+  '/admin/unknown-scans/:code',
+  admin,
+  handler(async (req, res) => {
+    await dropUnknownScans([cleanBarcode(req.params.code)]);
+    res.status(204).end();
   }),
 );
 
@@ -739,8 +807,9 @@ adminRoutes.get(
     const [items, shop, places] = await Promise.all([repo.listItems(), shopOf(repo), repo.listLocations()]);
     items.sort((a, b) => (a.nameEn || a.nameKn).localeCompare(b.nameEn || b.nameKn));
     const [header = [], ...rows] = parseCsv(itemsToCsv(items, shop.id, placeOrder(places).filter((l) => l.active))).filter((r) => r.some((c) => c !== ''));
-    // Numbers go in as numbers, so a price can be summed; everything else stays text.
-    const typed: Cell[][] = rows.map((r) => r.map((c) => (/^-?\d+(\.\d+)?$/.test(c) && !/^0\d/.test(c) ? Number(c) : c)));
+    // Numbers go in as numbers, so a price can be summed; everything else stays text. A long run
+    // of digits is a barcode, not a number: as one, Excel would show 8.90908E+12 and lose digits.
+    const typed: Cell[][] = rows.map((r) => r.map((c) => (/^-?\d+(\.\d+)?$/.test(c) && !/^0\d/.test(c) && !/^\d{12,}$/.test(c) ? Number(c) : c)));
     sendXlsx(res, 'items.xlsx', toXlsx([{ name: 'Items', header, rows: typed }]));
   }),
 );
@@ -869,7 +938,7 @@ adminRoutes.post(
     const byId = new Map(existing.map((i) => [i.id, i]));
     const parsed = itemsFromCsv(csv, shop.id, places);
     const errors = [...parsed.errors];
-    const ready: { input: ItemInput; old?: Item }[] = [];
+    const ready: { input: ItemInput; row: number; old?: Item }[] = [];
 
     for (const [i, raw] of parsed.items.entries()) {
       const row = parsed.rows[i] ?? 0;
@@ -882,16 +951,38 @@ adminRoutes.post(
       // the level the item has, and so does an empty low_<place> for that place.
       const oldLow = old ? lowAtOf(old) : undefined;
       const oldPlaceLow = old ? lowAtPlaceOf(old) : {};
+      // A file without the barcodes column keeps each unit's codes, matched by unit code.
+      const units = old
+        ? raw.units.map((u) => {
+            if (u.barcodes) return u;
+            const was = old.units.find((o) => o.code.toLowerCase() === u.code.toLowerCase())?.barcodes;
+            return was?.length ? { ...u, barcodes: was } : u;
+          })
+        : raw.units;
       const merged: ItemInput = old
-        ? { ...raw, racks: { ...old.racks, ...raw.racks }, ...(!raw.lowAt && !raw.reorderAt && oldLow ? { lowAt: oldLow } : {}), ...(Object.keys(oldPlaceLow).length || raw.lowAtPlace ? { lowAtPlace: { ...oldPlaceLow, ...raw.lowAtPlace } } : {}), active: raw.active ?? old.active }
+        ? { ...raw, units, racks: { ...old.racks, ...raw.racks }, ...(!raw.lowAt && !raw.reorderAt && oldLow ? { lowAt: oldLow } : {}), ...(Object.keys(oldPlaceLow).length || raw.lowAtPlace ? { lowAtPlace: { ...oldPlaceLow, ...raw.lowAtPlace } } : {}), active: raw.active ?? old.active }
         : raw;
       const r = checkItem(merged);
       if (!r.ok) {
         errors.push({ row, message: (raw.nameEn || raw.nameKn || raw.id || 'An item') + ': ' + r.error });
         continue;
       }
-      ready.push({ input: r.value, ...(old ? { old } : {}) });
+      ready.push({ input: r.value, row, ...(old ? { old } : {}) });
     }
+
+    // No barcode on two active items, across the file and the items it leaves as they are.
+    const after: Item[] = [
+      ...existing.filter((i) => !ready.some((r) => r.old?.id === i.id)),
+      ...ready.map((r, n) => ({ ...r.input, id: r.old?.id ?? 'new-' + n, active: r.input.active ?? r.old?.active ?? true, updatedAt: '' }) as Item),
+    ];
+    const told = new Set<string>();
+    ready.forEach((r, n) => {
+      const item = after[after.length - ready.length + n]!;
+      const clash = item.active ? barcodeClash(after, item) : null;
+      if (!clash || told.has(clash.code)) return;
+      told.add(clash.code);
+      errors.push({ row: r.row, message: 'The barcode ' + clash.code + ' is on both ' + (item.nameEn || item.nameKn) + ' and ' + (clash.other.nameEn || clash.other.nameKn) });
+    });
 
     const added = ready.filter((r) => !r.old).length;
     const changed = ready.filter((r) => r.old && comparable(r.input) !== comparable(r.old)).length;

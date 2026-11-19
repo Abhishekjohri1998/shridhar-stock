@@ -81,6 +81,11 @@ export interface ItemUnit {
   max?: number;
   /** What one costs the shop. Never shown to customers or vendors. */
   cost?: number;
+  /**
+   * The barcodes printed on this unit (EAN-13 on a packet, another on the carton), tidied by
+   * `cleanBarcode`. A scan at the counter bills this unit. No code is on two active items.
+   */
+  barcodes?: string[];
 }
 
 /** Another name the item goes by on a bill: "parle", "ಪಾರ್ಲೆ", "parle pack". */

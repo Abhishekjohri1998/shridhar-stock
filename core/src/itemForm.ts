@@ -20,6 +20,8 @@ export interface UnitForm {
   max: string;
   cost: string;
   slabs: { minQty: string; rate: string }[];
+  /** The barcodes on this unit, as chips. Absent on forms made before barcodes existed. */
+  barcodes?: string[];
 }
 
 export interface ItemForm {
@@ -80,6 +82,7 @@ export function itemToForm(item: Item): ItemForm {
       max: text(u.max),
       cost: text(u.cost),
       slabs: (u.slabs ?? []).map((x) => ({ minQty: String(x.minQty), rate: String(x.rate) })),
+      barcodes: [...(u.barcodes ?? [])],
     })),
     aliases: item.aliases.map((a) => (a.unit ? a.text + ', ' + a.unit : a.text)).join('\n'),
     racks: { ...item.racks },
@@ -109,6 +112,7 @@ export function formToInput(f: ItemForm, active?: boolean): ItemInput {
       ...(num(u.min) != null ? { min: num(u.min) } : {}),
       ...(num(u.max) != null ? { max: num(u.max) } : {}),
       ...(num(u.cost) != null ? { cost: num(u.cost) } : {}),
+      ...(u.barcodes?.length ? { barcodes: u.barcodes } : {}),
     })),
     aliases: f.aliases
       .split('\n')

@@ -11,6 +11,9 @@ import type { Alias, Item, ItemInput, ItemUnit, LowAt, Slab } from './types';
  * from that first row. low_at is for all places together, with its unit: "5 box", or a bare
  * number in the base unit. The old reorder_shop column is still read, as base units.
  *
+ * barcodes are the codes printed on that row's unit, more than one split by "|". A file without
+ * the column leaves the codes items already have alone (the server keeps them).
+ *
  * Given the places, one more column per place, low_<place> ("low_shop", "low_main_godown"): the
  * running-out level at that place, written the same way as low_at. Files without them still read.
  */
@@ -29,6 +32,7 @@ export const ITEM_COLUMNS = [
   'cost',
   'slabs',
   'other_names',
+  'barcodes',
   'rack_shop',
   'low_at',
   'active',
@@ -83,6 +87,7 @@ export function itemsToCsv(items: Item[], shopId: string, places: CsvPlace[] = [
         u.cost,
         slabsToText(u.slabs),
         names,
+        (u.barcodes ?? []).join('|'),
         i === 0 ? it.racks[shopId] ?? '' : '',
         i === 0 ? lowText(it) : '',
         i === 0 ? (it.active ? 'yes' : 'no') : '',
@@ -205,6 +210,8 @@ export function itemsFromCsv(text: string, shopId: string, places: CsvPlace[] = 
       ...(numOr('min') != null ? { min: numOr('min') } : {}),
       ...(numOr('max') != null ? { max: numOr('max') } : {}),
       ...(numOr('cost') != null ? { cost: numOr('cost') } : {}),
+      // Only with the column: no column means "leave the codes as they are", not "none".
+      ...(col('barcodes') >= 0 ? { barcodes: get('barcodes').split('|').map((t) => t.trim()).filter(Boolean) } : {}),
     };
     item.units.push(unit);
     const first = item.units.length === 1;

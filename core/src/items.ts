@@ -1,3 +1,4 @@
+import { MAX_BARCODES_PER_UNIT, cleanBarcode, isBarcode } from './barcode';
 import { searchKey } from './kannada';
 import { round3, round4 } from './money';
 import { unitKey } from './units';
@@ -27,6 +28,8 @@ export function checkItem(input: ItemInput): Checked<ItemInput> {
 
   const units: ItemUnit[] = [];
   const seen = new Set<string>();
+  /** Every barcode on the item so far, so one code is never on two of its units. */
+  const codes = new Set<string>();
   for (let i = 0; i < rawUnits.length; i++) {
     const u = rawUnits[i]!;
     const code = String(u.code ?? '').trim();
@@ -64,6 +67,18 @@ export function checkItem(input: ItemInput): Checked<ItemInput> {
     }
     slabs.sort((a, b) => a.minQty - b.minQty);
 
+    const barcodes: string[] = [];
+    for (const raw of u.barcodes ?? []) {
+      const b = cleanBarcode(raw);
+      if (!b) continue;
+      if (!isBarcode(b)) return { ok: false, error: where + 'the barcode "' + String(raw).trim() + '" is not one (4 to 32 letters or digits)' };
+      if (barcodes.includes(b)) continue;
+      if (codes.has(b)) return { ok: false, error: 'The barcode ' + b + ' is on two units of this item' };
+      codes.add(b);
+      barcodes.push(b);
+    }
+    if (barcodes.length > MAX_BARCODES_PER_UNIT) return { ok: false, error: where + MAX_BARCODES_PER_UNIT + ' barcodes at most' };
+
     units.push({
       code,
       label: String(u.label ?? '').trim() || code,
@@ -74,6 +89,7 @@ export function checkItem(input: ItemInput): Checked<ItemInput> {
       ...(min != null ? { min: round4(min) } : {}),
       ...(max != null ? { max: round4(max) } : {}),
       ...(cost != null ? { cost: round4(cost) } : {}),
+      ...(barcodes.length ? { barcodes } : {}),
     });
   }
 
@@ -188,9 +204,15 @@ export function plainSearchText(text: string): string {
  * as `ninrani`; a query that stops on that `m` ("Nim") has no consonant after it yet and keys as
  * `nim`. So a query key ending in `m` is also tried ending in `n`.
  */
-export function itemMatches(item: { nameEn: string; nameKn: string; aliases?: Alias[] }, query: string): boolean {
+export function itemMatches(
+  item: { nameEn: string; nameKn: string; aliases?: Alias[]; units?: { barcodes?: string[] }[] },
+  query: string,
+): boolean {
   const plain = plainSearchText(query);
   if (!plain) return false;
+  // A scanned or typed barcode finds its item exactly, never by the start of the code.
+  const code = cleanBarcode(query);
+  if (isBarcode(code) && (item.units ?? []).some((u) => (u.barcodes ?? []).includes(code))) return true;
   const names = [item.nameEn, item.nameKn, ...(item.aliases ?? []).map((a) => a.text)];
   // Plain first: the start of the name or of any of its words, exactly as typed.
   if (names.some((n) => { const t = plainSearchText(n); return t.startsWith(plain) || t.includes(' ' + plain); })) return true;

@@ -245,6 +245,38 @@ const rice = { units: [{ code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price
   check('a file with no price column is refused', C.itemsFromCsv('name_en,unit_code\nA,pc', 'x').errors[0].row === 1);
 }
 
+// ---------------------------------------------------------------- barcodes
+{
+  const base = { nameEn: 'Bingo', nameKn: '', aliases: [], racks: {} };
+  const ok = C.checkItem({ ...base, units: [{ code: 'pkt', label: 'Packet', labelKn: '', perBase: 1, price: 5, barcodes: [' 8909081 007804 ', '8909081007804', ''] }, { code: 'box', label: 'Box', labelKn: '', perBase: 30, price: 140, barcodes: ['abc-1234'] }] });
+  check('barcodes are tidied, deduped and kept on their unit', ok.ok && ok.value.units[0].barcodes.join() === '8909081007804' && ok.value.units[1].barcodes.join() === 'ABC-1234', JSON.stringify(ok));
+  const none = C.checkItem({ ...base, units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 1, barcodes: [] }] });
+  check('no barcodes, no field', none.ok && !('barcodes' in none.value.units[0]));
+  check('a bad barcode is refused', !C.checkItem({ ...base, units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 1, barcodes: ['12'] }] }).ok);
+  check('one code on two units is refused', !C.checkItem({ ...base, units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 1, barcodes: ['12345678'] }, { code: 'box', label: 'box', labelKn: '', perBase: 2, price: 2, barcodes: ['12345678'] }] }).ok);
+  check('eleven codes on a unit is too many', !C.checkItem({ ...base, units: [{ code: 'pc', label: 'pc', labelKn: '', perBase: 1, price: 1, barcodes: Array.from({ length: 11 }, (_, i) => '1000000' + i) }] }).ok);
+  const item = { ...ok.value, id: 'it1', active: true, updatedAt: '' };
+  check('an exact code finds the item', C.itemMatches(item, '8909081007804') && C.itemMatches(item, 'abc-1234'));
+  check('a part of a code does not', !C.itemMatches(item, '890908100780'));
+  check('findBarcode answers the unit', C.findBarcode([item], '8909081007804').unit === 'pkt' && C.findBarcode([item], 'ABC-1234').unit === 'box');
+  check('an inactive item keeps no code', C.findBarcode([{ ...item, active: false }], '8909081007804') === undefined);
+  let list = [];
+  list = C.withUnknownScan(list, '111111', '2026-01-01T00:00:00.000Z');
+  list = C.withUnknownScan(list, '222222', '2026-01-02T00:00:00.000Z');
+  list = C.withUnknownScan(list, '111111', '2026-01-03T00:00:00.000Z');
+  check('an unknown code scanned again is counted and moves to the top', list.length === 2 && list[0].code === '111111' && list[0].count === 2 && list[0].firstAt.startsWith('2026-01-01'));
+  let many = [];
+  for (let i = 0; i < 210; i++) many = C.withUnknownScan(many, 'C' + (100000 + i), '2026-01-01T00:00:00.000Z');
+  check('the newest 200 unknown codes are kept', many.length === 200 && many[0].code === 'C100209');
+  const csv = C.itemsToCsv([item], 'loc_shop');
+  const back = C.itemsFromCsv(csv, 'loc_shop').items[0];
+  check('barcodes survive the items file', back.units[0].barcodes.join() === '8909081007804' && back.units[1].barcodes.join() === 'ABC-1234', csv);
+  const noCol = C.itemsFromCsv('name_en,unit_code,price' + String.fromCharCode(10) + 'Tea,pc,10', 'loc_shop').items[0];
+  check('a file without the column says nothing about codes', !('barcodes' in noCol.units[0]));
+  const f = C.itemToForm(item);
+  check('the editor form carries the codes both ways', f.units[0].barcodes.join() === '8909081007804' && C.formToInput(f).units[1].barcodes.join() === 'ABC-1234');
+}
+
 // ---------------------------------------------------------------- roles
 check('a PIN is 4 to 6 digits', C.checkPin('1234') === null && C.checkPin('123456') === null && C.checkPin('123') && C.checkPin('12a4') && C.checkPin('1234567'));
 check('every role has a home screen', C.ROLES.every((r) => typeof C.ROLE_HOME[r] === 'string'));
