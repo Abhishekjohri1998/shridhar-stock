@@ -25,6 +25,9 @@ const eq = (name, got, want) => check(name, got === want, 'got ' + JSON.stringif
 
 const KEY = 'billing-link-test-key';
 
+const PORT_BASE = 4900 + Math.floor(Math.random() * 290);
+let nextPort = 0;
+
 /** A stock server of its own, on its own port and data folder. Never a database. */
 async function start(extra, seed) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-blink-'));
@@ -33,7 +36,9 @@ async function start(extra, seed) {
     await seed(repo, require(path.join(out, 'pin.js')).hashPin);
     await repo.close();
   }
-  const port = 4900 + Math.floor(Math.random() * 300);
+  // One random base, then a port each: four servers drawing at random from one range of 300
+  // sometimes drew the same one, and the second could not listen ("fetch failed").
+  const port = PORT_BASE + nextPort++;
   const base = 'http://localhost:' + port;
   const proc = spawn(process.execPath, [path.join(out, 'index.js')], {
     env: { ...process.env, MONGO_URI: '', DEMO: '', BILLING_URL: '', BILLING_PIN: '', LINK_KEY: '', PORT: String(port), DATA_DIR: dir, JWT_SECRET: 'blinktest', SEED_ADMIN_PHONE: '9000000001', SEED_ADMIN_PIN: '4821', ...extra },

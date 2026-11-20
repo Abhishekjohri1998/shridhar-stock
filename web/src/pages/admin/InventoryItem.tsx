@@ -271,11 +271,13 @@ function ItemDetails({
   const [costFrom, setCostFrom] = useState<number | null>(null);
   const costIdx = costFrom != null && form.units[costFrom] ? costFrom : biggestUnitIndex(form);
   const costPreview = costsFromUnit(form, costIdx);
-  // The unit whose price (and cost) was typed last: its rate per base unit suggests the others.
-  const [lastPrice, setLastPrice] = useState<number | null>(null);
-  const [lastCost, setLastCost] = useState<number | null>(null);
-  const priceHints = unitSuggestions(form, lastPrice, 'price');
-  const costHints = unitSuggestions(form, lastCost, 'cost');
+  // Each unit's suggestion comes from the next bigger unit with a price (or cost): see unitSuggestions.
+  const priceHints = unitSuggestions(form, 'price');
+  const costHints = unitSuggestions(form, 'cost');
+  const unitName = (j: number | null | undefined) => {
+    const u = j == null ? null : form.units[j];
+    return u ? (lang === 'kn' && u.labelKn) || u.label || u.code : '';
+  };
   const actions = !readOnly && (
     <div className="bar form-actions" data-tour="item-actions">
       <button className="btn primary" disabled={busy}>
@@ -427,12 +429,9 @@ function ItemDetails({
                     inputMode="decimal"
                     value={u.price}
                     placeholder={priceHints.suggest[i] != null ? String(priceHints.suggest[i]) : undefined}
-                    onChange={(e) => {
-                      setUnit(i, { price: e.target.value });
-                      setLastPrice(i);
-                    }}
+                    onChange={(e) => setUnit(i, { price: e.target.value })}
                   />
-                  {!readOnly && <Suggestion v={priceHints.suggest[i]} rate={priceHints.rate} base={base} onUse={(v) => setUnit(i, { price: String(v) })} />}
+                  {!readOnly && <Suggestion v={priceHints.suggest[i]} rate={priceHints.rate[i]} base={base} from={unitName(priceHints.from[i])} onUse={(v) => setUnit(i, { price: String(v) })} />}
                 </label>
                 <label className="field">
                   <span>{t('items.min')} ₹</span>
@@ -448,12 +447,9 @@ function ItemDetails({
                     inputMode="decimal"
                     value={u.cost}
                     placeholder={costHints.suggest[i] != null ? String(costHints.suggest[i]) : undefined}
-                    onChange={(e) => {
-                      setUnit(i, { cost: e.target.value });
-                      setLastCost(i);
-                    }}
+                    onChange={(e) => setUnit(i, { cost: e.target.value })}
                   />
-                  {!readOnly && <Suggestion v={costHints.suggest[i]} rate={costHints.rate} base={base} onUse={(v) => setUnit(i, { cost: String(v) })} />}
+                  {!readOnly && <Suggestion v={costHints.suggest[i]} rate={costHints.rate[i]} base={base} from={unitName(costHints.from[i])} onUse={(v) => setUnit(i, { cost: String(v) })} />}
                 </label>
               </div>
               <div className="muted mb-4" data-tour={i === 0 ? 'item-slabs' : undefined}>
@@ -602,15 +598,15 @@ function ItemDetails({
   );
 }
 
-/** "Suggested ₹29 — use": the price at the rate of the unit typed last, filled in with one tap. */
-function Suggestion({ v, rate, base, onUse }: { v: number | null | undefined; rate: number | null; base: string; onUse: (v: number) => void }) {
+/** "Suggested ₹29 (₹0.058 / g, from 1 Kg) · Use": the next bigger unit's rate, filled in with one tap. */
+function Suggestion({ v, rate, base, from, onUse }: { v: number | null | undefined; rate: number | null | undefined; base: string; from?: string; onUse: (v: number) => void }) {
   const bi = useBi();
   if (v == null) return null;
   return (
     <span className="hint-row">
       <span className="muted">
         {bi('Suggested', 'ಸಲಹೆ')} {formatRupees(v)}
-        {rate != null && base ? ' (' + formatRate(rate) + ' / ' + base + ')' : ''}
+        {rate != null && base ? ' (' + formatRate(rate) + ' / ' + base + (from ? bi(', from ' + from, ', ' + from + ' ರಿಂದ') : '') + ')' : ''}
       </span>
       <button type="button" className="btn ghost small" onClick={() => onUse(v)} aria-label={bi('Use the suggested ' + formatRupees(v), 'ಸಲಹೆಯ ' + formatRupees(v) + ' ಬಳಸಿ')}>
         {bi('Use', 'ಬಳಸಿ')}

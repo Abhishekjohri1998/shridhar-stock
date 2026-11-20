@@ -1003,26 +1003,33 @@ async function ledger() {
   const u = (code, perBase, price) => ({ ...C.blankUnit(false), code, label: code, perBase, price });
   // Sugar: base g, Bag = 50000 g at 2850.
   let f = { ...C.blankItemForm(), units: [u('g', '1', ''), u('bag', '50000', '2850'), u('kg', '1000', '')] };
-  let s = C.unitSuggestions(f, 1);
-  check('F sugar: bag 2850/50000 -> rate 0.057', s.rate === 0.057 && s.from === 1, JSON.stringify(s));
-  check('F sugar: 1 kg suggests 57', s.suggest[2] === 57, JSON.stringify(s.suggest));
-  check('F sugar: g suggests 0.06 (round2), bag (typed) none', s.suggest[0] === 0.06 && s.suggest[1] === null, JSON.stringify(s.suggest));
-  check('F sugar: no last index -> biggest priced unit', C.unitSuggestions(f, null).rate === 0.057);
-  // Enter 58 for the kg, then add 500 g.
+  let s = C.unitSuggestions(f);
+  check('F sugar: 1 kg follows the bag, 2850/50000 = 0.057 a g -> 57', s.suggest[2] === 57 && s.rate[2] === 0.057 && s.from[2] === 1, JSON.stringify(s));
+  check('F sugar: g follows the bag too (0.06, round2)', s.suggest[0] === 0.06, JSON.stringify(s.suggest));
+  check('F sugar: the bag has nothing bigger and its own price: no suggestion', s.suggest[1] === null);
+  // Enter 58 for the kg, then add 500 g: 500 g follows the kg, not the bag.
   f = { ...f, units: [...f.units.slice(0, 2), u('kg', '1000', '58'), u('500g', '500', '')] };
-  s = C.unitSuggestions(f, 2);
-  check('F sugar: kg 58 -> rate 0.058', s.rate === 0.058, String(s.rate));
-  check('F sugar: then 500 g suggests 29', s.suggest[3] === 29, JSON.stringify(s.suggest));
-  check('F sugar: typed prices never suggested over', s.suggest[1] === null && s.suggest[2] === null);
-  f = { ...f, units: [...f.units.slice(0, 3), u('500g', '500', '30')] };
-  s = C.unitSuggestions(f, 3);
-  check('F sugar: 500 g at 30 -> rate 0.06', s.rate === 0.06, String(s.rate));
-  check('F sugar: g now suggests 0.06', s.suggest[0] === 0.06);
-  check('F sugar: last typed empty -> falls back to biggest', C.unitSuggestions({ ...f, units: [...f.units.slice(0, 3), u('500g', '500', '')] }, 3).from === 1);
+  s = C.unitSuggestions(f);
+  check('F sugar: kg at 58 -> 500 g suggests 29 (0.058 a g, from the kg)', s.suggest[3] === 29 && s.rate[3] === 0.058 && s.from[3] === 2, JSON.stringify(s));
+  check('F sugar: the kg, priced 58, still shows what the bag makes it (57)', s.suggest[2] === 57 && s.from[2] === 1, JSON.stringify(s));
+  f = { ...f, units: [...f.units.slice(0, 3), u('500g', '500', '30'), u('250g', '250', '')] };
+  s = C.unitSuggestions(f);
+  check('F sugar: 500 g at 30 -> 250 g suggests 15 (0.06 a g)', s.suggest[4] === 15 && s.rate[4] === 0.06, JSON.stringify(s));
+  check('F sugar: g follows the smallest pack above it (250 g has none, so 500 g): 0.06', s.suggest[0] === 0.06 && s.from[0] === 3, JSON.stringify(s));
+  // The shop's Hesara Bele: 30 kg bag at 2500, 1 kg at 130 -> 500 g is 65, not the bag's 41.67.
+  const hb = { ...C.blankItemForm(), units: [u('gm', '1', ''), u('30kg', '30000', '2500'), u('Kg', '1000', '130'), u('500g', '500', '')] };
+  s = C.unitSuggestions(hb);
+  check('F hesara bele: 500 g suggests 65 from the 1 kg, not 41.67 from the bag', s.suggest[3] === 65 && s.from[3] === 2, JSON.stringify(s));
+  check('F hesara bele: the order of the units does not matter', C.unitSuggestions({ ...hb, units: [hb.units[0], hb.units[3], hb.units[2], hb.units[1]] }).suggest[1] === 65);
+  check('F a typed price that already matches gets no suggestion', C.unitSuggestions({ ...hb, units: [...hb.units.slice(0, 3), u('500g', '500', '65')] }).suggest[3] === null);
+  check('F a unit with nothing bigger priced, empty, follows the biggest smaller one', C.unitSuggestions({ ...C.blankItemForm(), units: [u('g', '1', ''), u('kg', '1000', '60'), u('bag', '25000', '')] }).suggest[2] === 1500);
   const fc = { ...C.blankItemForm(), units: [{ ...u('g', '1', ''), cost: '' }, { ...u('bag', '50000', ''), cost: '2700' }, { ...u('kg', '1000', ''), cost: '' }] };
-  const sc = C.unitSuggestions(fc, null, 'cost');
+  const sc = C.unitSuggestions(fc, 'cost');
   check('F cost: bag 2700 -> kg cost 54 (same as costsFromUnit)', sc.suggest[2] === 54 && C.costsFromUnit(fc, 1).units[2].cost === '54', JSON.stringify(sc));
-  check('F no price anywhere -> no suggestion', C.unitSuggestions({ ...C.blankItemForm(), units: [u('g', '1', ''), u('kg', '1000', '')] }, null).rate === null);
+  // Saved items carry 0 where nobody has priced a unit: 0 is "not priced", never a reference.
+  const zero = C.unitSuggestions({ ...C.blankItemForm(), units: [u('gm', '1', '0'), u('30kg', '30000', '2500'), u('Kg', '1000', '0'), u('500g', '500', '0')] });
+  check('F a unit saved at 0 is suggested a price, and is no reference', zero.suggest[2] === 83.33 && zero.suggest[3] === 41.67 && zero.from[3] === 1, JSON.stringify(zero));
+  check('F no price anywhere -> no suggestion', C.unitSuggestions({ ...C.blankItemForm(), units: [u('g', '1', ''), u('kg', '1000', '')] }).suggest.every((x) => x === null));
 
   // Pack size change: Box was 60 pc, now 72; 360 pc in stock.
   const wheel = { units: [{ code: 'pc', perBase: 1 }, { code: 'box', perBase: 60 }] };

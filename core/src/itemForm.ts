@@ -279,47 +279,62 @@ export function biggestUnitIndex(f: ItemForm): number {
 }
 
 /**
- * Suggested prices (or costs) for the units with nothing typed, from one per-base rate.
+ * A suggested price (or cost) for every unit, each from the next bigger unit that has one.
  *
- * The rate comes from the unit whose value was typed most recently (`lastIndex`): Sugar's Bag of
- * 50000 g at ₹2850 is ₹0.057 a g, so 1 kg suggests ₹57. Type 58 for the kg and the rate is 0.058,
- * so 500 g suggests ₹29. When the last typed unit has no usable value (or none is known), the
- * biggest unit with one is used, as the cost helper does. A unit with a value typed gets no
- * suggestion: a typed value is never replaced.
+ * Each unit takes its rate from the smallest priced unit bigger than itself, so smaller packs
+ * follow the retail price next above them, not the wholesale bag. Sugar: Bag of 50000 g at ₹2850
+ * is ₹0.057 a g, so 1 kg suggests ₹57. Type 58 for the kg and 500 g follows the kg (₹0.058 a g)
+ * and suggests ₹29; type 30 for the 500 g and 250 g follows that and suggests ₹15. With 1 kg at
+ * ₹130 beside a 30 kg bag at ₹2500, 500 g suggests ₹65, never the bag's ₹41.67.
+ *
+ * A unit with nothing bigger priced takes the nearest smaller priced unit instead, but only while
+ * its own box is empty: the biggest pack's price is the shop's own, not something to work out
+ * from a loose one. A unit whose typed value already matches gets no suggestion; one that
+ * differs still shows what its bigger unit would make it, so the two can be compared. Nothing
+ * is ever filled in without the shopkeeper tapping Use.
  */
 export interface UnitSuggestions {
-  /** Rupees per base unit, or null when no unit has a usable value and size. */
-  rate: number | null;
-  /** The unit the rate came from. */
-  from: number | null;
-  /** Per unit: the suggested value (round2), or null when it has a value or no size. */
+  /** Per unit: the suggested value (round2), or null when there is nothing to suggest. */
   suggest: (number | null)[];
+  /** Per unit: the rate per base unit the suggestion came from (round4), or null. */
+  rate: (number | null)[];
+  /** Per unit: the index of the unit the rate came from, or null. */
+  from: (number | null)[];
 }
 
 const sizeOf = (f: ItemForm, i: number) => (i === 0 ? 1 : numOf(f.units[i]?.perBase ?? ''));
 
-export function unitSuggestions(f: ItemForm, lastIndex: number | null, field: 'price' | 'cost' = 'price'): UnitSuggestions {
-  const usable = (i: number) => {
-    const u = f.units[i];
-    if (!u) return false;
-    const v = numOf(u[field]);
-    return v >= 0 && sizeOf(f, i) > 0;
-  };
-  let from: number | null = lastIndex != null && usable(lastIndex) ? lastIndex : null;
-  if (from == null) {
-    let best = -1;
-    f.units.forEach((_, i) => {
-      if (usable(i) && (best < 0 || sizeOf(f, i) > sizeOf(f, best))) best = i;
-    });
-    from = best >= 0 ? best : null;
-  }
-  const rate = from == null ? null : numOf(f.units[from]![field]) / sizeOf(f, from);
-  const suggest = f.units.map((u, i) => {
-    if (rate == null || u[field].trim() !== '') return null;
+export function unitSuggestions(f: ItemForm, field: 'price' | 'cost' = 'price'): UnitSuggestions {
+  const value = (i: number) => numOf(f.units[i]![field]);
+  const priced = f.units
+    .map((_, i) => i)
+    // ₹0 is a unit nobody has priced yet (a saved item needs a number there), never a reference.
+    .filter((i) => value(i) > 0 && sizeOf(f, i) > 0);
+  const out: UnitSuggestions = { suggest: [], rate: [], from: [] };
+  f.units.forEach((u, i) => {
     const n = sizeOf(f, i);
-    return n > 0 ? round2(n * rate) : null;
+    let src: number | null = null;
+    if (n > 0) {
+      // The smallest priced unit bigger than this one.
+      for (const j of priced) {
+        if (j !== i && sizeOf(f, j) > n && (src == null || sizeOf(f, j) < sizeOf(f, src))) src = j;
+      }
+      // Nothing bigger priced: the biggest priced unit smaller than this one, for an empty box.
+      if (src == null && !(value(i) > 0)) {
+        for (const j of priced) {
+          if (j !== i && sizeOf(f, j) < n && (src == null || sizeOf(f, j) > sizeOf(f, src))) src = j;
+        }
+      }
+    }
+    const rate = src == null ? null : value(src) / sizeOf(f, src);
+    let v = rate == null ? null : round2(n * rate);
+    // Already at that price: nothing to say.
+    if (v != null && value(i) > 0 && Math.abs(value(i) - v) < 0.005) v = null;
+    out.suggest.push(v);
+    out.rate.push(v == null || rate == null ? null : round4(rate));
+    out.from.push(v == null ? null : src);
   });
-  return { rate: rate == null ? null : round4(rate), from, suggest };
+  return out;
 }
 
 /**
