@@ -192,7 +192,8 @@ export interface StockLevel {
   qty: number;
 }
 
-export const ADJUST_REASONS = ['counted', 'damaged', 'expired', 'other'] as const;
+/** `added`: stock put in with Add (Inventory's quick edit), not a count. The count form does not offer it. */
+export const ADJUST_REASONS = ['counted', 'damaged', 'expired', 'other', 'added'] as const;
 export type AdjustReason = (typeof ADJUST_REASONS)[number];
 
 // ------------------------------------------------------------------ handwriting
@@ -261,6 +262,8 @@ export interface BillMirror {
   at: string;
   customer?: { key: string; name: string; phone: string };
   lines: MirrorLine[];
+  /** Billing's edit count for the bill (absent = 1, never edited). See saleKeyOf in the sync. */
+  rev?: number;
   /** 2 once every line's further handwriting (moreInk) has been read from billing. */
   inkV?: number;
   total: number;

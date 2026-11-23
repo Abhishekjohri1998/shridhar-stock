@@ -294,6 +294,27 @@ async function main() {
     eq('an unknown place is 404', (await call('/admin/places/nope/items', { token: admin })).status, 404);
     eq('signed out cannot see a place', (await call('/admin/places/' + godown + '/items')).status, 401);
 
+    // ------------------------------------------------ quick edit: Add puts stock in on top of the ledger
+    {
+      const qs = (await call('/items', { method: 'POST', token: admin, body: { nameEn: 'Quick sugar', nameKn: 'ಸಕ್ಕರೆ', units: [{ code: 'kg', label: 'Kg', labelKn: 'ಕೆಜಿ', perBase: 1, price: 58 }], aliases: [], racks: {} } })).body;
+      eq('quick: opening stock in the godown', (await call('/stock/open', { method: 'POST', token: admin, body: { itemId: qs.id, locationId: godown, qty: 10 } })).status, 201);
+      const add = (body) => call('/stock/adjust', { method: 'POST', token: admin, body: { itemId: qs.id, locationId: godown, reason: 'added', ...body } });
+      const a1 = await add({ add: 5, requestId: 'qa1' });
+      check('quick: Add 5 to 10 makes 15', a1.status === 200 && a1.body.posted === 1 && a1.body.qty === 15, JSON.stringify(a1.body));
+      eq('quick: the same Add sent twice is posted once', (await add({ add: 5, requestId: 'qa1' })).body.posted, 0);
+      eq('quick: Add 0 is refused', (await add({ add: 0, requestId: 'qa2' })).status, 400);
+      eq('quick: Add below 0 is refused', (await add({ add: -3, requestId: 'qa3' })).status, 400);
+      eq('quick: a count and an Add together are refused', (await add({ add: 1, actual: 20, requestId: 'qa4' })).status, 400);
+      eq('quick: neither a count nor an Add is refused', (await add({ requestId: 'qa5' })).status, 400);
+      const lv = (await call('/stock', { token: admin })).body.find((s) => s.itemId === qs.id && s.locationId === godown);
+      eq('quick: the godown has 15 kg', lv && lv.qty, 15);
+      const mv = (await call('/items/' + qs.id + '/moves', { token: admin })).body;
+      check('quick: the Add is a move in, reason added', mv.length === 2 && mv[0].kind === 'adjust' && mv[0].to === godown && mv[0].qty === 5 && mv[0].ref === 'added', JSON.stringify(mv));
+      eq('quick: a count still works beside it', (await add({ actual: 12, reason: 'counted', requestId: 'qa6' })).body.qty, 12);
+      eq('quick: recount agrees with the ledger', (await call('/stock/recount', { method: 'POST', token: admin })).body.fixed.length, 0);
+      await call('/items/' + qs.id, { method: 'PUT', token: admin, body: { ...qs, active: false } });
+    }
+
     // ------------------------------------------------ own PIN
     eq('changing my PIN needs the current one', (await call('/auth/pin', { method: 'POST', token: admin, body: { oldPin: '0000', newPin: '5555' } })).status, 400);
     eq('with it, it changes', (await call('/auth/pin', { method: 'POST', token: admin, body: { oldPin: ADMIN_PIN, newPin: '5555' } })).status, 200);

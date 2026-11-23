@@ -208,25 +208,104 @@ export interface PackRow {
 const numOf = (v: string): number => (v.trim() === '' ? NaN : Number(v));
 
 /**
+ * Which base-unit slab each other unit's price made, as {unit index: slab index}.
+ *
+ * A slab holds only its From and its rate, so the unit it came from is the one with the same
+ * per-base rate: Sugar's Kg (1000 g) at ₹58 is ₹0.058 a g, so the gm slab "from 900 at 0.058" is
+ * the Kg's, From 900. Each slab belongs to one unit at most. Smaller units choose first; a unit
+ * takes the slab From its own size if there is one, else the nearest From below its size, else
+ * the nearest above. Units at ₹0 or without a size have none.
+ */
+export function unitSlabLinks(f: ItemForm): Map<number, number> {
+  const slabs = (f.units[0]?.slabs ?? []).map((s) => ({ minQty: numOf(s.minQty), rate: numOf(s.rate) }));
+  const links = new Map<number, number>();
+  const taken = new Set<number>();
+  const units = f.units
+    .map((u, i) => ({ i, size: numOf(u.perBase), price: numOf(u.price) }))
+    .filter((u) => u.i > 0 && u.size > 0 && u.price > 0)
+    .sort((a, b) => a.size - b.size || a.i - b.i);
+  for (const u of units) {
+    const rate = round4(u.price / u.size);
+    let best: number | null = null;
+    const score = (k: number) => {
+      const m = slabs[k]!.minQty;
+      // Exact size first, then below the size (nearest first), then above it (nearest first).
+      return m === u.size ? -1 : m < u.size ? u.size - m : 1e12 + (m - u.size);
+    };
+    slabs.forEach((s, k) => {
+      if (taken.has(k) || !(s.minQty > 0) || !(s.rate >= 0) || round4(s.rate) !== rate) return;
+      if (best == null || score(k) < score(best)) best = k;
+    });
+    if (best != null) {
+      links.set(u.i, best);
+      taken.add(best);
+    }
+  }
+  return links;
+}
+
+/**
+ * The form with one unit's price typed, and the base-unit slab that unit's price made (see
+ * unitSlabLinks) moved to the new rate. The slab's From never moves: Kg 58 -> 60 turns "from 900
+ * at 0.058" into "from 900 at 0.06". `links` are the links as they were before typing began
+ * (worked out from `f` when not given), so a box emptied or half-typed loses nothing. A price
+ * that is not a number above 0 changes only the box.
+ */
+export function withUnitPrice(f: ItemForm, unitIndex: number, price: string, links: Map<number, number> = unitSlabLinks(f)): ItemForm {
+  const unit = f.units[unitIndex];
+  if (!unit) return f;
+  const units = f.units.map((u, i) => (i === unitIndex ? { ...u, price } : u));
+  const k = links.get(unitIndex);
+  const p = numOf(price);
+  const size = numOf(unit.perBase);
+  const base = units[0];
+  if (unitIndex > 0 && k != null && base?.slabs[k] && p > 0 && size > 0) {
+    const rate = String(round4(p / size));
+    units[0] = { ...base, slabs: base.slabs.map((s, j) => (j === k ? { ...s, rate } : s)) };
+  }
+  return { ...f, units };
+}
+
+/**
+ * What a quick price change saves: the item as the editor would save it with one unit's price
+ * changed (and its slab following, as in withUnitPrice). The server checks it as for any save.
+ */
+export function quickPriceInput(item: Item, unitIndex: number, price: string): ItemInput {
+  return formToInput(withUnitPrice(itemToForm(item), unitIndex, price.trim()));
+}
+
+/**
  * The pack-size panel's starting rows: one per other unit with a size (perBase) and a price
  * (Kg = 1000 g at ₹55 is size 1000, price 55), then each base-unit slab no unit already covers,
  * as a pack of its quantity at its rate.
+ *
+ * A unit's row keeps the From its slab was given (unitSlabLinks): Kg with "from 900" opens as
+ * size 1000, from 900, and is not turned into a new slab from 1000 beside the old one.
  */
 export function packsFromItem(f: ItemForm): PackRow[] {
   const rows: PackRow[] = [];
+  const slabs = f.units[0]?.slabs ?? [];
+  const links = unitSlabLinks(f);
+  const taken = new Set(links.values());
   f.units.forEach((u, i) => {
     if (i === 0) return;
     const size = numOf(u.perBase);
     const price = numOf(u.price);
-    if (u.code.trim() && size > 0 && price >= 0) rows.push({ size: String(size), price: String(price), from: '', unit: i });
+    if (!(u.code.trim() && size > 0 && price >= 0)) return;
+    const k = links.get(i);
+    const from = k == null ? NaN : numOf(slabs[k]!.minQty);
+    rows.push({ size: String(size), price: String(price), from: from > 0 && from !== size ? String(from) : '', unit: i });
   });
-  for (const sl of f.units[0]?.slabs ?? []) {
+  slabs.forEach((sl, k) => {
+    if (taken.has(k)) return;
     const minQty = numOf(sl.minQty);
     const rate = numOf(sl.rate);
-    if (!(minQty > 0 && rate >= 0)) continue;
-    if (rows.some((r) => Number(r.size) === minQty)) continue;
-    rows.push({ size: String(minQty), price: String(round2(minQty * rate)), from: '' });
-  }
+    if (!(minQty > 0 && rate >= 0)) return;
+    // A slab from the same quantity as a row's own would be written over by that row anyway.
+    if (rows.some((r) => numOf(r.from.trim() ? r.from : r.size) === minQty)) return;
+    // round4, not round2: the row's rate must come back exactly (40 g at 0.0583 is 2.332, not 2.33).
+    rows.push({ size: String(minQty), price: String(round4(minQty * rate)), from: '' });
+  });
   return rows.sort((a, b) => Number(a.size) - Number(b.size));
 }
 

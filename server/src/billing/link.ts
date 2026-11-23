@@ -46,8 +46,10 @@ export function syncNow(force = false): Promise<SyncResult | null> {
     }
     const full = force || !newest || Date.now() - lastFullAt >= FULL_EVERY_MS;
     if (full) {
-      // The latest 30 for cancels and edits; the first read ever takes the latest 100.
-      const r = await syncOnce(repo, billing(), { mode: 'full', limit: newest ? 30 : 100, customers: true });
+      // The latest 30 for cancels and edits; the first read ever takes the latest 100. Bills edited
+      // since the last full read are asked for too, however old (a minute's overlap, never a gap).
+      const editedAfter = lastFullAt > 0 ? new Date(lastFullAt - 60_000).toISOString() : undefined;
+      const r = await syncOnce(repo, billing(), { mode: 'full', limit: newest ? 30 : 100, customers: true, ...(editedAfter ? { editedAfter } : {}) });
       if (r.bills > 0) liteServer = r.lite ?? false;
       lastFullAt = Date.now();
       return r;

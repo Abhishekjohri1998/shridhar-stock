@@ -769,6 +769,71 @@ async function ledger() {
   check('applyPacks leaves the input alone', f.units[1].price === '55');
 }
 
+// "From range should be fixed, only price should change whenever the reference unit price changes":
+// Sugar in gm, Kg 1000 at ₹58 and Bag 50000 at ₹2850, gm slabs from 40, 100, 200, 400, 900, 50000.
+{
+  const u = (code, perBase, price, slabs = []) => ({ ...C.blankUnit(false), code, label: code, perBase, price, slabs });
+  const sl = (minQty, rate) => ({ minQty, rate });
+  const gmSlabs = [sl('40', '0.065'), sl('100', '0.062'), sl('200', '0.06'), sl('400', '0.059'), sl('900', '0.058'), sl('50000', '0.057')];
+  const f = { ...C.blankItemForm(), nameEn: 'Sugar', units: [u('gm', '1', '0.065', gmSlabs), u('Kg', '1000', '58'), u('Bag', '50000', '2850')] };
+  const froms = (g) => g.units[0].slabs.map((s) => s.minQty).join(',');
+  const rateAt = (g, m) => g.units[0].slabs.find((s) => s.minQty === m)?.rate;
+  const links = C.unitSlabLinks(f);
+  check('links: Kg made the slab from 900, Bag the one from 50000', links.get(1) === 4 && links.get(2) === 5 && !links.has(0), JSON.stringify([...links]));
+
+  const g = C.withUnitPrice(f, 1, '60');
+  check('Kg 58 -> 60: the From quantities stay exactly', froms(g) === '40,100,200,400,900,50000', froms(g));
+  check('Kg 58 -> 60: its slab from 900 follows at 0.06', rateAt(g, '900') === '0.06' && g.units[1].price === '60', rateAt(g, '900'));
+  check('Kg 58 -> 60: the other slabs keep their rates', ['40', '100', '200', '400', '50000'].every((m) => rateAt(g, m) === rateAt(f, m)));
+  check('withUnitPrice leaves the input alone', rateAt(f, '900') === '0.058' && f.units[1].price === '58');
+  const b = C.withUnitPrice(f, 2, '3000');
+  check('Bag 2850 -> 3000: its slab from 50000 follows at 0.06, From kept', rateAt(b, '50000') === '0.06' && froms(b) === froms(f), JSON.stringify(b.units[0].slabs));
+
+  // Typed one key at a time, with the links taken when the box got focus: emptying it loses nothing.
+  let t = C.withUnitPrice(f, 1, '', links);
+  check('an emptied price box leaves the slab as it was', rateAt(t, '900') === '0.058' && t.units[1].price === '');
+  t = C.withUnitPrice(t, 1, '6', links);
+  t = C.withUnitPrice(t, 1, '62', links);
+  check('typed key by key, the slab ends at the final price', rateAt(t, '900') === '0.062' && froms(t) === froms(f), rateAt(t, '900'));
+  check('a price of 0 does not touch the slab', rateAt(C.withUnitPrice(f, 1, '0'), '900') === '0.058');
+  check('the base unit price never moves slabs', JSON.stringify(C.withUnitPrice(f, 0, '0.07').units[0].slabs) === JSON.stringify(gmSlabs));
+  const noLink = { ...f, units: [u('gm', '1', '0.065', [sl('900', '0.05')]), u('Kg', '1000', '58')] };
+  check('a slab at another rate is not the unit\'s and stays', JSON.stringify(C.withUnitPrice(noLink, 1, '60').units[0].slabs) === JSON.stringify([sl('900', '0.05')]));
+
+  // The pack panel opens with the Kg's From as it was set, not reset to 1000.
+  const rows = C.packsFromItem(f);
+  const kg = rows.find((r) => r.unit === 1);
+  check('packsFromItem: the Kg row keeps From 900', kg && kg.from === '900' && kg.size === '1000', JSON.stringify(rows));
+  check('packsFromItem: the Bag row is From its own size', rows.find((r) => r.unit === 2)?.from === '', JSON.stringify(rows));
+  check('packsFromItem: no stray row for the 900 slab', !rows.some((r) => r.size === '900'), JSON.stringify(rows));
+  const opened = C.applyPacks(f, rows);
+  check('opening the panel changes no From and no rate', JSON.stringify(opened.units[0].slabs) === JSON.stringify(gmSlabs) && opened.units[0].price === '0.065', JSON.stringify(opened.units[0]));
+  const inPanel = C.applyPacks(f, rows.map((r) => (r.unit === 1 ? { ...r, price: '60' } : r)));
+  check('Kg 60 in the panel: the slab from 900 is 0.06, no new slab from 1000', froms(inPanel) === froms(f) && rateAt(inPanel, '900') === '0.06' && inPanel.units[1].price === '60', JSON.stringify(inPanel.units[0].slabs));
+  const odd = { ...f, units: [u('gm', '1', '0.0583', [sl('40', '0.0583')]), u('Kg', '1000', '58')] };
+  check('packsFromItem: a slab row comes back at its exact rate', C.applyPacks(odd, C.packsFromItem(odd)).units[0].slabs.find((s) => s.minQty === '40')?.rate === '0.0583', JSON.stringify(C.packsFromItem(odd)));
+
+  // Quick edit's price save: the editor's own save, with the slab following.
+  const item = { id: 'it_s', active: true, updatedAt: '', ...C.formToInput(f) };
+  const input = C.quickPriceInput(item, 1, ' 60 ');
+  check('quick price: the unit gets the new price', input.units[1].price === 60 && input.units[2].price === 2850, JSON.stringify(input.units.map((x) => x.price)));
+  check('quick price: the slab from 900 follows, From kept', JSON.stringify(input.units[0].slabs.map((s) => s.minQty)) === '[40,100,200,400,900,50000]' && input.units[0].slabs.find((s) => s.minQty === 900).rate === 0.06);
+  check('quick price: names, aliases and racks come through', input.nameEn === 'Sugar' && JSON.stringify(input.racks) === '{}' && Array.isArray(input.aliases));
+  check('quick price: passes checkItem', C.checkItem(input).ok, JSON.stringify(C.checkItem(input)));
+  check('quick price: an empty box is refused by checkItem', !C.checkItem(C.quickPriceInput(item, 1, '')).ok);
+}
+{
+  const read = (...p) => fs.readFileSync(path.join(__dirname, '..', 'web', 'src', ...p), 'utf8');
+  const inv = read('pages', 'admin', 'Inventory.tsx');
+  const ed = read('pages', 'admin', 'InventoryItem.tsx');
+  const css = read('styles.css');
+  check('New item from an open category carries it', /'\/admin\/inventory\/new' \+ \(cat != null && cat !== NO_CAT \? '\?category=' \+ encodeURIComponent\(cat\)/.test(inv));
+  check('the new item form starts in that category', /get\('category'\)/.test(ed) && /category: startCategory/.test(ed));
+  check('quick edit is on Inventory', /<QuickEdit mode=\{quick!\}/.test(inv));
+  check('quick edit: the name column stays put while the rest scrolls', /\.qe-table \.qe-name \{ position: sticky; left: 0;/.test(css) && /\.qe-wrap \{ overflow-x: auto;/.test(css));
+  check('the count form does not offer "Stock added"', /ADJUST_REASONS\.filter\(\(r\) => r !== 'added'\)/.test(ed));
+}
+
 // ---------------------------------------------------------------- 3D view: the sample layout from racks
 {
   const its = [

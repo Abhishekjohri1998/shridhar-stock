@@ -5,8 +5,9 @@ import { api, http } from '../../lib/api';
 import { Select } from '../../components/Select';
 import { useLive } from '../../lib/live';
 import { useLoad, useSession } from '../../lib/session';
-import { Loading, Table, useBi } from '../../components/ui';
+import { Loading, Table, Tabs, useBi } from '../../components/ui';
 import { UnknownScans } from '../../components/UnknownScans';
+import { QuickEdit, type QuickMode } from './QuickEdit';
 
 /** "5 box", the way the running-out level was typed, in the shop's words. */
 export function lowWords(item: Item, lang: Lang): string {
@@ -28,6 +29,15 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
   const base = '/admin/inventory';
   const [params, setParams] = useSearchParams();
   const onlyLow = params.get('low') === '1';
+  // Quick edit (?quick=price or ?quick=stock): every item as one row of boxes. Admin only.
+  const quickParam = params.get('quick');
+  const quick: QuickMode | null = !readOnly && (quickParam === 'price' || quickParam === 'stock') ? quickParam : null;
+  const setQuick = (m: QuickMode | null) => {
+    const next = new URLSearchParams(params);
+    if (m) next.set('quick', m);
+    else next.delete('quick');
+    setParams(next, { replace: true });
+  };
   const [q, setQ] = useState('');
   const [showAll, setShowAll] = useState(false);
   const [note, setNote] = useState('');
@@ -153,6 +163,10 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
     </td>
   );
   const lowCount = items.filter((i) => i.active && low(i)).length;
+  // Quick edit shows the items the list would show; the category and place lists stay as they are,
+  // so a category or place can be opened first. In a place: what is there now, then what was.
+  const quickOn = quick != null && !showCats && !showPlaces;
+  const quickItems = inPlace ? [...placeNow, ...placeBefore].map((r) => byId.get(r.itemId)!) : shown;
 
   const recount = async () => {
     const r = await api.recount();
@@ -168,9 +182,15 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
       <div className="bar">
         <input className="grow" data-tour="inventory-search" placeholder={t('common.search')} value={q} onChange={(e) => setQ(e.target.value)} />
         {!readOnly && (
-          <Link className="btn primary" to="/admin/inventory/new" data-tour="inventory-new">
+          // With a category open, the new item starts in that category.
+          <Link className="btn primary" to={'/admin/inventory/new' + (cat != null && cat !== NO_CAT ? '?category=' + encodeURIComponent(cat) : '')} data-tour="inventory-new">
             + {t('items.new')}
           </Link>
+        )}
+        {!readOnly && (
+          <button type="button" className={'btn' + (quick ? ' primary' : '')} aria-pressed={!!quick} onClick={() => setQuick(quick ? null : 'price')} data-tour="inventory-quick-edit">
+            {quick ? bi('Done', 'ಮುಗಿಯಿತು') : bi('Quick edit', 'ತ್ವರಿತ ತಿದ್ದುಪಡಿ')}
+          </button>
         )}
         {!readOnly && (
           <button className="btn" onClick={recount} data-tour="inventory-recount">
@@ -180,7 +200,7 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
       </div>
       <div className="bar">
         <label className="check" data-tour="inventory-low">
-          <input type="checkbox" checked={onlyLow} onChange={(e) => setParams(e.target.checked ? { low: '1' } : {})} />
+          <input type="checkbox" checked={onlyLow} onChange={(e) => setParams({ ...(e.target.checked ? { low: '1' } : {}), ...(quick ? { quick } : {}) })} />
           {t('stock.onlyLow')} ({lowCount})
         </label>
         <label className="check">
@@ -247,7 +267,28 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
       )}
       {inPlace && placeErr && <div className="msg err">{placeErr}</div>}
       {inPlace && !pd && !placeErr && <Loading />}
-      {inPlace && pd && (
+      {quickOn && (
+        <>
+          <div className="bar qe-bar">
+            <Tabs<QuickMode>
+              tabs={[
+                { key: 'price', label: bi('Prices', 'ಬೆಲೆಗಳು') },
+                { key: 'stock', label: bi('Stock', 'ಸ್ಟಾಕ್') },
+              ]}
+              value={quick!}
+              onChange={setQuick}
+            />
+          </div>
+          <p className="muted">
+            {quick === 'price'
+              ? bi('Change a price and leave the box (or press Enter): it is saved for that unit.', 'ಬೆಲೆ ಬದಲಿಸಿ ಬಾಕ್ಸ್‌ನಿಂದ ಹೊರಗೆ ಬನ್ನಿ (ಅಥವಾ Enter ಒತ್ತಿ): ಆ ಘಟಕಕ್ಕೆ ಉಳಿಸಲಾಗುತ್ತದೆ.')
+              : bi('Type a number, then “Set count” to save it as the count there, or “Add” to add it to the stock there.', 'ಸಂಖ್ಯೆ ಬರೆಯಿರಿ; ಅದನ್ನೇ ಅಲ್ಲಿನ ಎಣಿಕೆಯಾಗಿ ಉಳಿಸಲು “ಎಣಿಕೆ ಉಳಿಸಿ”, ಅಲ್ಲಿನ ಸ್ಟಾಕ್‌ಗೆ ಸೇರಿಸಲು “ಸೇರಿಸಿ” ಒತ್ತಿ.')}
+          </p>
+          {/* In a place, its items are still loading (or failed, said above). */}
+          {inPlace && !pd ? null :<QuickEdit mode={quick!} items={quickItems} locs={locs} stock={stock} onChanged={reload} />}
+        </>
+      )}
+      {inPlace && pd && !quickOn && (
         <>
           <h2 className="subtitle">{bi('In stock here', 'ಇಲ್ಲಿ ಸ್ಟಾಕ್ ಇದೆ')}</h2>
           {placeNow.length === 0 ? (
@@ -331,12 +372,12 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
       )}
       {!showCats && !showPlaces && !inPlace && items.length === 0 && <div className="card" data-tour="inventory-list">{t('items.empty')}</div>}
       {showCats && items.length > 0 && catRows.length === 0 && <div className="card">{bi('No items here.', 'ಇಲ್ಲಿ ಸಾಮಾನು ಇಲ್ಲ.')}</div>}
-      {!showCats && !showPlaces && !inPlace && items.length > 0 && shown.length === 0 && (
+      {!showCats && !showPlaces && !inPlace && !quickOn && items.length > 0 && shown.length === 0 && (
         <div className="card" data-tour="inventory-list">
           {onlyLow ? bi('Nothing is running low. Good.', 'ಏನೂ ಮುಗಿಯುತ್ತಿಲ್ಲ. ಒಳ್ಳೆಯದು.') : bi('No item matches. Try another name, or add it with “New item”.', 'ಯಾವ ಸಾಮಾನೂ ಹೊಂದುತ್ತಿಲ್ಲ. ಬೇರೆ ಹೆಸರು ನೋಡಿ, ಅಥವಾ “ಹೊಸ ಸಾಮಾನು” ಒತ್ತಿ ಸೇರಿಸಿ.')}
         </div>
       )}
-      {!showCats && !showPlaces && !inPlace && shown.length > 0 && (
+      {!showCats && !showPlaces && !inPlace && !quickOn && shown.length > 0 && (
         <div className="scroll" data-tour="inventory-list">
           <Table className="list">
             <thead>

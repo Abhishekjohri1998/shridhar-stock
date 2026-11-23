@@ -48,6 +48,8 @@ import {
   type UsedUnit,
   usedUnits,
   unitSuggestions,
+  unitSlabLinks,
+  withUnitPrice,
   packChange,
 } from '@stock/core';
 import { SalesChart } from '../../components/SalesChart';
@@ -173,13 +175,17 @@ function ItemDetails({
   const { t, lang } = useSession();
   const bi = useBi();
   const nav = useNavigate();
+  const [startCategory] = useState(() => (item ? '' : (new URLSearchParams(window.location.search).get('category') ?? '').trim().slice(0, 60)));
   const [form, setForm] = useState<ItemForm>(() => {
     if (item) return itemToForm(item);
     // "New item" from Inventory's scanned-not-linked list: the code goes on the base unit.
-    const blank = blankItemForm();
+    // "New item" with a category open on Inventory: that category is filled in.
+    const blank = { ...blankItemForm(), category: startCategory };
     const code = cleanBarcode(new URLSearchParams(window.location.search).get('barcode'));
     return isBarcode(code) ? { ...blank, units: blank.units.map((u, i) => (i === 0 ? { ...u, barcodes: [code] } : u)) } : blank;
   });
+  // The links between unit prices and base slabs, taken when a price box gets focus (see withUnitPrice).
+  const priceLinks = useRef<Map<number, number> | null>(null);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState('');
   const [busy, setBusy] = useState(false);
@@ -283,7 +289,7 @@ function ItemDetails({
       <button className="btn primary" disabled={busy}>
         {t('common.save')}
       </button>
-      <button type="button" className="btn" onClick={() => nav('/admin/inventory')}>
+      <button type="button" className="btn" onClick={() => nav('/admin/inventory' + (startCategory ? '?sort=category&cat=' + encodeURIComponent(startCategory) : ''))}>
         {item ? bi('Back to the list', 'ಪಟ್ಟಿಗೆ ಹಿಂದೆ') : t('common.cancel')}
       </button>
       {item && (
@@ -429,9 +435,16 @@ function ItemDetails({
                     inputMode="decimal"
                     value={u.price}
                     placeholder={priceHints.suggest[i] != null ? String(priceHints.suggest[i]) : undefined}
-                    onChange={(e) => setUnit(i, { price: e.target.value })}
+                    onFocus={() => (priceLinks.current = unitSlabLinks(form))}
+                    onBlur={() => (priceLinks.current = null)}
+                    // The base slab this unit's price made follows the new price; its From stays put.
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      const links = priceLinks.current ?? undefined;
+                      setForm((f) => withUnitPrice(f, i, v, links));
+                    }}
                   />
-                  {!readOnly && <Suggestion v={priceHints.suggest[i]} rate={priceHints.rate[i]} base={base} from={unitName(priceHints.from[i])} onUse={(v) => setUnit(i, { price: String(v) })} />}
+                  {!readOnly && <Suggestion v={priceHints.suggest[i]} rate={priceHints.rate[i]} base={base} from={unitName(priceHints.from[i])} onUse={(v) => setForm((f) => withUnitPrice(f, i, String(v)))} />}
                 </label>
                 <label className="field">
                   <span>{t('items.min')} ₹</span>
@@ -738,7 +751,7 @@ function ItemStock({ item, locs, stock, readOnly, onChanged }: { item: Item; loc
               <>
                 <label className="field">
                   <span>{t('stock.reason')}</span>
-                  <Select<AdjustReason> value={reason} onChange={setReason} aria-label={t('stock.reason')} options={ADJUST_REASONS.map((r) => ({ value: r, label: t(('stock.reason.' + r) as MsgKey) }))} />
+                  <Select<AdjustReason> value={reason} onChange={setReason} aria-label={t('stock.reason')} options={ADJUST_REASONS.filter((r) => r !== 'added').map((r) => ({ value: r, label: t(('stock.reason.' + r) as MsgKey) }))} />
                 </label>
                 <label className="field">
                   <span>{t('stock.note')}</span>
@@ -929,7 +942,10 @@ const blankPack = (): PackRow => ({ size: '', price: '', from: '' });
 function PackPricer({ base, form, setForm }: { base: string; form: ItemForm; setForm: (fn: (f: ItemForm) => ItemForm) => void }) {
   const bi = useBi();
   const [open, setOpen] = useState(false);
-  const [rows, setRows] = useState<PackRow[]>([]);
+  const [held, setRows] = useState<PackRow[]>([]);
+  // A row from a unit shows that unit's price as it is in the form now: a price typed in the units
+  // card above shows here at once, and the next edit here never puts the old one back.
+  const rows = held.map((r) => (r.unit != null && form.units[r.unit] ? { ...r, price: form.units[r.unit]!.price } : r));
   const [before, setBefore] = useState<UnitForm[] | null>(null);
   const packs = form.units.slice(1).filter((x) => x.code.trim() && Number(x.perBase) > 0).map((x) => ({ code: x.code, size: Number(x.perBase) }));
   const n = (v: string) => (v.trim() === '' ? NaN : Number(v));

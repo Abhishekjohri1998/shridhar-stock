@@ -349,6 +349,27 @@ async function main() {
     eq('a new bill is picked up', (await call('/admin/link/sync', {})).body.newBills, 1);
     eq('10 pieces by the rate', await qty(parle.id), 422);
 
+    // Bill 3 edited in billing (rev 2): its 10 come back, the edited 4 go out; nothing twice.
+    Object.assign(billing.bills.find((x) => x.no === 3), { rev: 2, editedAt: new Date().toISOString(), lines: [{ nameEn: 'Parle-G', nameKn: '', qty: 4, rate: 5 }] });
+    const e1 = (await call('/admin/link/sync', {})).body;
+    eq('an edit takes the old sale back and posts the new one', JSON.stringify([e1.reversed, e1.posted]), '[1,1]');
+    eq('stock follows the edit', await qty(parle.id), 428);
+    await call('/admin/link/sync', {});
+    eq('and not twice', await qty(parle.id), 428);
+    eq('the bill remembers its revision', (await call('/admin/bills')).body.find((b) => b.no === 3).rev, 2);
+    Object.assign(billing.bills.find((x) => x.no === 3), { rev: 3, lines: [{ nameEn: 'Parle-G', nameKn: '', qty: 6, rate: 5 }] });
+    await call('/admin/link/sync', {});
+    eq('a second edit: only the latest counts', await qty(parle.id), 426);
+    billing.bills.find((x) => x.no === 3).cancelled = true;
+    await call('/admin/link/sync', {});
+    eq('cancelled after edits: everything comes back once', await qty(parle.id), 432);
+    await call('/admin/link/sync', {});
+    eq('and stays so', await qty(parle.id), 432);
+    billing.bills.find((x) => x.no === 3).cancelled = false;
+    Object.assign(billing.bills.find((x) => x.no === 3), { rev: 4, lines: [{ nameEn: 'Parle-G', nameKn: '', qty: 10, rate: 5 }] });
+    await call('/admin/link/sync', {});
+    eq('(put back as it was for what follows)', await qty(parle.id), 422);
+
     const summary = (await call('/admin/summary')).body;
     check('the link shows as working', summary.link && summary.link.ok === true && summary.link.lastBillNo === 3, JSON.stringify(summary.link));
     eq('nothing else was ever written to billing', billing.writes, 0);

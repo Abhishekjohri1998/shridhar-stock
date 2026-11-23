@@ -940,3 +940,30 @@ img, svg.ink { max-width: 100%; }
 .gain { color: var(--ok-700); }
 .loss { color: var(--danger-600); }
 .chart .bar-loss { fill: var(--danger-600); }
+
+/* Inventory quick edit: one row per item; the name column stays put while the boxes scroll sideways. */
+.qe-bar .tabs { margin-bottom: 0; }
+.qe-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; background: var(--paper-1); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--sh-1); }
+.qe-table { border-collapse: separate; border-spacing: 0; min-width: 100%; }
+.qe-table th, .qe-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; text-align: left; }
+.qe-table tbody tr:last-child td { border-bottom: 0; }
+.qe-table th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-500); background: var(--paper-2); font-weight: 600; white-space: nowrap; }
+.qe-table .qe-name { position: sticky; left: 0; z-index: 2; width: 180px; min-width: 110px; max-width: 34vw; background: var(--paper-1); border-right: 1px solid var(--line-strong); box-shadow: 6px 0 8px -6px rgba(31, 30, 27, 0.18); }
+.qe-table th.qe-name { z-index: 3; background: var(--paper-2); }
+.qe-name a { color: var(--ink-900); font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
+.qe-other { font-size: 0.85rem; overflow-wrap: anywhere; }
+.qe-cell { min-width: 96px; }
+.qe-cell.qe-stock { min-width: 186px; }
+.qe-unit { display: block; margin-bottom: 4px; font-size: 0.8rem; font-weight: 700; color: var(--ink-500); white-space: nowrap; }
+.qe-table input.qe-box { width: 88px; min-height: 40px; padding: 6px 10px; text-align: right; font-variant-numeric: tabular-nums; }
+.qe-table input.qe-box.bad { border-color: var(--danger-600); }
+.qe-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: nowrap; }
+.qe-row .btn.small { padding: 0 10px; white-space: nowrap; }
+.qe-now { font-weight: 700; color: var(--ink-900); white-space: nowrap; }
+.qe-note { margin-top: 4px; font-size: 0.8rem; max-width: 200px; }
+.qe-note.busy { color: var(--ink-400); }
+.qe-note.ok { color: var(--ok-700); }
+.qe-note.err { color: var(--danger-600); }
+@media (max-width: 639px) {
+  .qe-table .qe-name { width: 120px; }
+}

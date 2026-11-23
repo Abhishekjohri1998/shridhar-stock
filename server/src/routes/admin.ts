@@ -567,6 +567,9 @@ adminRoutes.post(
  * Sets the count of an item in a place to what is actually there, recording the difference as a
  * move with a reason. The difference is taken from the ledger, not the cache, so a correction is
  * right even if the cache had drifted.
+ *
+ * With `add` instead of `actual` (Inventory's quick edit, "Add"), that many base units are put
+ * in on top of whatever the ledger holds, so a sale posted meanwhile is never written over.
  */
 adminRoutes.post(
   '/stock/adjust',
@@ -576,18 +579,20 @@ adminRoutes.post(
       .object({
         itemId: z.string(),
         locationId: z.string(),
-        actual: z.coerce.number().finite().min(-10_000_000).max(10_000_000),
+        actual: z.coerce.number().finite().min(-10_000_000).max(10_000_000).optional(),
+        add: z.coerce.number().finite().gt(0, 'Add more than zero').max(10_000_000).optional(),
         reason: z.enum(ADJUST_REASONS),
         note: z.string().trim().max(200).optional(),
         /** Sent by the screen so a double tap posts once. */
         requestId: z.string().max(60).optional(),
       })
+      .refine((b) => (b.actual == null) !== (b.add == null), 'Send either the count now or the quantity to add')
       .parse(req.body);
     const { item, loc } = await itemAndPlace(body.itemId, body.locationId);
     const repo = getRepo();
     const levels = await repo.ledgerLevels([item.id]);
     const now = levels.find((l) => l.locationId === loc.id)?.qty ?? 0;
-    const delta = Math.round((body.actual - now) * 1000) / 1000;
+    const delta = Math.round((body.add != null ? body.add : body.actual! - now) * 1000) / 1000;
     if (delta === 0) {
       res.json({ posted: 0, qty: now });
       return;
@@ -606,7 +611,7 @@ adminRoutes.post(
         ...(body.note ? { note: body.note } : {}),
       },
     ]);
-    res.json({ posted: posted.length, qty: body.actual });
+    res.json({ posted: posted.length, qty: body.actual ?? Math.round((now + delta) * 1000) / 1000 });
   }),
 );
 

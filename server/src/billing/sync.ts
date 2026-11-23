@@ -15,10 +15,22 @@ import type { InvRepo } from '../store/types';
 import type { BillingClient } from './client';
 import { takeDraft, type Draft } from './drafts';
 
+/**
+ * The ledger key of the sale one bill line made. A bill edited in billing (rev 2, 3, ...) posts
+ * its lines again under keys of their own, after the old ones are taken back; an unedited bill
+ * keeps the key it always had, so nothing already posted is posted twice.
+ */
+export function saleKeyOf(no: number, rev: number | undefined, i: number): string {
+  return (rev ?? 1) > 1 ? 'sale:' + no + ':r' + rev + ':' + i : 'sale:' + no + ':' + i;
+}
+
 /** A bill as the billing server sends it. Only the fields stock reads. */
 export interface BillingBill {
   no: number;
   at: string;
+  /** Billing's edit count (absent = 1) and when it was last edited. */
+  rev?: number;
+  editedAt?: string;
   customer?: { id: string; name: string; nameKn?: string; phone: string };
   lines: {
     nameKn?: string;
@@ -190,6 +202,8 @@ export interface SyncOptions {
   limit?: number;
   /** Read billing's customers too. The link does it on full reads and when a new bill arrives. */
   customers?: boolean;
+  /** On a full read, also the bills billing edited after this time (ISO), however old they are. */
+  editedAfter?: string;
 }
 
 /** The round-off as billing names it, under either spelling. Undefined when billing sent none. */
@@ -223,9 +237,16 @@ function stable(v: unknown): string {
 }
 
 /** The bill list from billing: the light one where billing has it, and whether it did. */
-async function readBills(billing: BillingClient, opts: Required<Pick<SyncOptions, 'mode' | 'since' | 'limit'>>): Promise<{ bills: BillingBill[]; lite: boolean }> {
+async function readBills(billing: BillingClient, opts: Required<Pick<SyncOptions, 'mode' | 'since' | 'limit'>> & { editedAfter?: string }): Promise<{ bills: BillingBill[]; lite: boolean }> {
   const q = opts.mode === 'fast' && opts.since > 0 ? '?lite=1&since=' + opts.since + '&limit=' + opts.limit : '?lite=1&limit=' + opts.limit;
-  const bills = await billing.get<BillingBill[]>('/api/bills' + q);
+  let bills = await billing.get<BillingBill[]>('/api/bills' + q);
+  // A bill edited in billing may be older than the latest few: asked for by its edit time. An
+  // older billing server ignores the filter and sends its latest ones, which merge harmlessly.
+  if (opts.mode === 'full' && opts.editedAfter) {
+    const edited = await billing.get<BillingBill[]>('/api/bills?lite=1&limit=100&editedAfter=' + encodeURIComponent(opts.editedAfter)).catch(() => []);
+    const have = new Set(bills.map((b) => b.no));
+    bills = [...bills, ...edited.filter((b) => !have.has(b.no))];
+  }
   // A billing server that knows lite marks every bill with hasInk; an older one sends full bills.
   const lite = bills.length > 0 && bills.every((b) => typeof b.hasInk === 'boolean');
   return { bills, lite };
@@ -256,6 +277,27 @@ export async function syncCustomers(repo: InvRepo, billing: BillingClient): Prom
 }
 
 /**
+ * The moves that take back every sale a bill made: one per sale (or digitised) move of the bill,
+ * keyed 'cancel:<rest of its key>'. Posting skips a key already in the ledger, so a sale taken back
+ * once (an edit, then a cancel) is never taken back twice.
+ */
+async function reversalsOf(repo: InvRepo, no: number, ref: string): Promise<StockMove[]> {
+  const sold = await repo.listMoves({});
+  return sold
+    .filter((m) => m.kind === 'sale' || m.kind === 'digitise')
+    .filter((m) => m.key.startsWith('sale:' + no + ':'))
+    .map((m) => ({ id: 'mv_cancel_' + m.key, key: 'cancel:' + m.key.slice(5), at: new Date().toISOString(), kind: 'cancel', itemId: m.itemId, to: m.from!, qty: m.qty, ref, by: 'billing' }));
+}
+
+/** Whether an edited bill's line is still what stock read before, so its settled state can stay. */
+function sameLine(was: MirrorLine, raw: BillingBill['lines'][number]): boolean {
+  const names = raw.lastMode === 'ink' ? [] : [...new Set([raw.nameEn, raw.nameKn].map((n) => String(n ?? '').trim()).filter(Boolean))];
+  const strokes = (raw.ink?.strokes ?? []).length;
+  return was.name === names.join(' / ') && was.qty === raw.qty && was.rate === raw.rate
+    && (was.ink?.strokes ?? []).length === strokes;
+}
+
+/**
  * Reads bills (and, when asked, every customer) from billing, and brings stock up to date.
  *
  * - A matched line posts a sale from the shop (key sale:<bill>:<line>, so a restart or a second
@@ -272,7 +314,7 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limitOrOpt
   const limit = opts.limit ?? (mode === 'full' ? 30 : 100);
   const wantCustomers = opts.customers ?? mode === 'full';
   const [{ bills: listedAll, lite }, items, locs] = await Promise.all([
-    readBills(billing, { mode, since: opts.since ?? 0, limit }),
+    readBills(billing, { mode, since: opts.since ?? 0, limit, ...(opts.editedAfter ? { editedAfter: opts.editedAfter } : {}) }),
     repo.listItems(),
     repo.listLocations(),
   ]);
@@ -292,10 +334,14 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limitOrOpt
     const id = String(listedBill.no);
     const before = await repo.getDoc<BillMirror>('bills', id);
     let b = listedBill;
+    const rev = b.rev ?? 1;
+    // Edited in billing since stock last read it: its old sales come back, its lines post again.
+    const edited = before != null && (before.rev ?? 1) !== rev;
     // Read in full (an older server, or fetched below): every ink block is in hand.
     let whole = !lite;
     // A light bill with handwriting that stock has not read yet: its handwriting, fetched once.
-    if (lite && b.hasInk && !before?.hasInk) {
+    // An edited one too: its writing may not be what stock read before.
+    if (lite && b.hasInk && (!before?.hasInk || edited)) {
       b = await billing.get<BillingBill>('/api/bills/' + b.no);
       result.fullFetched!++;
       whole = true;
@@ -307,9 +353,11 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limitOrOpt
     const drafted = (l: BillingBill['lines'][number], i: number) =>
       before || !draft ? undefined : l.itemId ? draft.lines.find((d) => d.key === l.itemId) : draft.lines[i];
     const lines = b.lines.map((l, i) => {
+      // After an edit, what was settled for line i carries over only if the line is still the same.
+      const was = edited && before?.lines[i] && !sameLine(before.lines[i]!, l) ? undefined : before?.lines[i];
       // A light line comes without its handwriting: the ink read before stays.
-      const raw = lite && !l.ink && before?.lines[i]?.ink ? { ...l, ink: before.lines[i]!.ink, moreInk: before.lines[i]!.moreInk } : l;
-      return toMirrorLine(items, raw, i, before?.lines[i], drafted(l, i));
+      const raw = lite && !l.ink && was?.ink ? { ...l, ink: was.ink, moreInk: was.moreInk } : l;
+      return toMirrorLine(items, raw, i, was, drafted(l, i));
     });
     // A tick made on the draft in the moment before Save may not have reached billing: send it.
     lines.forEach((l, i) => {
@@ -326,6 +374,7 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limitOrOpt
       total: b.total,
       paid: b.paid,
       balance: b.balance,
+      ...(rev > 1 ? { rev } : {}),
       ...(b.cancelled ? { cancelled: true } : {}),
       // Removed from To digitise by the admin: billing knows nothing of it, so the mark is carried over.
       ...(before?.dismissed ? { dismissed: true, dismissedBy: before.dismissedBy, dismissedAt: before.dismissedAt } : {}),
@@ -340,10 +389,15 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limitOrOpt
     }
 
     const moved = lines.filter((l) => l.itemId && l.baseQty && (l.state === 'typed-match' || l.state === 'read-auto' || l.state === 'confirmed'));
+    if (edited && !b.cancelled) {
+      // What the bill sold before the edit comes back first, under the keys a cancel would use,
+      // so a later cancel never takes it back a second time.
+      result.reversed += (await post(repo, await reversalsOf(repo, b.no, 'bill ' + b.no + ' edited'))).length;
+    }
     if (!b.cancelled) {
       const sales: StockMove[] = moved.map((l) => ({
-        id: 'mv_sale_' + b.no + '_' + l.i,
-        key: 'sale:' + b.no + ':' + l.i,
+        id: 'mv_sale_' + b.no + (rev > 1 ? '_r' + rev : '') + '_' + l.i,
+        key: saleKeyOf(b.no, rev, l.i),
         at: b.at,
         kind: 'sale',
         itemId: l.itemId!,
@@ -356,12 +410,7 @@ export async function syncOnce(repo: InvRepo, billing: BillingClient, limitOrOpt
       if (!mirror.dismissed) result.toConfirm += lines.filter((l) => l.state === 'to-confirm').length;
     } else {
       // Only what was actually sold comes back: reverse the sale moves that exist.
-      const sold = await repo.listMoves({});
-      const reverse: StockMove[] = sold
-        .filter((m) => m.kind === 'sale' || m.kind === 'digitise')
-        .filter((m) => m.key.startsWith('sale:' + b.no + ':'))
-        .map((m) => ({ id: 'mv_cancel_' + m.key, key: 'cancel:' + m.key.slice(5), at: new Date().toISOString(), kind: 'cancel', itemId: m.itemId, to: m.from!, qty: m.qty, ref: 'bill ' + b.no + ' cancelled', by: 'billing' }));
-      result.reversed += (await post(repo, reverse)).length;
+      result.reversed += (await post(repo, await reversalsOf(repo, b.no, 'bill ' + b.no + ' cancelled'))).length;
     }
     // Written after its stock moves: a read that fails half way is done again in full next time.
     await repo.putDoc('bills', mirror);

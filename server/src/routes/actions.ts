@@ -43,6 +43,7 @@ import { getRepo } from '../store';
 import { newId } from '../store/types';
 import { emit } from '../events';
 import { pushAddress } from '../billing/push';
+import { saleKeyOf } from '../billing/sync';
 
 /**
  * The things people do, each checked for who may do it and on what, and each moving stock
@@ -116,7 +117,8 @@ async function confirmLine(ctx: ConfirmContext, a: Answer): Promise<{ learnt: st
   line.baseQty = baseQty;
   if (line.reading) line.reading = { ...line.reading, by: ctx.by, at: now() };
   await post(getRepo(), [
-    { id: newId('mv'), key: 'sale:' + bill.no + ':' + line.i, at: now(), kind: line.ink ? 'digitise' : 'sale', itemId: item.id, from: ctx.shopId, qty: baseQty, ref: 'bill ' + bill.no + ' line ' + (line.i + 1), by: ctx.by },
+    // Under the bill's current revision: an edited bill's earlier sales were taken back.
+    { id: newId('mv'), key: saleKeyOf(bill.no, bill.rev, line.i), at: now(), kind: line.ink ? 'digitise' : 'sale', itemId: item.id, from: ctx.shopId, qty: baseQty, ref: 'bill ' + bill.no + ' line ' + (line.i + 1), by: ctx.by },
   ]);
 
   // Learn the name it was written or typed as.
