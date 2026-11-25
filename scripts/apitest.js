@@ -311,6 +311,15 @@ async function main() {
       const mv = (await call('/items/' + qs.id + '/moves', { token: admin })).body;
       check('quick: the Add is a move in, reason added', mv.length === 2 && mv[0].kind === 'adjust' && mv[0].to === godown && mv[0].qty === 5 && mv[0].ref === 'added', JSON.stringify(mv));
       eq('quick: a count still works beside it', (await add({ actual: 12, reason: 'counted', requestId: 'qa6' })).body.qty, 12);
+      // Taking some out, with the reason: Damaged, Expired, Other.
+      const r1 = await add({ remove: 2, reason: 'damaged', requestId: 'qr1' });
+      check('quick: 2 damaged out of 12 leaves 10', r1.status === 200 && r1.body.qty === 10, JSON.stringify(r1.body));
+      const mv2 = (await call('/items/' + qs.id + '/moves', { token: admin })).body;
+      check('quick: a move out of the godown, reason damaged', mv2[0].kind === 'adjust' && mv2[0].from === godown && mv2[0].qty === 2 && mv2[0].ref === 'damaged', JSON.stringify(mv2[0]));
+      eq('quick: the same removal sent twice is posted once', (await add({ remove: 2, reason: 'damaged', requestId: 'qr1' })).body.posted, 0);
+      eq('quick: expired works too', (await add({ remove: 1, reason: 'expired', requestId: 'qr2' })).body.qty, 9);
+      eq('quick: remove 0 is refused', (await add({ remove: 0, reason: 'other', requestId: 'qr3' })).status, 400);
+      eq('quick: an Add and a remove together are refused', (await add({ add: 1, remove: 1, requestId: 'qr4' })).status, 400);
       eq('quick: recount agrees with the ledger', (await call('/stock/recount', { method: 'POST', token: admin })).body.fixed.length, 0);
       await call('/items/' + qs.id, { method: 'PUT', token: admin, body: { ...qs, active: false } });
     }

@@ -17,9 +17,10 @@ type Note = { kind: 'busy' | 'ok' | 'err'; text: string };
  * - Prices: one box per unit of the item, under its code. Leaving the box (or Enter) saves that
  *   unit's price through the same save as the item editor (PUT /items/:id, checked the same way);
  *   a base slab the unit's price made follows it, its From untouched (withUnitPrice).
- * - Stock: one cell per place with the count there, a box and a unit. "Set" saves the box as the
- *   count (a correction, reason Counted); "Add" puts that much in on top of what the ledger holds
- *   (reason Stock added). Both go through the ledger, never by writing the total.
+ * - Stock: one cell per place with the count there, a box, a unit and one dropdown (STOCK_ACTIONS):
+ *   Add puts that much in on top of what the ledger holds (reason Stock added); Set count saves the
+ *   box as the count (reason Counted); Damaged, Expired and Remove take that much out with that
+ *   reason. All go through the ledger, never by writing the total.
  */
 export function QuickEdit({ mode, items, locs, stock, onChanged }: { mode: QuickMode; items: Item[]; locs: Location[]; stock: StockLevel[]; onChanged: () => void }) {
   const { lang } = useSession();
@@ -87,22 +88,38 @@ export function QuickEdit({ mode, items, locs, stock, onChanged }: { mode: Quick
     });
   };
 
-  const saveStock = (item: Item, loc: Location, how: 'set' | 'add') => {
+  /** What the stock box does, picked from the dropdown: the last one used is where the next cell starts. */
+  const [actions, setActions] = useState<Record<string, StockAction>>({});
+  const [lastAction, setLastAction] = useState<StockAction>('add');
+  const actionOf = (k: string): StockAction => actions[k] ?? lastAction;
+
+  const saveStock = (item: Item, loc: Location, how: StockAction) => {
     const k = item.id + '@' + loc.id;
     const text = (drafts[k] ?? '').trim();
     const n = Number(text);
-    if (text === '' || !Number.isFinite(n) || n < 0 || (how === 'add' && n === 0)) {
-      note(k, { kind: 'err', text: how === 'add' ? bi('Type how many to add', 'ಎಷ್ಟು ಸೇರಿಸಬೇಕು ಎಂದು ಬರೆಯಿರಿ') : bi('Type the count', 'ಎಣಿಕೆ ಬರೆಯಿರಿ') });
+    const removing = how === 'damaged' || how === 'expired' || how === 'other';
+    if (text === '' || !Number.isFinite(n) || n < 0 || (how !== 'counted' && n === 0)) {
+      note(k, {
+        kind: 'err',
+        text: how === 'add' ? bi('Type how many to add', 'ಎಷ್ಟು ಸೇರಿಸಬೇಕು ಎಂದು ಬರೆಯಿರಿ')
+          : removing ? bi('Type how many to take out', 'ಎಷ್ಟು ತೆಗೆಯಬೇಕು ಎಂದು ಬರೆಯಿರಿ')
+          : bi('Type the count', 'ಎಣಿಕೆ ಬರೆಯಿರಿ'),
+      });
       return;
     }
     const code = unitOf(item, units[k]);
     const qty = toBase(item, code, n);
     const hasRow = stock.some((s) => s.itemId === item.id && s.locationId === loc.id);
+    if (removing && !hasRow) {
+      note(k, { kind: 'err', text: bi('Nothing is counted here yet to take out', 'ಇಲ್ಲಿ ತೆಗೆಯಲು ಇನ್ನೂ ಸ್ಟಾಕ್ ಎಣಿಸಿಲ್ಲ') });
+      return;
+    }
+    setLastAction(how);
     note(k, { kind: 'busy', text: bi('Saving…', 'ಉಳಿಸಲಾಗುತ್ತಿದೆ…') });
     void run(item.id, async () => {
       try {
         let done = false;
-        // Nothing counted here yet: the first count is the opening stock, as on the item's page.
+        // Nothing counted here yet: the first count (or Add) is the opening stock, as on the item's page.
         if (!hasRow) {
           try {
             await api.openStock(item.id, loc.id, qty);
@@ -113,10 +130,20 @@ export function QuickEdit({ mode, items, locs, stock, onChanged }: { mode: Quick
         }
         if (!done) {
           const requestId = crypto.randomUUID();
-          await api.adjust(how === 'add' ? { itemId: item.id, locationId: loc.id, add: qty, reason: 'added', requestId } : { itemId: item.id, locationId: loc.id, actual: qty, reason: 'counted', requestId });
+          const base = { itemId: item.id, locationId: loc.id, requestId };
+          await api.adjust(
+            how === 'add' ? { ...base, add: qty, reason: 'added' }
+              : how === 'counted' ? { ...base, actual: qty, reason: 'counted' }
+              : { ...base, remove: qty, reason: how },
+          );
         }
         setDraft(k, null);
-        note(k, { kind: 'ok', text: how === 'add' ? '+' + describeQty(item, qty, lang) : bi('Count saved', 'ಎಣಿಕೆ ಉಳಿಸಲಾಗಿದೆ') });
+        note(k, {
+          kind: 'ok',
+          text: how === 'add' ? '+' + describeQty(item, qty, lang)
+            : removing ? '−' + describeQty(item, qty, lang) + ' · ' + (how === 'damaged' ? bi('Damaged', 'ಹಾಳಾಗಿದೆ') : how === 'expired' ? bi('Expired', 'ಅವಧಿ ಮುಗಿದಿದೆ') : bi('Removed', 'ತೆಗೆಯಲಾಗಿದೆ'))
+            : bi('Count saved', 'ಎಣಿಕೆ ಉಳಿಸಲಾಗಿದೆ'),
+        });
         onChanged();
       } catch (e) {
         note(k, { kind: 'err', text: e instanceof Error ? e.message : String(e) });
@@ -254,12 +281,22 @@ export function QuickEdit({ mode, items, locs, stock, onChanged }: { mode: Quick
                           <span className="muted">{(lang === 'kn' && item.units[0]!.labelKn) || item.units[0]!.code}</span>
                         )}
                       </div>
+                      {/* One dropdown for every way stock changes here, and one Save. */}
                       <div className="qe-row">
-                        <button type="button" className="btn small" disabled={!ok || busy} onClick={() => saveStock(item, l, 'set')} title={bi('Save the box as the count here', 'ಬಾಕ್ಸ್‌ನಲ್ಲಿರುವುದನ್ನು ಇಲ್ಲಿನ ಎಣಿಕೆಯಾಗಿ ಉಳಿಸಿ')}>
-                          {bi('Set count', 'ಎಣಿಕೆ ಉಳಿಸಿ')}
-                        </button>
-                        <button type="button" className="btn small primary" disabled={!ok || n === 0 || busy} onClick={() => saveStock(item, l, 'add')} title={bi('Add the box to the stock here', 'ಬಾಕ್ಸ್‌ನಲ್ಲಿರುವಷ್ಟು ಇಲ್ಲಿನ ಸ್ಟಾಕ್‌ಗೆ ಸೇರಿಸಿ')}>
-                          + {bi('Add', 'ಸೇರಿಸಿ')}
+                        <Select<StockAction>
+                          className="w-auto qe-action"
+                          value={actionOf(k)}
+                          onChange={(v) => setActions((all) => ({ ...all, [k]: v }))}
+                          aria-label={bi('What to do', 'ಏನು ಮಾಡಬೇಕು')}
+                          options={STOCK_ACTIONS.map((a) => ({ value: a.value, label: bi(a.en, a.kn) }))}
+                        />
+                        <button
+                          type="button"
+                          className="btn small primary"
+                          disabled={!ok || (actionOf(k) !== 'counted' && n === 0) || busy}
+                          onClick={() => saveStock(item, l, actionOf(k))}
+                        >
+                          {bi('Save', 'ಉಳಿಸಿ')}
                         </button>
                       </div>
                       {noteLine(k)}
@@ -274,6 +311,19 @@ export function QuickEdit({ mode, items, locs, stock, onChanged }: { mode: Quick
     </div>
   );
 }
+
+/**
+ * Every way quick edit changes the stock in a place, in one dropdown: put some in, write down
+ * what was counted, or take some out with the reason the item page's count form uses.
+ */
+type StockAction = 'add' | 'counted' | 'damaged' | 'expired' | 'other';
+const STOCK_ACTIONS: { value: StockAction; en: string; kn: string }[] = [
+  { value: 'add', en: '+ Add stock', kn: '+ ಸ್ಟಾಕ್ ಸೇರಿಸಿ' },
+  { value: 'counted', en: '= Set count', kn: '= ಎಣಿಕೆ ಉಳಿಸಿ' },
+  { value: 'damaged', en: '− Damaged', kn: '− ಹಾಳಾಗಿದೆ' },
+  { value: 'expired', en: '− Expired', kn: '− ಅವಧಿ ಮುಗಿದಿದೆ' },
+  { value: 'other', en: '− Remove (other)', kn: '− ತೆಗೆಯಿರಿ (ಬೇರೆ)' },
+];
 
 /** The unit a stock cell counts in: the one picked, if the item still has it, else the counting unit. */
 function unitOf(item: Item, picked: string | undefined): string {

@@ -581,18 +581,20 @@ adminRoutes.post(
         locationId: z.string(),
         actual: z.coerce.number().finite().min(-10_000_000).max(10_000_000).optional(),
         add: z.coerce.number().finite().gt(0, 'Add more than zero').max(10_000_000).optional(),
+        // Quick edit's "Damaged", "Expired", "Remove": that many taken out of what the ledger holds.
+        remove: z.coerce.number().finite().gt(0, 'Remove more than zero').max(10_000_000).optional(),
         reason: z.enum(ADJUST_REASONS),
         note: z.string().trim().max(200).optional(),
         /** Sent by the screen so a double tap posts once. */
         requestId: z.string().max(60).optional(),
       })
-      .refine((b) => (b.actual == null) !== (b.add == null), 'Send either the count now or the quantity to add')
+      .refine((b) => [b.actual, b.add, b.remove].filter((x) => x != null).length === 1, 'Send one of: the count now, the quantity to add, or the quantity to remove')
       .parse(req.body);
     const { item, loc } = await itemAndPlace(body.itemId, body.locationId);
     const repo = getRepo();
     const levels = await repo.ledgerLevels([item.id]);
     const now = levels.find((l) => l.locationId === loc.id)?.qty ?? 0;
-    const delta = Math.round((body.add != null ? body.add : body.actual! - now) * 1000) / 1000;
+    const delta = Math.round((body.add != null ? body.add : body.remove != null ? -body.remove : body.actual! - now) * 1000) / 1000;
     if (delta === 0) {
       res.json({ posted: 0, qty: now });
       return;

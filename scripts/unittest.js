@@ -830,6 +830,11 @@ async function ledger() {
   check('New item from an open category carries it', /'\/admin\/inventory\/new' \+ \(cat != null && cat !== NO_CAT \? '\?category=' \+ encodeURIComponent\(cat\)/.test(inv));
   check('the new item form starts in that category', /get\('category'\)/.test(ed) && /category: startCategory/.test(ed));
   check('quick edit is on Inventory', /<QuickEdit mode=\{quick!\}/.test(inv));
+  {
+    const qe = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'web', 'src', 'pages', 'admin', 'QuickEdit.tsx'), 'utf8');
+    check('quick edit: one dropdown for every stock change', /STOCK_ACTIONS/.test(qe) && ['add', 'counted', 'damaged', 'expired', 'other'].every((a) => qe.includes("value: '" + a + "'")));
+    check('quick edit: no separate Add button any more', !qe.includes("saveStock(item, l, 'add')"));
+  }
   check('quick edit: the name column stays put while the rest scrolls', /\.qe-table \.qe-name \{ position: sticky; left: 0;/.test(css) && /\.qe-wrap \{ overflow-x: auto;/.test(css));
   check('the count form does not offer "Stock added"', /ADJUST_REASONS\.filter\(\(r\) => r !== 'added'\)/.test(ed));
 }

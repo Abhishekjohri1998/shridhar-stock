@@ -282,7 +282,7 @@ export function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
           <p className="muted">
             {quick === 'price'
               ? bi('Change a price and leave the box (or press Enter): it is saved for that unit.', 'ಬೆಲೆ ಬದಲಿಸಿ ಬಾಕ್ಸ್‌ನಿಂದ ಹೊರಗೆ ಬನ್ನಿ (ಅಥವಾ Enter ಒತ್ತಿ): ಆ ಘಟಕಕ್ಕೆ ಉಳಿಸಲಾಗುತ್ತದೆ.')
-              : bi('Type a number, then “Set count” to save it as the count there, or “Add” to add it to the stock there.', 'ಸಂಖ್ಯೆ ಬರೆಯಿರಿ; ಅದನ್ನೇ ಅಲ್ಲಿನ ಎಣಿಕೆಯಾಗಿ ಉಳಿಸಲು “ಎಣಿಕೆ ಉಳಿಸಿ”, ಅಲ್ಲಿನ ಸ್ಟಾಕ್‌ಗೆ ಸೇರಿಸಲು “ಸೇರಿಸಿ” ಒತ್ತಿ.')}
+              : bi('Type a number, pick what to do — add stock, set the count, or take out damaged, expired or other — then Save.', 'ಸಂಖ್ಯೆ ಬರೆಯಿರಿ, ಏನು ಮಾಡಬೇಕು ಎಂದು ಆರಿಸಿ — ಸ್ಟಾಕ್ ಸೇರಿಸಿ, ಎಣಿಕೆ ಉಳಿಸಿ, ಅಥವಾ ಹಾಳಾದ, ಅವಧಿ ಮುಗಿದ ಅಥವಾ ಬೇರೆ ಕಾರಣಕ್ಕೆ ತೆಗೆಯಿರಿ — ನಂತರ “ಉಳಿಸಿ” ಒತ್ತಿ.')}
           </p>
           {/* In a place, its items are still loading (or failed, said above). */}
           {inPlace && !pd ? null :<QuickEdit mode={quick!} items={quickItems} locs={locs} stock={stock} onChanged={reload} />}

@@ -174,7 +174,7 @@ export const api = {
   openStock: (itemId: string, locationId: string, qty: number) =>
     request<{ posted: number }>('/stock/open', send('POST', { itemId, locationId, qty })),
   /** `actual` sets the count; `add` (base units, above 0) puts that much in on top of the ledger's count. */
-  adjust: (a: { itemId: string; locationId: string; reason: AdjustReason; note?: string; requestId: string } & ({ actual: number; add?: never } | { add: number; actual?: never })) =>
+  adjust: (a: { itemId: string; locationId: string; reason: AdjustReason; note?: string; requestId: string } & ({ actual: number; add?: never; remove?: never } | { add: number; actual?: never; remove?: never } | { remove: number; actual?: never; add?: never })) =>
     request<{ posted: number; qty: number }>('/stock/adjust', send('POST', a)),
   recount: () => request<{ checked: number; fixed: unknown[] }>('/stock/recount', { method: 'POST' }),
 
