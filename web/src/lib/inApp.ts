@@ -18,7 +18,15 @@ export function inApp(): boolean {
 }
 
 /** What this page may ask the app: a fresh session, to sign out of both halves, or its Settings. */
-export type AppAsk = { type: 'need-session' } | { type: 'sign-out' } | { type: 'open-settings' };
+export type AppAsk =
+  | { type: 'need-session' }
+  | { type: 'sign-out' }
+  | { type: 'open-settings' }
+  /** Barcode labels on the shop's receipt printer; the app answers with LABELS_PRINTED_EVENT. */
+  | { type: 'print-labels'; labels: { code: string; modules: string; title: string; price: string }[]; copies: number };
+
+/** The app's answer to print-labels: `detail` is { ok, error? }. An app before build 95 never answers. */
+export const LABELS_PRINTED_EVENT = 'labels-printed';
 
 export function tellApp(msg: AppAsk): void {
   try {

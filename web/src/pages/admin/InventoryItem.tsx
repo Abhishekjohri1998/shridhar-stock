@@ -3,6 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   ADJUST_REASONS,
   cleanBarcode,
+  asEan13,
+  newShopBarcode,
   isBarcode,
   MAX_BARCODES_PER_UNIT,
   addAliasChip,
@@ -59,6 +61,7 @@ import { useLoad, useSession } from '../../lib/session';
 import { Loading, Select, SuggestInput, Table, Tabs, useBi, when } from '../../components/ui';
 import { ItemLots } from '../../components/ItemLots';
 import { lowWords } from './Inventory';
+import { BarcodeLabelDialog, type LabelInfo } from '../../components/BarcodeLabel';
 
 type Tab = 'details' | 'stock';
 
@@ -500,6 +503,8 @@ function ItemDetails({
                 readOnly={readOnly}
                 tour={i === 0 ? 'item-barcode' : undefined}
                 onChange={(barcodes) => setUnit(i, { barcodes })}
+                taken={form.units.flatMap((x) => x.barcodes ?? [])}
+                labelFor={(code) => ({ code, nameEn: form.nameEn.trim(), nameKn: form.nameKn.trim(), price: Number(u.price) > 0 ? Number(u.price) : null, unit: u.label || u.code })}
               />
               {i === 0 && !readOnly && (
                 <PackPricer
@@ -1065,16 +1070,24 @@ function BarcodeChips({
   readOnly,
   tour,
   onChange,
+  taken = [],
+  labelFor,
 }: {
   codes: string[];
   unit: string;
   readOnly?: boolean;
   tour?: string;
   onChange: (codes: string[]) => void;
+  /** Codes already on this item, which a generated one must not repeat. */
+  taken?: string[];
+  /** What a printed label for a code says: the item's names and this unit's price. */
+  labelFor?: (code: string) => LabelInfo;
 }) {
   const bi = useBi();
   const [text, setText] = useState('');
   const [note, setNote] = useState('');
+  /** The code whose label is being printed, if any. */
+  const [printing, setPrinting] = useState<string | null>(null);
   const full = codes.length >= MAX_BARCODES_PER_UNIT;
   const add = () => {
     const code = cleanBarcode(text);
@@ -1099,6 +1112,18 @@ function BarcodeChips({
           {codes.map((c) => (
             <span key={c} className="chip on">
               {c}
+              {/* A label for it: only a 13-digit code (or a 12-digit UPC) can be drawn. */}
+              {labelFor && asEan13(c) && (
+                <button
+                  type="button"
+                  className="btn ghost small"
+                  aria-label={bi('Print label', 'ಲೇಬಲ್ ಮುದ್ರಿಸಿ') + ' ' + c}
+                  title={bi('Print label', 'ಲೇಬಲ್ ಮುದ್ರಿಸಿ')}
+                  onClick={() => setPrinting(asEan13(c))}
+                >
+                  🖨
+                </button>
+              )}
               {!readOnly && (
                 <button
                   type="button"
@@ -1136,9 +1161,24 @@ function BarcodeChips({
           <button type="button" className="btn" disabled={full || !text.trim()} onClick={add}>
             + {bi('Add', 'ಸೇರಿಸಿ')}
           </button>
+          {/* No barcode on the packet: one made here, unique, for the shop to print and stick on. */}
+          <button
+            type="button"
+            className="btn"
+            disabled={full}
+            title={bi('Make a new barcode for this unit', 'ಈ ಘಟಕಕ್ಕೆ ಹೊಸ ಬಾರ್‌ಕೋಡ್ ಮಾಡಿ')}
+            onClick={() => {
+              const code = newShopBarcode([...taken, ...codes]);
+              setNote(bi('New barcode made. Save the item, then print its label (🖨).', 'ಹೊಸ ಬಾರ್‌ಕೋಡ್ ಮಾಡಲಾಗಿದೆ. ಸಾಮಾನು ಉಳಿಸಿ, ನಂತರ ಅದರ ಲೇಬಲ್ ಮುದ್ರಿಸಿ (🖨).'));
+              onChange([...codes, code]);
+            }}
+          >
+            ⚙ {bi('Generate', 'ಹೊಸದು ಮಾಡಿ')}
+          </button>
         </div>
       )}
       {note && <p className="muted mb-0">{note}</p>}
+      {printing && labelFor && <BarcodeLabelDialog info={labelFor(printing)} onClose={() => setPrinting(null)} />}
     </div>
   );
 }

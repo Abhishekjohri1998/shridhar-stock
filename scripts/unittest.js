@@ -247,6 +247,34 @@ const rice = { units: [{ code: 'kg', label: 'Kg', labelKn: '', perBase: 1, price
 
 // ---------------------------------------------------------------- barcodes
 {
+  // EAN-13: the check digit, a new shop code, the bars.
+  check('the Bingo packet\'s check digit is 4', C.ean13Check('890908100780') === 4);
+  check('a whole EAN-13 is recognised', C.isEan13('8909081007804') && !C.isEan13('8909081007805') && !C.isEan13('12345'));
+  check('a 12-digit UPC prints as EAN-13 with a 0', C.asEan13('036000291452') === '0036000291452');
+  check('an odd code does not print', C.asEan13('ABC-1234') === null);
+  const made = C.newShopBarcode(['2000000000000']);
+  check('a new shop code: 13 digits, starts 20, valid', /^20\d{11}$/.test(made) && C.isEan13(made), made);
+  let calls = 0;
+  const seq = () => { calls++; return calls <= 10 ? 0 : 0.5; };
+  const first = C.newShopBarcode([], () => 0);
+  check('never one already taken', C.newShopBarcode([first], seq) !== first);
+  const T = C.EAN_TABLES;
+  const flip = (p) => p.replace(/./g, (b) => (b === '1' ? '0' : '1'));
+  check('R is L with black and white swapped', T.L.every((p, d) => T.R[d] === flip(p)));
+  check('G is R read backwards', T.R.every((p, d) => T.G[d] === p.split('').reverse().join('')));
+  check('every L digit starts white and ends black', T.L.every((p) => p.length === 7 && p[0] === '0' && p[6] === '1'));
+  const bars = C.ean13Modules('8909081007804');
+  check('95 modules', bars.length === 95);
+  check('start, middle and end guards', bars.startsWith('101') && bars.slice(45, 50) === '01010' && bars.endsWith('101'));
+  check('the right half is the R patterns of the last six digits', bars.slice(50, 92) === ['0', '0', '7', '8', '0', '4'].map((d) => T.R[+d]).join(''));
+  check('the left half follows the first digit\'s parity (8: LGLGGL)', bars.slice(3, 45) === ['9', '0', '9', '0', '8', '1'].map((d, i) => ('LGLGGL'[i] === 'L' ? T.L : T.G)[+d]).join(''));
+  const fs = require('node:fs'); const path = require('node:path');
+  const item = fs.readFileSync(path.join(__dirname, '..', 'web', 'src', 'pages', 'admin', 'InventoryItem.tsx'), 'utf8');
+  check('the barcode box can generate a code', item.includes('newShopBarcode([...taken, ...codes])'));
+  check('and print a label for one', item.includes('<BarcodeLabelDialog'));
+}
+
+{
   const base = { nameEn: 'Bingo', nameKn: '', aliases: [], racks: {} };
   const ok = C.checkItem({ ...base, units: [{ code: 'pkt', label: 'Packet', labelKn: '', perBase: 1, price: 5, barcodes: [' 8909081 007804 ', '8909081007804', ''] }, { code: 'box', label: 'Box', labelKn: '', perBase: 30, price: 140, barcodes: ['abc-1234'] }] });
   check('barcodes are tidied, deduped and kept on their unit', ok.ok && ok.value.units[0].barcodes.join() === '8909081007804' && ok.value.units[1].barcodes.join() === 'ABC-1234', JSON.stringify(ok));

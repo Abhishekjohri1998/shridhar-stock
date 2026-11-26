@@ -967,3 +967,25 @@ img, svg.ink { max-width: 100%; }
 @media (max-width: 639px) {
   .qe-table .qe-name { width: 120px; }
 }
+
+/* ---------------------------------------------------------------- barcode labels */
+.barcode-svg { width: 100%; height: auto; display: block; }
+.barcode-label { display: grid; gap: 2px; justify-items: center; text-align: center; color: #000; background: #fff; padding: 6px 8px; border-radius: 6px; }
+.barcode-label .bl-name { font-size: 14px; line-height: 1.2; }
+.barcode-label .bl-other { font-size: 12px; }
+.barcode-label .bl-price { font-size: 13px; font-weight: 700; }
+.barcode-preview { max-width: 260px; margin: 0 auto 10px; border: 1px dashed #999; border-radius: 8px; }
+.modal-back { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); display: grid; place-items: center; z-index: 1000; padding: 16px; }
+.modal-back .modal { width: min(420px, 100%); max-height: 90vh; overflow: auto; }
+.label-sheet { display: none; }
+@media print {
+  @page { size: A4; margin: 13mm 7mm; }
+  body > *:not(.label-sheet) { display: none !important; }
+  .label-sheet { display: grid !important; grid-template-columns: repeat(3, 63.5mm); grid-auto-rows: 33.9mm; column-gap: 2.5mm; }
+  .label-cell { overflow: hidden; display: grid; align-items: center; }
+  .label-cell .barcode-label { padding: 1mm 2mm; border-radius: 0; }
+  .label-cell .barcode-svg { height: 16mm; width: auto; max-width: 100%; }
+  .label-cell .bl-name { font-size: 9pt; }
+  .label-cell .bl-other { font-size: 8pt; }
+  .label-cell .bl-price { font-size: 9pt; }
+}
